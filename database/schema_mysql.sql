@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `personnel_id` VARCHAR(64) NULL,
   `account_status` VARCHAR(32) NOT NULL DEFAULT 'aktif',
   `alumni_access_expires_at` VARCHAR(40) NULL,
+  `notification_prefs_json` LONGTEXT NULL,
   `is_demo` TINYINT(1) NOT NULL DEFAULT 0,
   `last_login_at` VARCHAR(40) NULL,
   `created_at` VARCHAR(40) NOT NULL,
@@ -159,6 +160,7 @@ CREATE TABLE IF NOT EXISTS `personnel` (
   `guardian_relation` VARCHAR(64) NOT NULL DEFAULT '',
   `guardian_phone` VARCHAR(48) NOT NULL DEFAULT '',
   `docs_checklist_json` LONGTEXT NOT NULL,
+  `avatar_file_id` VARCHAR(64) NULL,
   `created_at` VARCHAR(40) NOT NULL,
   `updated_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`id`),
@@ -662,6 +664,17 @@ CREATE TABLE IF NOT EXISTS `system_settings` (
   `value` LONGTEXT NOT NULL,
   `updated_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `system_errors` (
+  `id` VARCHAR(64) NOT NULL,
+  `reference_code` VARCHAR(64) NOT NULL,
+  `http_status` INT NOT NULL,
+  `route` VARCHAR(191) NOT NULL,
+  `error_message` TEXT NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_system_errors_ref` (`reference_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

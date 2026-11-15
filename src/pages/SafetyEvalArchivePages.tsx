@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Award, Download, FileSpreadsheet, Lock, Plus } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { EmptyState, GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
 import { formatTanggalIndonesia } from '../lib/rbac';
@@ -594,7 +594,7 @@ export function ArchivePage() {
           </p>
         </div>
         <a
-          href="/api/archive/export-personal"
+          href={apiUrl('/api/archive/export-personal')}
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
         >
           <Download className="w-4 h-4" /> Ekspor Arsip Pribadi (JSON)
@@ -632,21 +632,21 @@ export function ArchivePage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <a
-              href="/api/export/bundle?scope=personnel"
+              href={apiUrl('/api/export/bundle?scope=personnel')}
               className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] bg-white/70 dark:bg-slate-900/60 font-semibold transition-colors"
             >
               <span>Data Personalia & Duta</span>
               <Download className="w-4 h-4 text-[#0EA5E9]" />
             </a>
             <a
-              href="/api/export/bundle?scope=proposals"
+              href={apiUrl('/api/export/bundle?scope=proposals')}
               className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] bg-white/70 dark:bg-slate-900/60 font-semibold transition-colors"
             >
               <span>Rekap Proposal Kegiatan</span>
               <Download className="w-4 h-4 text-[#0EA5E9]" />
             </a>
             <a
-              href="/api/export/bundle?scope=lkl"
+              href={apiUrl('/api/export/bundle?scope=lkl')}
               className="flex items-center justify-between gap-2 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] bg-white/70 dark:bg-slate-900/60 font-semibold transition-colors"
             >
               <span>Rekap Laporan LKL</span>

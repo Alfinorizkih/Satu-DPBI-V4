@@ -23,9 +23,17 @@ export function setApiHandlers(handlers: ApiHandlers): void {
   apiHandlers.onNetworkError = handlers.onNetworkError;
 }
 
+export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  if (!API_BASE_URL) return path;
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 async function performFetch(url: string, init: RequestInit): Promise<Response> {
   try {
-    const res = await fetch(url, {
+    const res = await fetch(apiUrl(url), {
       ...init,
       credentials: 'include',
       headers: {

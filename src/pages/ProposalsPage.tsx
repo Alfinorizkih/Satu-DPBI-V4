@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Edit3, Eye, FileText, History, Info, Plus, Send } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
+  ConfirmDialog,
   EmptyState,
   FileDropzone,
   GlassCard,
@@ -10,7 +12,7 @@ import {
   Modal,
   Pagination,
   StatusIndicator,
-} from '../components/ui/Primitives';
+} from '../components/ui';
 import type { ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
@@ -36,11 +38,20 @@ function getNextActionSummary(p: ProposalRecord): string {
   }
 }
 
-export function ProposalsPage() {
-  const { user, can, notify } = useAuth();
+export function ProposalsPage({
+  initialMode = 'list',
+  initialId,
+}: {
+  initialMode?: 'list' | 'create' | 'detail';
+  initialId?: string;
+}) {
+  const { user, can, notify, navigate } = useAuth();
   const [proposals, setProposals] = useState<ProposalRecord[]>([]);
   const [matrixRules, setMatrixRules] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
+  const { showConfirmDialog, guardAction, confirmLeave, cancelLeave } = useUnsavedChanges(formDirty);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
@@ -84,15 +95,29 @@ export function ProposalsPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
-  useEffect(() => { setPage(1); }, [statusFilter]);
+  useEffect(() => {
+    load();
+  }, []);
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter]);
 
-  const openDetail = async (p: ProposalRecord) => {
+  useEffect(() => {
+    if (initialMode === 'create' && can('proposal', 'create')) {
+      setEditingDraftId(null);
+      setForm(defaultForm);
+      setFormDirty(false);
+      setCreateOpen(true);
+    }
+  }, [initialMode]);
+
+  const openDetail = async (p: ProposalRecord, updateUrl = true) => {
     setSelected(p);
     setDecisionNote('');
     setReviseNote('');
     setReviseFile(null);
     setPreviewPdfId(null);
+    if (updateUrl) navigate(`/proposal/${p.id}`);
     try {
       const vRes = await apiGet<{ versions: Record<string, unknown>[] }>(`/api/proposals/${p.id}/versions`);
       setVersions(vRes.versions);
@@ -100,6 +125,15 @@ export function ProposalsPage() {
       setVersions([]);
     }
   };
+
+  useEffect(() => {
+    if (!loading && initialMode === 'detail' && initialId && proposals.length > 0) {
+      const target = proposals.find((p) => p.id === initialId || p.referenceNumber === initialId);
+      if (target && selected?.id !== target.id) {
+        openDetail(target, false);
+      }
+    }
+  }, [loading, initialMode, initialId, proposals]);
 
   const openEditDraft = (p: ProposalRecord) => {
     setEditingDraftId(p.id);
@@ -120,10 +154,25 @@ export function ProposalsPage() {
       pdfFileId: p.pdfFileId,
       pdfFileName: p.pdfFileName,
     });
+    setFormDirty(false);
     setCreateOpen(true);
   };
 
+  const updateProposalForm = (patch: Partial<typeof defaultForm>) => {
+    setFormDirty(true);
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const closeCreateModal = () => {
+    guardAction(() => {
+      setFormDirty(false);
+      setCreateOpen(false);
+      navigate('/proposal');
+    });
+  };
+
   const submitProposal = async (saveAsDraft: boolean) => {
+    if (submitting) return;
     if (!form.title.trim()) {
       notify('Judul kegiatan wajib diisi.', 'error');
       return;
@@ -132,6 +181,7 @@ export function ProposalsPage() {
       notify('Tujuan dan lokasi kegiatan wajib diisi sebelum dikirim.', 'error');
       return;
     }
+    setSubmitting(true);
     try {
       if (editingDraftId) {
         await apiPatch(`/api/proposals/${editingDraftId}`, { ...form, submitNow: !saveAsDraft });
@@ -151,12 +201,16 @@ export function ProposalsPage() {
           'success'
         );
       }
+      setFormDirty(false);
       setCreateOpen(false);
       setEditingDraftId(null);
       setForm(defaultForm);
+      navigate('/proposal');
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menyimpan proposal.', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -217,7 +271,9 @@ export function ProposalsPage() {
               onClick={() => {
                 setEditingDraftId(null);
                 setForm(defaultForm);
+                setFormDirty(false);
                 setCreateOpen(true);
+                navigate('/proposal/baru');
               }}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
             >
@@ -360,18 +416,18 @@ export function ProposalsPage() {
       {/* Create / Edit Draft Proposal Modal */}
       <Modal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreateModal}
         title={editingDraftId ? 'Lanjutkan Draft Proposal' : 'Ajukan Proposal Kegiatan Baru'}
       >
         <div className="space-y-4 text-xs">
           <div>
             <label className="block font-semibold mb-1">Judul Kegiatan *</label>
-            <input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
+            <input type="text" required value={form.title} onChange={(e) => updateProposalForm({ title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold mb-1">Bidang</label>
-              <select value={form.bidang} onChange={(e) => setForm({ ...form, bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+              <select value={form.bidang} onChange={(e) => updateProposalForm({ bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
                 <option value="Kebudayaan">Kebudayaan</option>
                 <option value="Pendidikan">Pendidikan</option>
                 <option value="Program dan Operasional">Program dan Operasional</option>
@@ -380,11 +436,11 @@ export function ProposalsPage() {
             </div>
             <div>
               <label className="block font-semibold mb-1">Kategori</label>
-              <input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="text" required value={form.category} onChange={(e) => updateProposalForm({ category: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
             <div>
               <label className="block font-semibold mb-1">Tingkat Risiko</label>
-              <select value={form.riskLevel} onChange={(e) => setForm({ ...form, riskLevel: e.target.value as 'rendah' | 'sedang' | 'tinggi' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+              <select value={form.riskLevel} onChange={(e) => updateProposalForm({ riskLevel: e.target.value as 'rendah' | 'sedang' | 'tinggi' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
                 <option value="rendah">Rendah</option>
                 <option value="sedang">Sedang</option>
                 <option value="tinggi">Tinggi</option>
@@ -394,11 +450,11 @@ export function ProposalsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold mb-1">Tanggal Kegiatan</label>
-              <input type="date" required value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="date" required value={form.eventDate} onChange={(e) => updateProposalForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
             <div>
               <label className="block font-semibold mb-1">Moda Pelaksanaan</label>
-              <select value={form.activityMode} onChange={(e) => setForm({ ...form, activityMode: e.target.value as 'luring' | 'daring' | 'hibrida' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+              <select value={form.activityMode} onChange={(e) => updateProposalForm({ activityMode: e.target.value as 'luring' | 'daring' | 'hibrida' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
                 <option value="luring">Luring (Tatap Muka)</option>
                 <option value="daring">Daring (Online)</option>
                 <option value="hibrida">Hibrida</option>
@@ -406,24 +462,24 @@ export function ProposalsPage() {
             </div>
             <div>
               <label className="block font-semibold mb-1">Estimasi Peserta</label>
-              <input type="number" min={1} required value={form.estimatedParticipants} onChange={(e) => setForm({ ...form, estimatedParticipants: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="number" min={1} required value={form.estimatedParticipants} onChange={(e) => updateProposalForm({ estimatedParticipants: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
           </div>
           <div>
             <label className="block font-semibold mb-1">Lokasi / Platform Kegiatan</label>
-            <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Nama gedung/sekolah atau platform daring" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            <input type="text" value={form.location} onChange={(e) => updateProposalForm({ location: e.target.value })} placeholder="Nama gedung/sekolah atau platform daring" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
           </div>
           <div>
             <label className="block font-semibold mb-1">Tujuan & Sasaran Kegiatan *</label>
-            <textarea rows={3} required value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            <textarea rows={3} required value={form.objective} onChange={(e) => updateProposalForm({ objective: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
           </div>
           <div className="flex flex-wrap gap-4">
             <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={form.usesDpbiIdentity} onChange={(e) => setForm({ ...form, usesDpbiIdentity: e.target.checked })} />
+              <input type="checkbox" checked={form.usesDpbiIdentity} onChange={(e) => updateProposalForm({ usesDpbiIdentity: e.target.checked })} />
               <span>Menggunakan Identitas Resmi DPBI</span>
             </label>
             <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={form.externalPermitNeeded} onChange={(e) => setForm({ ...form, externalPermitNeeded: e.target.checked })} />
+              <input type="checkbox" checked={form.externalPermitNeeded} onChange={(e) => updateProposalForm({ externalPermitNeeded: e.target.checked })} />
               <span>Memerlukan Izin Eksternal / Mitra</span>
             </label>
           </div>
@@ -432,22 +488,24 @@ export function ProposalsPage() {
             accept=".pdf,application/pdf"
             moduleName="proposal"
             uploadedFileName={form.pdfFileName}
-            onUploaded={(res) => setForm({ ...form, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+            onUploaded={(res) => updateProposalForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
           />
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={submitting}
               onClick={() => submitProposal(true)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9] disabled:opacity-50"
             >
-              Simpan Draft
+              {submitting ? 'Menyimpan...' : 'Simpan Draft'}
             </button>
             <button
               type="button"
+              disabled={submitting}
               onClick={() => submitProposal(false)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold hover:bg-sky-600"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold hover:bg-sky-600 disabled:opacity-60"
             >
-              <Send className="w-3.5 h-3.5" /> Kirim Pengajuan
+              <Send className="w-3.5 h-3.5" /> {submitting ? 'Mengirim...' : 'Kirim Pengajuan'}
             </button>
           </div>
         </div>
@@ -456,7 +514,10 @@ export function ProposalsPage() {
       {/* Proposal Detail, Preview, Decision, & Revision Modal */}
       <Modal
         open={Boolean(selected)}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          navigate('/proposal');
+        }}
         title={selected?.title || 'Detail Proposal'}
         subtitle={selected ? `${selected.referenceNumber} · Versi ${selected.version} · Peninjau: ${selected.assignedApproverRole.replace(/_/g, ' ')}` : ''}
         maxWidth="max-w-3xl"
@@ -475,7 +536,7 @@ export function ProposalsPage() {
                     <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Tutup Pratinjau' : 'Pratinjau PDF'}
                   </button>
                   <a
-                    href={`/api/files/${selected.pdfFileId}`}
+                    href={apiUrl(`/api/files/${selected.pdfFileId}`)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
@@ -496,7 +557,7 @@ export function ProposalsPage() {
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
                 <iframe
                   title="Pratinjau Dokumen Proposal PDF"
-                  src={`/api/files/${previewPdfId}/preview`}
+                  src={apiUrl(`/api/files/${previewPdfId}/preview`)}
                   className="w-full h-[55vh]"
                 />
               </div>
@@ -549,7 +610,7 @@ export function ProposalsPage() {
                   <div key={String(v.id)} className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800/60">
                     <span>Versi {Number(v.version)} · {String(v.change_note)} ({String(v.uploaded_by)})</span>
                     {v.pdf_file_id ? (
-                      <a href={`/api/files/${v.pdf_file_id}`} target="_blank" rel="noreferrer" className="text-[#0EA5E9] font-semibold">PDF</a>
+                      <a href={apiUrl(`/api/files/${v.pdf_file_id}`)} target="_blank" rel="noreferrer" className="text-[#0EA5E9] font-semibold">PDF</a>
                     ) : null}
                   </div>
                 ))
@@ -615,6 +676,17 @@ export function ProposalsPage() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={showConfirmDialog}
+        title="Batalkan Perubahan Proposal?"
+        message="Anda memiliki perubahan formulir proposal yang belum disimpan. Yakin ingin keluar dan membuang perubahan?"
+        confirmLabel="Buang Perubahan"
+        cancelLabel="Lanjutkan Mengisi"
+        danger
+        onConfirm={confirmLeave}
+        onCancel={cancelLeave}
+      />
     </div>
   );
 }

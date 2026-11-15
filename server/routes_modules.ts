@@ -594,6 +594,7 @@ export function registerModuleRoutes(app: Express): void {
     const auditLogs = db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 50').all();
     const timeline = db.prepare('SELECT * FROM activity_timeline ORDER BY created_at DESC LIMIT 50').all();
     const settings = db.prepare('SELECT * FROM system_settings').all();
+    const systemErrors = db.prepare('SELECT id, reference_code, http_status, route, error_message, created_at FROM system_errors ORDER BY created_at DESC LIMIT 30').all();
 
     // Data Quality scanner (read-only recommendations, never auto-deletes)
     const findings: { id: string; severity: 'tinggi' | 'sedang' | 'rendah'; type: string; detail: string; actionPath: string }[] = [];
@@ -649,6 +650,7 @@ export function registerModuleRoutes(app: Express): void {
       auditLogs,
       timeline,
       settings,
+      systemErrors,
     });
   });
 
@@ -791,6 +793,37 @@ export function registerModuleRoutes(app: Express): void {
     const db = getDb();
     const timeline = db.prepare('SELECT * FROM activity_timeline ORDER BY created_at DESC LIMIT 30').all();
     res.json({ timeline });
+  });
+
+  // Personal activity hub (/aktivitas-saya)
+  app.get('/api/my-activity', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const personnelId = user.personnelId || user.id;
+
+    const proposals = db
+      .prepare('SELECT id, reference_number, title, category, event_date, status, updated_at FROM proposals WHERE applicant_personnel_id = ? OR applicant_name = ? ORDER BY updated_at DESC LIMIT 20')
+      .all(personnelId, user.fullName);
+    const lklReports = db
+      .prepare('SELECT id, reference_number, activity_name, event_date, participant_count, status, created_at FROM lkl_reports WHERE submitter_personnel_id = ? OR submitter_name = ? ORDER BY created_at DESC LIMIT 20')
+      .all(personnelId, user.fullName);
+    const tasks = db
+      .prepare('SELECT id, reference_number, title, priority, status, deadline, assignee_name FROM tasks WHERE assignee_id = ? OR creator_id = ? ORDER BY deadline ASC LIMIT 20')
+      .all(user.id, user.id);
+    const recentActions = db
+      .prepare('SELECT id, action, target_type, target_id, outcome, context_note, created_at FROM audit_logs WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 30')
+      .all(user.id);
+    const unreadNotifications = db
+      .prepare('SELECT id, title, message, category, target_path, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 15')
+      .all(user.id);
+
+    res.json({
+      proposals,
+      lklReports,
+      tasks,
+      recentActions,
+      unreadNotifications,
+    });
   });
 
   // ==================== USER & SETTINGS MANAGEMENT ====================

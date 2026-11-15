@@ -248,7 +248,7 @@ export function OrganizationPage() {
   );
 }
 
-export function BatchesPage() {
+export function BatchesPage({ initialId }: { initialId?: string }) {
   const { can, notify, navigate } = useAuth();
   const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -266,11 +266,19 @@ export function BatchesPage() {
   const load = () => {
     setLoading(true);
     apiGet<{ batches: BatchRecord[] }>('/api/batches')
-      .then((res) => setBatches(res.batches))
+      .then((res) => {
+        setBatches(res.batches);
+        if (initialId) {
+          const match = res.batches.find((b) => b.id === initialId || String(b.batchNumber) === initialId);
+          if (match) setSelectedBatch(match);
+        }
+      })
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, [initialId]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

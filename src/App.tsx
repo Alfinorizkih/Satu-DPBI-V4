@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppShell } from './components/AppShell';
-import { AccountPendingView, ErrorView, LoadingSkeleton } from './components/ui/Primitives';
-import type { HttpErrorCode, ModuleCode } from './lib/types';
+import { AccountPendingView, ErrorView, LoadingSkeleton } from './components/ui';
+import type { HttpErrorCode } from './lib/types';
+import { matchPrivateRoute, normalizePathname, VALID_ERROR_CODES, type MatchedPrivateRoute } from './lib/routes';
 
 import { PublicPortalPage } from './pages/PublicPortalPage';
 import { HelpPage } from './pages/HelpPage';
@@ -17,35 +18,8 @@ import { TasksPage, DocumentsPage } from './pages/TasksAndDocsPages';
 import { AnnouncementsPage, CalendarPage, NotificationsPage } from './pages/CommsPages';
 import { SafeguardingPage, EvaluationsPage, ArchivePage } from './pages/SafetyEvalArchivePages';
 import { SystemAdminPage, SettingsPage } from './pages/SystemAndSettingsPages';
-
-interface RouteConfig {
-  module?: ModuleCode;
-  render: () => React.ReactNode;
-}
-
-const PRIVATE_ROUTES: Record<string, RouteConfig> = {
-  '/dashboard': { module: 'dashboard', render: () => <DashboardPage /> },
-  '/organisasi': { module: 'organisasi', render: () => <OrganizationPage /> },
-  '/personalia': { module: 'personalia', render: () => <PersonnelPage /> },
-  '/wilayah': { module: 'wilayah', render: () => <RegionsPage /> },
-  '/angkatan': { module: 'angkatan', render: () => <BatchesPage /> },
-  '/proposal': { module: 'proposal', render: () => <ProposalsPage /> },
-  '/laporan-kegiatan': { module: 'lkl', render: () => <LklPage /> },
-  '/laporan-koordinator': { module: 'laporan_koordinator', render: () => <CoordinatorReportsPage /> },
-  '/tugas': { module: 'tugas', render: () => <TasksPage /> },
-  '/dokumen': { module: 'dokumen', render: () => <DocumentsPage /> },
-  '/pengumuman': { module: 'pengumuman', render: () => <AnnouncementsPage /> },
-  '/kalender': { module: 'kalender', render: () => <CalendarPage /> },
-  '/notifikasi': { render: () => <NotificationsPage /> },
-  '/perlindungan': { module: 'perlindungan', render: () => <SafeguardingPage /> },
-  '/evaluasi': { module: 'evaluasi', render: () => <EvaluationsPage /> },
-  '/arsip': { module: 'arsip', render: () => <ArchivePage /> },
-  '/sistem': { module: 'sistem', render: () => <SystemAdminPage /> },
-  '/pengaturan': { module: 'pengaturan', render: () => <SettingsPage /> },
-  '/bantuan': { render: () => <HelpPage /> },
-};
-
-const VALID_ERROR_CODES: HttpErrorCode[] = [400, 401, 403, 404, 419, 422, 429, 500, 502, 503];
+import { MyActivityPage } from './pages/MyActivityPage';
+import { AlumniPage } from './pages/AlumniPage';
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -81,6 +55,53 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
+function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
+  switch (route.kind) {
+    case 'dashboard':
+      return <DashboardPage />;
+    case 'my_activity':
+      return <MyActivityPage />;
+    case 'organization':
+      return <OrganizationPage />;
+    case 'personnel':
+      return <PersonnelPage initialMode={route.mode} initialId={route.id} />;
+    case 'regions':
+      return <RegionsPage initialId={route.id} />;
+    case 'batches':
+      return <BatchesPage initialId={route.id} />;
+    case 'alumni':
+      return <AlumniPage />;
+    case 'proposals':
+      return <ProposalsPage initialMode={route.mode} initialId={route.id} />;
+    case 'lkl':
+      return <LklPage initialMode={route.mode} initialId={route.id} />;
+    case 'coordinator_reports':
+      return <CoordinatorReportsPage />;
+    case 'tasks':
+      return <TasksPage scope={route.scope} initialId={route.id} />;
+    case 'documents':
+      return <DocumentsPage initialId={route.id} />;
+    case 'announcements':
+      return <AnnouncementsPage />;
+    case 'calendar':
+      return <CalendarPage />;
+    case 'notifications':
+      return <NotificationsPage />;
+    case 'safeguarding':
+      return <SafeguardingPage />;
+    case 'evaluations':
+      return <EvaluationsPage />;
+    case 'archive':
+      return <ArchivePage />;
+    case 'system':
+      return <SystemAdminPage initialTab={route.initialTab} />;
+    case 'settings':
+      return <SettingsPage initialTab={route.initialTab} />;
+    case 'help':
+      return <HelpPage />;
+  }
+}
+
 function AppRouter() {
   const {
     user,
@@ -92,18 +113,23 @@ function AppRouter() {
     clearSessionExpired,
     accountPending,
     setAccountPending,
+    pendingRedirectPath,
+    setPendingRedirectPath,
   } = useAuth();
 
-  const normalizedPath =
-    currentPath.length > 1 && currentPath.endsWith('/')
-      ? currentPath.slice(0, -1)
-      : currentPath || '/';
+  const normalizedPath = normalizePathname(currentPath);
 
   useEffect(() => {
     if (!loading && user && (normalizedPath === '/' || normalizedPath === '/login')) {
-      navigate('/dashboard');
+      if (pendingRedirectPath) {
+        const dest = pendingRedirectPath;
+        setPendingRedirectPath(null);
+        navigate(dest);
+      } else {
+        navigate('/dashboard');
+      }
     }
-  }, [loading, user, normalizedPath, navigate]);
+  }, [loading, user, normalizedPath, navigate, pendingRedirectPath, setPendingRedirectPath]);
 
   if (loading) {
     return (
@@ -177,17 +203,20 @@ function AppRouter() {
     if (normalizedPath === '/lupa-password' || normalizedPath === '/reset-password') {
       return <PublicPortalPage initialAuthTab="reset" />;
     }
-    if (normalizedPath === '/aktivasi' || normalizedPath === '/verifikasi-undangan') {
+    if (normalizedPath === '/aktivasi' || normalizedPath === '/aktivasi-akun' || normalizedPath === '/verifikasi-undangan') {
       return <PublicPortalPage initialAuthTab="invite" />;
     }
     if (normalizedPath === '/bantuan') {
       return <HelpPage />;
     }
-    if (PRIVATE_ROUTES[normalizedPath]) {
+    if (matchPrivateRoute(normalizedPath)) {
       return (
         <ErrorView
           code={401}
-          onLogin={() => navigate('/')}
+          onLogin={() => {
+            setPendingRedirectPath(normalizedPath);
+            navigate('/login');
+          }}
           onBack={() => navigate('/')}
         />
       );
@@ -197,7 +226,7 @@ function AppRouter() {
 
   const effectivePath =
     normalizedPath === '/' || normalizedPath === '/login' ? '/dashboard' : normalizedPath;
-  const route = PRIVATE_ROUTES[effectivePath];
+  const route = matchPrivateRoute(effectivePath);
 
   if (!route) {
     return (
@@ -211,7 +240,7 @@ function AppRouter() {
     );
   }
 
-  if (route.module && !can(route.module, 'view')) {
+  if ('module' in route && route.module && !can(route.module, 'view')) {
     return (
       <AppShell>
         <ErrorView
@@ -222,7 +251,15 @@ function AppRouter() {
     );
   }
 
-  return <AppShell>{route.render()}</AppShell>;
+  if (effectivePath === '/pengaturan/pengguna' && !can('pengaturan', 'manage')) {
+    return (
+      <AppShell>
+        <ErrorView code={403} onBack={() => navigate('/dashboard')} />
+      </AppShell>
+    );
+  }
+
+  return <AppShell>{renderMatchedPage(route)}</AppShell>;
 }
 
 export default function App() {

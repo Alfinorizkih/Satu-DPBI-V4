@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { apiGet, apiPost, setApiHandlers } from '../lib/api';
 import type { AuthUser, ModuleCode, PermissionAction } from '../lib/types';
 import { hasPermission } from '../lib/rbac';
+import { getRouteTitle, matchPrivateRoute, normalizePathname } from '../lib/routes';
 
 interface ToastItem {
   id: string;
@@ -17,10 +18,13 @@ export interface RecentRouteItem {
 
 export const ROUTE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard & Ringkasan',
+  '/aktivitas-saya': 'Aktivitas Saya',
+  '/tugas-saya': 'Tugas Saya',
   '/organisasi': 'Organisasi & Delegasi',
   '/personalia': 'Personalia & Verifikasi Profil',
   '/wilayah': 'Wilayah 38 Provinsi & Peta Indonesia',
   '/angkatan': 'Angkatan & Siklus Masa Tugas',
+  '/alumni': 'Direktori & Akses Alumni',
   '/proposal': 'Manajemen Proposal PDF',
   '/laporan-kegiatan': 'Laporan Kegiatan Lapangan (LKL)',
   '/laporan-koordinator': 'Laporan Koordinator Wilayah',
@@ -33,7 +37,14 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/evaluasi': 'Monitoring & Evaluasi Kinerja',
   '/arsip': 'Arsip Organisasi & Alumni',
   '/sistem': 'Kontrol Sistem, Storage, Backup & Audit',
+  '/audit-log': 'Audit Log Keamanan',
+  '/status-sistem': 'Status & Kesehatan Sistem',
+  '/profil': 'Profil Pribadi',
   '/pengaturan': 'Pengaturan Akun & Hak Akses',
+  '/pengaturan/keamanan': 'Keamanan & Kata Sandi',
+  '/pengaturan/sesi': 'Perangkat & Sesi Aktif',
+  '/pengaturan/pengguna': 'Manajemen Pengguna',
+  '/pengaturan/hak-akses': 'Hak Akses & Peran (RBAC)',
   '/bantuan': 'Pusat Bantuan Internal',
 };
 
@@ -50,6 +61,8 @@ interface AuthContextValue {
   idleMinutes: number;
   recentlyViewed: RecentRouteItem[];
   onboardingDone: boolean;
+  pendingRedirectPath: string | null;
+  setPendingRedirectPath: (path: string | null) => void;
   navigate: (path: string) => void;
   toggleTheme: () => void;
   refreshUser: () => Promise<void>;
@@ -81,6 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [idleWarningSecondsLeft, setIdleWarningSecondsLeft] = useState<number | null>(null);
   const [recentlyViewed, setRecentlyViewed] = useState<RecentRouteItem[]>([]);
   const [onboardingDone, setOnboardingDone] = useState(true);
+  const [pendingRedirectPath, setPendingRedirectPath] = useState<string | null>(() => {
+    const p = normalizePathname(window.location.pathname || '/');
+    return matchPrivateRoute(p) ? p : null;
+  });
   const lastActivityRef = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -217,29 +234,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Track recently viewed internal pages (only when user has access, non-sensitive route names only)
   useEffect(() => {
     if (!user) return;
-    const title = ROUTE_TITLES[currentPath];
-    if (!title || currentPath === '/' || currentPath === '/login') return;
-    const routeModuleMap: Partial<Record<string, ModuleCode>> = {
-      '/dashboard': 'dashboard',
-      '/organisasi': 'organisasi',
-      '/personalia': 'personalia',
-      '/wilayah': 'wilayah',
-      '/angkatan': 'angkatan',
-      '/proposal': 'proposal',
-      '/laporan-kegiatan': 'lkl',
-      '/laporan-koordinator': 'laporan_koordinator',
-      '/tugas': 'tugas',
-      '/dokumen': 'dokumen',
-      '/pengumuman': 'pengumuman',
-      '/kalender': 'kalender',
-      '/perlindungan': 'perlindungan',
-      '/evaluasi': 'evaluasi',
-      '/arsip': 'arsip',
-      '/sistem': 'sistem',
-      '/pengaturan': 'pengaturan',
-    };
-    const mod = routeModuleMap[currentPath];
-    if (mod && !hasPermission(user.permissions, mod, 'view')) return;
+    const matched = matchPrivateRoute(currentPath);
+    if (!matched || currentPath === '/' || currentPath === '/login') return;
+    if ('module' in matched && matched.module && !hasPermission(user.permissions, matched.module, 'view')) return;
+    const title = getRouteTitle(currentPath);
     setRecentlyViewed((prev) => {
       const next = [
         { path: currentPath, title, visitedAt: new Date().toISOString() },
@@ -321,6 +319,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         idleMinutes,
         recentlyViewed,
         onboardingDone,
+        pendingRedirectPath,
+        setPendingRedirectPath,
         navigate,
         toggleTheme,
         refreshUser,

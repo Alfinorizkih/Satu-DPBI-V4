@@ -33,15 +33,23 @@ import {
 import { BASE_ROLE_PERMISSIONS, formatTanggalIndonesia, ROLE_LABELS } from '../lib/rbac';
 import type { ModuleCode, RoleCode } from '../lib/types';
 
-export function SystemAdminPage() {
+export function SystemAdminPage({
+  initialTab = 'storage',
+}: {
+  initialTab?: 'storage' | 'backup' | 'kualitas' | 'kesehatan' | 'otomatisasi' | 'kemendikdasmen' | 'audit' | 'timeline';
+}) {
   const { can, notify } = useAuth();
   const [tab, setTab] = useState<
     'storage' | 'backup' | 'kualitas' | 'kesehatan' | 'otomatisasi' | 'kemendikdasmen' | 'audit' | 'timeline'
-  >('storage');
+  >(initialTab);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState<string | null>(null);
   const [restoreChecked, setRestoreChecked] = useState(false);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   const load = () => {
     setLoading(true);
@@ -264,21 +272,46 @@ export function SystemAdminPage() {
       )}
 
       {tab === 'kesehatan' && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-          <GlassCard className="p-5 space-y-1">
-            <Activity className="w-5 h-5 text-emerald-500" />
-            <p className="font-bold text-sm mt-2">Database SQLite WAL</p>
-            <StatusIndicator status={data.health.database} />
-          </GlassCard>
-          <GlassCard className="p-5 space-y-1">
-            <Shield className="w-5 h-5 text-emerald-500" />
-            <p className="font-bold text-sm mt-2">Autentikasi & RBAC Server</p>
-            <StatusIndicator status={data.health.authSessionEngine} />
-          </GlassCard>
-          <GlassCard className="p-5 space-y-1">
-            <CheckCircle2 className="w-5 h-5 text-[#0EA5E9]" />
-            <p className="font-bold text-sm mt-2">Uptime Layanan</p>
-            <p className="font-mono text-lg font-bold tabular-nums">{data.health.uptimeSeconds} detik</p>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <GlassCard className="p-5 space-y-1">
+              <Activity className="w-5 h-5 text-emerald-500" />
+              <p className="font-bold text-sm mt-2">Database SQLite WAL</p>
+              <StatusIndicator status={data.health.database} />
+            </GlassCard>
+            <GlassCard className="p-5 space-y-1">
+              <Shield className="w-5 h-5 text-emerald-500" />
+              <p className="font-bold text-sm mt-2">Autentikasi & RBAC Server</p>
+              <StatusIndicator status={data.health.authSessionEngine} />
+            </GlassCard>
+            <GlassCard className="p-5 space-y-1">
+              <CheckCircle2 className="w-5 h-5 text-[#0EA5E9]" />
+              <p className="font-bold text-sm mt-2">Uptime Layanan</p>
+              <p className="font-mono text-lg font-bold tabular-nums">{data.health.uptimeSeconds} detik</p>
+            </GlassCard>
+          </div>
+
+          <GlassCard className="p-5 space-y-3 text-xs">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Catatan Error Sistem Terakhir ({Array.isArray(data.systemErrors) ? data.systemErrors.length : 0})
+            </h2>
+            {!Array.isArray(data.systemErrors) || data.systemErrors.length === 0 ? (
+              <p className="text-emerald-600 dark:text-emerald-400 font-medium">
+                Tidak ada error internal HTTP 500 yang tercatat saat ini.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
+                {data.systemErrors.map((er: any) => (
+                  <div key={er.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-mono font-semibold text-rose-600">{er.reference_code} · HTTP {er.http_status}</p>
+                      <p className="text-slate-600 dark:text-slate-300">{er.route} — {er.error_message}</p>
+                    </div>
+                    <span className="text-[11px] text-slate-400 tabular-nums">{formatTanggalIndonesia(er.created_at, true)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </GlassCard>
         </div>
       )}
@@ -419,9 +452,25 @@ const MODULE_LABELS: Record<ModuleCode, string> = {
   pengaturan: 'Pengaturan',
 };
 
-export function SettingsPage() {
+export function SettingsPage({
+  initialTab = 'profil',
+}: {
+  initialTab?: 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'preferensi' | 'hak_akses' | 'organisasi';
+}) {
+  const mapTab = (t: typeof initialTab): 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' => {
+    if (t === 'preferensi') return 'tampilan';
+    if (t === 'hak_akses') return 'rbac';
+    if (t === 'organisasi') return 'sistem';
+    return t;
+  };
   const { user, can, theme, toggleTheme, notify, logout, refreshUser, navigate } = useAuth();
-  const [tab, setTab] = useState<'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem'>('profil');
+  const [tab, setTab] = useState<'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem'>(
+    mapTab(initialTab)
+  );
+
+  useEffect(() => {
+    setTab(mapTab(initialTab));
+  }, [initialTab]);
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [loginLogs, setLoginLogs] = useState<any[]>([]);

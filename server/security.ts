@@ -99,18 +99,32 @@ export function rotateSession(
   return createSession(db, userId, deviceLabel, ipAddress);
 }
 
-export function setSessionCookie(res: Response, rawToken: string, maxAgeMs = 24 * 60 * 60 * 1000): void {
-  res.cookie(SESSION_COOKIE_NAME, rawToken, {
+function resolveCookieOptions(maxAgeMs?: number) {
+  const rawSameSite = (process.env.COOKIE_SAMESITE || 'lax').toLowerCase();
+  const sameSite: 'lax' | 'none' | 'strict' =
+    rawSameSite === 'none' || rawSameSite === 'strict' ? rawSameSite : 'lax';
+  const secure =
+    sameSite === 'none'
+      ? process.env.ALLOW_INSECURE_COOKIE !== 'true'
+      : process.env.NODE_ENV === 'production' && process.env.ALLOW_INSECURE_COOKIE !== 'true';
+  const domain = process.env.COOKIE_DOMAIN?.trim() || undefined;
+  return {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production' && process.env.ALLOW_INSECURE_COOKIE !== 'true',
+    sameSite,
+    secure,
     path: '/',
-    maxAge: maxAgeMs,
-  });
+    ...(domain ? { domain } : {}),
+    ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
+  };
+}
+
+export function setSessionCookie(res: Response, rawToken: string, maxAgeMs = 24 * 60 * 60 * 1000): void {
+  res.cookie(SESSION_COOKIE_NAME, rawToken, resolveCookieOptions(maxAgeMs));
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+  const opts = resolveCookieOptions();
+  res.clearCookie(SESSION_COOKIE_NAME, opts);
 }
 
 export function getSessionTokenFromReq(req: Request): string | null {
@@ -332,12 +346,20 @@ export function requireSafeOrigin(req: Request, res: Response, next: NextFunctio
     next();
     return;
   }
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    next();
+    return;
+  }
   const xRequestedWith = req.headers['x-requested-with'];
   if (xRequestedWith === 'SATU-DPBI') {
     next();
     return;
   }
-  const origin = req.headers.origin;
   const referer = req.headers.referer;
   const host = req.headers.host;
   if (origin && host) {

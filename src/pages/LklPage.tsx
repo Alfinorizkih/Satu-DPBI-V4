@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Eye, FileText, MapPin, Plus, Save } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
+  ConfirmDialog,
   EmptyState,
   FileDropzone,
   GlassCard,
@@ -10,18 +12,27 @@ import {
   Modal,
   Pagination,
   StatusIndicator,
-} from '../components/ui/Primitives';
+} from '../components/ui';
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
 import type { LklRecord, ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
 const PAGE_SIZE = 10;
 
-export function LklPage() {
-  const { user, can, notify } = useAuth();
+export function LklPage({
+  initialMode = 'list',
+  initialId,
+}: {
+  initialMode?: 'list' | 'create' | 'detail';
+  initialId?: string;
+}) {
+  const { user, can, notify, navigate } = useAuth();
   const [reports, setReports] = useState<LklRecord[]>([]);
   const [proposals, setProposals] = useState<ProposalRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [formDirty, setFormDirty] = useState(false);
+  const { showConfirmDialog, guardAction, confirmLeave, cancelLeave } = useUnsavedChanges(formDirty);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<LklRecord | null>(null);
@@ -74,9 +85,11 @@ export function LklPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const openCreateModal = () => {
+  const openCreateModal = (updateUrl = true) => {
     try {
       const saved = localStorage.getItem(draftKey);
       if (saved) {
@@ -87,12 +100,45 @@ export function LklPage() {
     } catch {
       setForm(defaultForm);
     }
+    setFormDirty(false);
     setCreateOpen(true);
+    if (updateUrl) navigate('/laporan-kegiatan/baru');
+  };
+
+  useEffect(() => {
+    if (initialMode === 'create' && can('lkl', 'create')) {
+      openCreateModal(false);
+    }
+  }, [initialMode]);
+
+  useEffect(() => {
+    if (!loading && initialMode === 'detail' && initialId && reports.length > 0) {
+      const target = reports.find((r) => r.id === initialId || r.referenceNumber === initialId);
+      if (target && selected?.id !== target.id) {
+        setSelected(target);
+        setPreviewPdfId(target.pdfFileId);
+        setReviewNote('');
+      }
+    }
+  }, [loading, initialMode, initialId, reports]);
+
+  const updateLklForm = (patch: Partial<typeof defaultForm>) => {
+    setFormDirty(true);
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const closeCreateModal = () => {
+    guardAction(() => {
+      setFormDirty(false);
+      setCreateOpen(false);
+      navigate('/laporan-kegiatan');
+    });
   };
 
   const saveLocalDraft = () => {
     try {
       localStorage.setItem(draftKey, JSON.stringify(form));
+      setFormDirty(false);
       notify('Draft LKL tersimpan di perangkat Anda dan akan dipulihkan saat formulir dibuka lagi.', 'info');
     } catch {
       notify('Tidak dapat menyimpan draft lokal.', 'error');
@@ -101,15 +147,21 @@ export function LklPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
     try {
       const res = await apiPost<{ referenceNumber: string }>('/api/lkl', form);
       localStorage.removeItem(draftKey);
+      setFormDirty(false);
       notify(`LKL ${res.referenceNumber} berhasil dikirim untuk pemeriksaan Koordinator Wilayah.`, 'success');
       setCreateOpen(false);
       setForm(defaultForm);
+      navigate('/laporan-kegiatan');
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal mengirim LKL.', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -142,7 +194,7 @@ export function LklPage() {
         {can('lkl', 'create') && (
           <button
             type="button"
-            onClick={openCreateModal}
+            onClick={() => openCreateModal(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
           >
             <Plus className="w-4 h-4" /> Kirim LKL Baru
@@ -156,7 +208,7 @@ export function LklPage() {
             title="Belum ada LKL terkirim"
             description="Setelah melaksanakan kegiatan, kirimkan LKL beserta PDF laporan dan foto dokumentasi."
             actionLabel={can('lkl', 'create') ? 'Buat LKL Pertama' : undefined}
-            onAction={can('lkl', 'create') ? openCreateModal : undefined}
+            onAction={can('lkl', 'create') ? () => openCreateModal(true) : undefined}
           />
         ) : (
           <>
@@ -199,6 +251,7 @@ export function LklPage() {
                             setSelected(r);
                             setPreviewPdfId(r.pdfFileId);
                             setReviewNote('');
+                            navigate(`/laporan-kegiatan/${r.id}`);
                           }}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white font-semibold"
                         >
@@ -246,11 +299,11 @@ export function LklPage() {
       </GlassCard>
 
       {/* Create LKL Modal */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Kirim Laporan Kegiatan Lapangan (LKL)">
+      <Modal open={createOpen} onClose={closeCreateModal} title="Kirim Laporan Kegiatan Lapangan (LKL)">
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
             <label className="block font-semibold mb-1">Nama Kegiatan</label>
-            <input required value={form.activityName} onChange={(e) => setForm({ ...form, activityName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
+            <input type="text" required value={form.activityName} onChange={(e) => updateLklForm({ activityName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -347,12 +400,15 @@ export function LklPage() {
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={submitting}
               onClick={saveLocalDraft}
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
             >
               <Save className="w-3.5 h-3.5" /> Simpan Draft Lokal
             </button>
-            <button type="submit" className="px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim LKL</button>
+            <button type="submit" disabled={submitting} className="px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold disabled:opacity-60">
+              {submitting ? 'Mengirim LKL...' : 'Kirim LKL'}
+            </button>
           </div>
         </form>
       </Modal>
@@ -364,6 +420,7 @@ export function LklPage() {
           setSelected(null);
           setPreviewPdfId(null);
           setLightboxPhotoId(null);
+          navigate('/laporan-kegiatan');
         }}
         title={selected?.activityName || 'Pemeriksaan LKL'}
         subtitle={selected ? `${selected.referenceNumber} · ${selected.submitterName} · ${selected.provinceName}` : ''}
@@ -382,7 +439,7 @@ export function LklPage() {
                   >
                     <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Sembunyikan PDF' : 'Tampilkan Pratinjau PDF'}
                   </button>
-                  <a href={`/api/files/${selected.pdfFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
+                  <a href={apiUrl(`/api/files/${selected.pdfFileId}`)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
                     <Download className="w-3.5 h-3.5" /> Unduh PDF LKL
                   </a>
                 </div>
@@ -393,7 +450,7 @@ export function LklPage() {
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
                 <iframe
                   title="Pratinjau PDF Laporan Kegiatan Lapangan"
-                  src={`/api/files/${previewPdfId}/preview`}
+                  src={apiUrl(`/api/files/${previewPdfId}/preview`)}
                   className="w-full h-[50vh] sm:h-[60vh]"
                 />
               </div>
@@ -426,7 +483,7 @@ export function LklPage() {
                       onClick={() => setLightboxPhotoId(fid)}
                       className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] transition-colors"
                     >
-                      <img src={`/api/files/${fid}/preview`} alt="Dokumentasi kegiatan" referrerPolicy="no-referrer" className="object-cover h-28 w-full" />
+                      <img src={apiUrl(`/api/files/${fid}/preview`)} alt="Dokumentasi kegiatan" referrerPolicy="no-referrer" className="object-cover h-28 w-full" />
                     </button>
                   ))}
                 </div>
@@ -464,7 +521,7 @@ export function LklPage() {
       >
         {lightboxPhotoId && (
           <img
-            src={`/api/files/${lightboxPhotoId}/preview`}
+            src={apiUrl(`/api/files/${lightboxPhotoId}/preview`)}
             alt="Dokumentasi kegiatan LKL"
             className="w-full max-h-[70vh] object-contain rounded-xl bg-slate-950"
           />
@@ -478,6 +535,17 @@ export function LklPage() {
         provinceName={user?.provinceName || 'Jawa Barat'}
         actionType="verifikasi_lkl_luring"
         onVerified={() => setLocModalOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={showConfirmDialog}
+        title="Batalkan Pengisian LKL?"
+        message="Anda memiliki isian LKL yang belum dikirim atau disimpan sebagai draft lokal. Yakin ingin keluar?"
+        confirmLabel="Buang Perubahan"
+        cancelLabel="Lanjutkan Mengisi"
+        danger
+        onConfirm={confirmLeave}
+        onCancel={cancelLeave}
       />
     </div>
   );

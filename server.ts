@@ -18,6 +18,27 @@ async function startServer() {
   const db = getDb();
   ensureSeeded(db);
 
+  // Configurable CORS for split frontend (Vercel) + backend API hosting
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use('/api', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, Authorization');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
+    next();
+  });
+
   // Security headers
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -31,6 +52,16 @@ async function startServer() {
 
   // Serve public uploaded static assets (like the official DPBI logo)
   app.use('/assets', express.static(path.resolve(process.cwd(), 'public', 'assets')));
+
+  // Lightweight health check for deployment monitoring (Vercel/ArenHost/Uptime)
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      service: 'SATU DPBI',
+      mode: IS_DEMO_MODE ? 'DEMO_SIMULASI' : 'PRODUKSI',
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // CSRF / Origin validation for state-changing API requests
   app.use('/api', requireSafeOrigin);

@@ -31,7 +31,16 @@ export function PublicPortalPage({
 }: {
   initialAuthTab?: 'login' | 'reset' | 'invite';
 }) {
-  const { refreshUser, navigate, theme, toggleTheme, notify, setAccountPending } = useAuth();
+  const {
+    refreshUser,
+    navigate,
+    theme,
+    toggleTheme,
+    notify,
+    setAccountPending,
+    pendingRedirectPath,
+    setPendingRedirectPath,
+  } = useAuth();
   const [overview, setOverview] = useState<PublicOverview | null>(null);
   const [authTab, setAuthTab] = useState<'login' | 'reset' | 'invite'>(initialAuthTab);
   const [email, setEmail] = useState('');
@@ -55,6 +64,14 @@ export function PublicPortalPage({
       .catch(() => {});
   }, []);
 
+  const redirectAfterAuth = () => {
+    const destination = pendingRedirectPath || '/dashboard';
+    if (pendingRedirectPath) {
+      setPendingRedirectPath(null);
+    }
+    navigate(destination);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -62,7 +79,7 @@ export function PublicPortalPage({
     try {
       await apiPost('/api/auth/login', { email, password }, true);
       await refreshUser();
-      navigate('/dashboard');
+      redirectAfterAuth();
     } catch (err) {
       if (err instanceof ApiError && err.accountStatus === 'menunggu_persetujuan') {
         setAccountPending(true);
@@ -82,7 +99,7 @@ export function PublicPortalPage({
       await apiPost('/api/auth/bootstrap', { fullName: bootstrapName, email, password }, true);
       await refreshUser();
       notify('Super Admin pertama berhasil diinisialisasi.', 'success');
-      navigate('/dashboard');
+      redirectAfterAuth();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal inisialisasi Super Admin.');
     } finally {
@@ -96,7 +113,7 @@ export function PublicPortalPage({
     try {
       await apiPost('/api/auth/demo-switch', { email: demoEmail }, true);
       await refreshUser();
-      navigate('/dashboard');
+      redirectAfterAuth();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal masuk ke akun simulasi.');
     } finally {

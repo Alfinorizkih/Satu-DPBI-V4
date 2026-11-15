@@ -7,7 +7,7 @@ import { LocationVerifyModal } from '../components/LocationVerifyModal';
 import { GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
 import type { ProvinceRecord, ProvinceStatus } from '../lib/types';
 
-export function RegionsPage() {
+export function RegionsPage({ initialId }: { initialId?: string }) {
   const { user, can, notify } = useAuth();
   const [tab, setTab] = useState<'peta' | 'handover' | 'lokasi'>('peta');
   const [viewMode, setViewMode] = useState<'gabungan' | 'daftar'>('gabungan');
@@ -36,7 +36,13 @@ export function RegionsPage() {
       setLocLogs(lRes.logs);
       setLocExceptions(lRes.exceptions);
       if (pRes.provinces.length > 0) {
+        const requested = initialId
+          ? pRes.provinces.find(
+              (p) => p.code === initialId || p.name.toLowerCase().replace(/\s+/g, '-') === initialId.toLowerCase()
+            )
+          : undefined;
         setSelected((prev) => {
+          if (requested) return requested;
           if (prev) return pRes.provinces.find((p) => p.code === prev.code) || prev;
           return pRes.provinces.find((p) => p.code === (user?.provinceCode || '32')) || pRes.provinces[0];
         });
@@ -46,7 +52,9 @@ export function RegionsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, [initialId]);
 
   const handleUpdateProvince = async (code: string, status: ProvinceStatus, coachingNote: string) => {
     try {

@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+*.zip
+.playwright-cli/
+data/
+storage/
+server.js

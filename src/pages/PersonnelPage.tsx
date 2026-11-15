@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CheckSquare, Download, Edit3, Eye, Plus, Upload, UserCheck } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import {
@@ -13,7 +13,7 @@ import {
   Modal,
   Pagination,
   StatusIndicator,
-} from '../components/ui/Primitives';
+} from '../components/ui';
 import { formatTanggalIndonesia } from '../lib/rbac';
 import type { PersonnelRecord } from '../lib/types';
 
@@ -42,12 +42,19 @@ type DetailTab = 'identitas' | 'pendidikan' | 'domisili' | 'penugasan' | 'dokume
 
 const PAGE_SIZE = 10;
 
-export function PersonnelPage() {
-  const { user, can, notify } = useAuth();
+export function PersonnelPage({
+  initialMode = 'list',
+  initialId,
+}: {
+  initialMode?: 'list' | 'create' | 'detail' | 'edit' | 'history';
+  initialId?: string;
+}) {
+  const { user, can, notify, navigate } = useAuth();
   const [tab, setTab] = useState<'direktori' | 'permintaan' | 'impor'>('direktori');
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
   const [requests, setRequests] = useState<AccountRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [provFilter, setProvFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -132,6 +139,16 @@ export function PersonnelPage() {
   }, [search, provFilter]);
 
   useEffect(() => {
+    if (!formDirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [formDirty]);
+
+  useEffect(() => {
     if (!selected || detailTab !== 'riwayat') return;
     setHistoryLoading(true);
     apiGet<PersonnelHistory>(`/api/personnel/${selected.id}/history`)
@@ -152,16 +169,17 @@ export function PersonnelPage() {
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const openCreateForm = () => {
+  const openCreateForm = (updateUrl = true) => {
     setEditingId(null);
     setPersonForm(emptyPersonForm);
     setFormErrors([]);
     setFormDirty(false);
     setFormStep(1);
     setFormMode('create');
+    if (updateUrl) navigate('/personalia/tambah');
   };
 
-  const openEditForm = (p: PersonnelRecord) => {
+  const openEditForm = (p: PersonnelRecord, updateUrl = true) => {
     setEditingId(p.id);
     setPersonForm({
       fullName: p.fullName,
@@ -198,13 +216,44 @@ export function PersonnelPage() {
     setFormDirty(false);
     setFormStep(1);
     setFormMode('edit');
+    if (updateUrl) navigate(`/personalia/${p.id}/ubah`);
   };
+
+  useEffect(() => {
+    if (loading) return;
+    if (initialMode === 'create' && can('personalia', 'create')) {
+      openCreateForm(false);
+      return;
+    }
+    if ((initialMode === 'detail' || initialMode === 'edit') && initialId && personnel.length > 0) {
+      const target = personnel.find((p) => p.id === initialId || p.memberNumber === initialId);
+      if (target) {
+        if (initialMode === 'edit' && can('personalia', 'edit')) {
+          openEditForm(target, false);
+        } else if (selected?.id !== target.id) {
+          setSelected(target);
+          setDetailTab('identitas');
+          setHistory(null);
+        }
+      }
+      return;
+    }
+    if (initialMode === 'history' && personnel.length > 0 && !selected) {
+      const mine = personnel.find((p) => p.id === user?.personnelId) || personnel[0];
+      if (mine) {
+        setSelected(mine);
+        setDetailTab('riwayat');
+        setHistory(null);
+      }
+    }
+  }, [loading, initialMode, initialId, personnel]);
 
   const attemptCloseForm = () => {
     if (formDirty) {
       setConfirmDiscardOpen(true);
     } else {
       setFormMode(null);
+      navigate('/personalia');
     }
   };
 
@@ -215,6 +264,7 @@ export function PersonnelPage() {
 
   const handleSavePerson = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     const errs: string[] = [];
     if (!personForm.fullName.trim()) errs.push('Nama lengkap wajib diisi.');
     if (!personForm.email.trim()) errs.push('Alamat email wajib diisi.');
@@ -224,6 +274,7 @@ export function PersonnelPage() {
       return;
     }
     setFormErrors([]);
+    setSaving(true);
     try {
       if (formMode === 'create') {
         const res = await apiPost<{ referenceNumber: string }>('/api/personnel', personForm);
@@ -235,9 +286,12 @@ export function PersonnelPage() {
       setFormDirty(false);
       setFormMode(null);
       setSelected(null);
+      navigate('/personalia');
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menyimpan data personel.', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -342,7 +396,7 @@ export function PersonnelPage() {
               <button type="button" onClick={() => setReqOpen(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold">
                 <UserCheck className="w-4 h-4 text-[#0EA5E9]" /> Ajukan Akun Duta
               </button>
-              <button type="button" onClick={openCreateForm} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold">
+              <button type="button" onClick={() => openCreateForm(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold">
                 <Plus className="w-4 h-4" /> Tambah Personel
               </button>
             </>
@@ -416,7 +470,7 @@ export function PersonnelPage() {
                           <div className="flex items-center gap-2.5">
                             {p.avatarFileId ? (
                               <img
-                                src={`/api/files/${p.avatarFileId}/preview`}
+                                src={apiUrl(`/api/files/${p.avatarFileId}/preview`)}
                                 alt={p.fullName}
                                 className="w-8 h-8 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
                               />
@@ -441,7 +495,7 @@ export function PersonnelPage() {
                           {can('personalia', 'edit') && (
                             <button
                               type="button"
-                              onClick={() => openEditForm(p)}
+                              onClick={() => openEditForm(p, true)}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] text-xs font-semibold"
                             >
                               <Edit3 className="w-3.5 h-3.5" /> Ubah
@@ -453,6 +507,7 @@ export function PersonnelPage() {
                               setSelected(p);
                               setDetailTab('identitas');
                               setHistory(null);
+                              navigate(`/personalia/${p.id}`);
                             }}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white text-xs font-semibold transition-colors"
                           >
@@ -593,7 +648,10 @@ export function PersonnelPage() {
       {/* Multi-Tab Detail & Verification Modal */}
       <Modal
         open={Boolean(selected)}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          navigate('/personalia');
+        }}
         title={selected?.fullName || 'Detail Profil'}
         subtitle={selected ? `${selected.memberNumber} · ${selected.referenceNumber} · Kelengkapan ${selected.completenessScore}%` : ''}
         maxWidth="max-w-3xl"
@@ -605,7 +663,7 @@ export function PersonnelPage() {
               <div className="flex items-center gap-3.5">
                 {selected.avatarFileId ? (
                   <img
-                    src={`/api/files/${selected.avatarFileId}/preview`}
+                    src={apiUrl(`/api/files/${selected.avatarFileId}/preview`)}
                     alt={`Foto profil ${selected.fullName}`}
                     className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700"
                   />
@@ -978,8 +1036,8 @@ export function PersonnelPage() {
                   Lanjut
                 </button>
               ) : (
-                <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">
-                  {formMode === 'edit' ? 'Simpan Perubahan' : 'Simpan Data Induk'}
+                <button type="submit" disabled={saving} className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold disabled:opacity-60">
+                  {saving ? 'Menyimpan...' : formMode === 'edit' ? 'Simpan Perubahan' : 'Simpan Data Induk'}
                 </button>
               )}
             </div>
@@ -997,6 +1055,7 @@ export function PersonnelPage() {
           setConfirmDiscardOpen(false);
           setFormDirty(false);
           setFormMode(null);
+          navigate('/personalia');
         }}
         onCancel={() => setConfirmDiscardOpen(false)}
       />

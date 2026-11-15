@@ -10,6 +10,7 @@ import {
   resolveProposalApprover,
   verifyCoordinateInProvince,
 } from './rbac';
+import { matchPrivateRoute, normalizePathname, resolveBaseNavPath } from './routes';
 import type { DelegationRecord } from './types';
 
 test('supports all 38 official Indonesian provinces', () => {
@@ -112,4 +113,55 @@ test('Profile completeness & reference number generator produce exact institutio
   assert.ok(partial.missingFields.includes('Kartu Pelajar / Bukti Status'));
 
   assert.equal(formatReferenceNumber('PROP', 2026, 42), 'DPBI/PROP/2026/0042');
+});
+
+test('Clean parameterized router resolves deep links, sub-routes, and active nav bases safely', () => {
+  assert.equal(normalizePathname('/proposal/baru/?ref=1#top'), '/proposal/baru');
+
+  const createProp = matchPrivateRoute('/proposal/baru');
+  assert.deepEqual(createProp, {
+    kind: 'proposals',
+    module: 'proposal',
+    title: 'Ajukan Proposal Baru',
+    mode: 'create',
+  });
+
+  const detailPerson = matchPrivateRoute('/personalia/per-101');
+  assert.deepEqual(detailPerson, {
+    kind: 'personnel',
+    module: 'personalia',
+    title: 'Detail Profil Personel',
+    mode: 'detail',
+    id: 'per-101',
+  });
+
+  const editPerson = matchPrivateRoute('/personalia/per-101/ubah');
+  assert.deepEqual(editPerson, {
+    kind: 'personnel',
+    module: 'personalia',
+    title: 'Ubah Profil Personel',
+    mode: 'edit',
+    id: 'per-101',
+  });
+
+  const myTasks = matchPrivateRoute('/tugas-saya');
+  assert.deepEqual(myTasks, {
+    kind: 'tasks',
+    module: 'tugas',
+    title: 'Tugas Saya',
+    scope: 'mine',
+  });
+
+  const auditRoute = matchPrivateRoute('/audit-log');
+  assert.equal(auditRoute?.kind, 'system');
+  if (auditRoute?.kind === 'system') {
+    assert.equal(auditRoute.initialTab, 'audit');
+  }
+
+  assert.equal(matchPrivateRoute('/personalia/..%2Fetc'), null);
+  assert.equal(matchPrivateRoute('/tidak-ada'), null);
+
+  assert.equal(resolveBaseNavPath('/proposal/prop-12'), '/proposal');
+  assert.equal(resolveBaseNavPath('/pengaturan/sesi'), '/pengaturan');
+  assert.equal(resolveBaseNavPath('/pengaturan/hak-akses'), '/pengaturan/hak-akses');
 });

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Activity,
   Archive,
   Award,
   Bell,
   Building2,
   Calendar,
+  CheckSquare,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -13,7 +15,9 @@ import {
   FileCheck2,
   FileSpreadsheet,
   FolderOpen,
+  GraduationCap,
   HelpCircle,
+  KeyRound,
   LayoutDashboard,
   ListTodo,
   LogOut,
@@ -25,22 +29,25 @@ import {
   ServerCog,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   Sun,
   UserCheck,
   Users,
   X,
 } from 'lucide-react';
-import { ROUTE_TITLES, useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { apiGet, apiPost } from '../lib/api';
-import type { ModuleCode, NotificationRecord } from '../lib/types';
+import type { ModuleCode, NotificationRecord, PermissionAction } from '../lib/types';
+import { getRouteTitle, resolveBaseNavPath } from '../lib/routes';
 import { CommandPalette } from './CommandPalette';
-import { OfflineBanner } from './ui/Primitives';
+import { OfflineBanner } from './ui';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
 interface NavItem {
   label: string;
   path: string;
   module?: ModuleCode;
+  action?: PermissionAction;
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -53,56 +60,62 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    id: 'ringkasan',
-    group: 'Ringkasan',
+    id: 'utama',
+    group: 'Utama',
     items: [
-      { label: 'Dashboard Utama', path: '/dashboard', module: 'dashboard', icon: LayoutDashboard },
+      { label: 'Dashboard', path: '/dashboard', module: 'dashboard', icon: LayoutDashboard },
+      { label: 'Aktivitas Saya', path: '/aktivitas-saya', module: 'dashboard', icon: Activity },
+      { label: 'Tugas Saya', path: '/tugas-saya', module: 'tugas', icon: CheckSquare },
     ],
   },
   {
     id: 'organisasi',
-    group: 'Organisasi & Duta',
+    group: 'Organisasi',
     collapsible: true,
     items: [
-      { label: 'Struktur & Delegasi', path: '/organisasi', module: 'organisasi', icon: Building2 },
-      { label: 'Personalia & Duta', path: '/personalia', module: 'personalia', icon: Users },
-      { label: 'Wilayah 38 Provinsi', path: '/wilayah', module: 'wilayah', icon: MapIcon },
-      { label: 'Angkatan & Siklus', path: '/angkatan', module: 'angkatan', icon: Award },
+      { label: 'Personalia', path: '/personalia', module: 'personalia', icon: Users },
+      { label: 'Wilayah', path: '/wilayah', module: 'wilayah', icon: MapIcon },
+      { label: 'Angkatan', path: '/angkatan', module: 'angkatan', icon: Award },
+      { label: 'Alumni', path: '/alumni', module: 'arsip', icon: GraduationCap },
+      { label: 'Struktur Organisasi', path: '/organisasi', module: 'organisasi', icon: Building2 },
     ],
   },
   {
     id: 'operasional',
-    group: 'Operasional & Pelaporan',
+    group: 'Operasional',
     collapsible: true,
     items: [
-      { label: 'Proposal Kegiatan', path: '/proposal', module: 'proposal', icon: FileCheck2 },
-      { label: 'Laporan Kegiatan (LKL)', path: '/laporan-kegiatan', module: 'lkl', icon: ClipboardCheck },
+      { label: 'Proposal', path: '/proposal', module: 'proposal', icon: FileCheck2 },
+      { label: 'Laporan Kegiatan', path: '/laporan-kegiatan', module: 'lkl', icon: ClipboardCheck },
       { label: 'Laporan Koordinator', path: '/laporan-koordinator', module: 'laporan_koordinator', icon: FileSpreadsheet },
-      { label: 'Tugas & Progres', path: '/tugas', module: 'tugas', icon: ListTodo },
-      { label: 'Kalender Organisasi', path: '/kalender', module: 'kalender', icon: Calendar },
+      { label: 'Tugas', path: '/tugas', module: 'tugas', icon: ListTodo },
+      { label: 'Kalender', path: '/kalender', module: 'kalender', icon: Calendar },
     ],
   },
   {
-    id: 'dokumen',
-    group: 'Dokumen & Komunikasi',
+    id: 'informasi',
+    group: 'Informasi',
     collapsible: true,
     items: [
-      { label: 'Pusat Dokumen & SOP', path: '/dokumen', module: 'dokumen', icon: FolderOpen },
       { label: 'Pengumuman', path: '/pengumuman', module: 'pengumuman', icon: Megaphone },
       { label: 'Notifikasi', path: '/notifikasi', icon: Bell },
-      { label: 'Arsip & Alumni', path: '/arsip', module: 'arsip', icon: Archive },
+      { label: 'Dokumen', path: '/dokumen', module: 'dokumen', icon: FolderOpen },
+      { label: 'Arsip', path: '/arsip', module: 'arsip', icon: Archive },
+      { label: 'Pusat Bantuan', path: '/bantuan', icon: HelpCircle },
     ],
   },
   {
-    id: 'pengawasan',
-    group: 'Tata Kelola & Sistem',
+    id: 'pengelolaan',
+    group: 'Pengelolaan',
     collapsible: true,
     items: [
-      { label: 'Perlindungan Peserta', path: '/perlindungan', module: 'perlindungan', icon: ShieldAlert },
-      { label: 'Evaluasi Kinerja', path: '/evaluasi', module: 'evaluasi', icon: Award },
-      { label: 'Sistem, Audit & Backup', path: '/sistem', module: 'sistem', icon: ServerCog },
+      { label: 'Pengguna', path: '/pengaturan/pengguna', module: 'pengaturan', action: 'manage', icon: Users },
+      { label: 'Hak Akses', path: '/pengaturan/hak-akses', module: 'pengaturan', icon: KeyRound },
       { label: 'Pengaturan', path: '/pengaturan', module: 'pengaturan', icon: Settings },
-      { label: 'Pusat Bantuan', path: '/bantuan', icon: HelpCircle },
+      { label: 'Audit Log', path: '/audit-log', module: 'sistem', icon: ShieldCheck },
+      { label: 'Status Sistem', path: '/status-sistem', module: 'sistem', icon: ServerCog },
+      { label: 'Perlindungan', path: '/perlindungan', module: 'perlindungan', icon: ShieldAlert },
+      { label: 'Evaluasi', path: '/evaluasi', module: 'evaluasi', icon: Award },
     ],
   },
 ];
@@ -168,8 +181,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const activeGroup = NAV_GROUPS.find((g) => g.items.some((i) => i.path === currentPath));
-  const pageTitle = ROUTE_TITLES[currentPath] || 'Portal Internal SATU DPBI';
+  const baseActivePath = resolveBaseNavPath(currentPath);
+  const activeGroup = NAV_GROUPS.find((g) => g.items.some((i) => i.path === baseActivePath));
+  const pageTitle = getRouteTitle(currentPath);
 
   const initials = (user?.fullName || 'DP')
     .split(/\s+/)
@@ -227,7 +241,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Grouped navigation with collapsible submenus */}
       <nav aria-label="Navigasi Portal Internal" className="flex-1 overflow-y-auto px-2.5 py-3 space-y-3">
         {NAV_GROUPS.map((grp) => {
-          const visibleItems = grp.items.filter((item) => !item.module || can(item.module, 'view'));
+          const visibleItems = grp.items.filter((item) => !item.module || can(item.module, item.action || 'view'));
           if (visibleItems.length === 0) return null;
           const isGroupCollapsed = Boolean(collapsedGroups[grp.id]) && !collapsed;
 
@@ -259,7 +273,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="space-y-0.5 mt-0.5">
                   {visibleItems.map((item) => {
                     const Icon = item.icon;
-                    const active = currentPath === item.path;
+                    const active = baseActivePath === item.path;
                     return (
                       <button
                         key={item.path}

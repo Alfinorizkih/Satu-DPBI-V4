@@ -10,7 +10,7 @@ import {
   Search,
   Users,
 } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import {
@@ -43,8 +43,8 @@ const PRIORITY_STYLES: Record<string, string> = {
   rendah: 'text-slate-500 dark:text-slate-400',
 };
 
-export function TasksPage() {
-  const { can, notify } = useAuth();
+export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'; initialId?: string }) {
+  const { user, can, notify, navigate } = useAuth();
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [view, setView] = useState<'list' | 'kanban' | 'calendar'>('list');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -74,14 +74,20 @@ export function TasksPage() {
   const load = () => {
     setLoading(true);
     apiGet<{ tasks: TaskRecord[] }>('/api/tasks')
-      .then((res) => setTasks(res.tasks))
+      .then((res) => {
+        setTasks(res.tasks);
+        if (initialId) {
+          const found = res.tasks.find((t) => t.id === initialId || t.referenceNumber === initialId);
+          if (found) setActiveTask(found);
+        }
+      })
       .catch((err) => notify(err instanceof Error ? err.message : 'Gagal memuat tugas.', 'error'))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     load();
-  }, []);
+  }, [initialId]);
 
   const handleStatus = async (id: string, status: TaskStatus) => {
     try {
@@ -171,17 +177,27 @@ export function TasksPage() {
     { status: 'selesai', label: 'Selesai' },
   ];
 
-  const visibleTasks = statusFilter ? tasks.filter((t) => t.status === statusFilter) : tasks;
-  const doneCount = tasks.filter((t) => t.status === 'selesai').length;
-  const urgentCount = tasks.filter((t) => t.priority === 'mendesak' || t.status === 'perlu_perhatian').length;
+  const scopedTasks =
+    scope === 'mine' && user
+      ? tasks.filter(
+          (t) => t.assigneeId === user.id || t.assigneeName === user.fullName || t.creatorName === user.fullName
+        )
+      : tasks;
+  const visibleTasks = statusFilter ? scopedTasks.filter((t) => t.status === statusFilter) : scopedTasks;
+  const doneCount = scopedTasks.filter((t) => t.status === 'selesai').length;
+  const urgentCount = scopedTasks.filter((t) => t.priority === 'mendesak' || t.status === 'perlu_perhatian').length;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Pusat Pengelolaan Tugas</h1>
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+            {scope === 'mine' ? 'Tugas Saya' : 'Pusat Pengelolaan Tugas'}
+          </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Pantau tugas operasional, prioritas, progres subtugas, penugasan per provinsi, dan tenggat waktu.
+            {scope === 'mine'
+              ? 'Daftar tugas pribadi, subtugas, komentar koordinasi, dan tenggat waktu yang menjadi tanggung jawab Anda.'
+              : 'Pantau tugas operasional, prioritas, progres subtugas, penugasan per provinsi, dan tenggat waktu.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -617,8 +633,8 @@ export function TasksPage() {
 
 const DOC_PAGE_SIZE = 10;
 
-export function DocumentsPage() {
-  const { can, notify } = useAuth();
+export function DocumentsPage({ initialId }: { initialId?: string }) {
+  const { can, notify, navigate } = useAuth();
   const [tab, setTab] = useState<'semua' | 'sop' | 'materi' | 'arsip' | 'generator'>('semua');
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
@@ -656,6 +672,10 @@ export function DocumentsPage() {
       ]);
       setDocs(dRes.documents);
       setPersonnel(pRes.personnel);
+      if (initialId) {
+        const match = dRes.documents.find((d) => d.id === initialId || d.documentNumber === initialId);
+        if (match) setPreviewDoc(match);
+      }
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal memuat pusat dokumen.', 'error');
     } finally {
@@ -665,7 +685,7 @@ export function DocumentsPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [initialId]);
 
   const handleUploadDoc = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -687,7 +707,7 @@ export function DocumentsPage() {
     }
     setGenerating(true);
     try {
-      const res = await fetch('/api/documents/bulk-generate', {
+      const res = await fetch(apiUrl('/api/documents/bulk-generate'), {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -991,7 +1011,10 @@ export function DocumentsPage() {
       {/* Inline PDF Preview Modal */}
       <Modal
         open={Boolean(previewDoc)}
-        onClose={() => setPreviewDoc(null)}
+        onClose={() => {
+          setPreviewDoc(null);
+          navigate('/dokumen');
+        }}
         title={previewDoc?.title || 'Pratinjau Dokumen'}
         subtitle={previewDoc ? `${previewDoc.documentNumber} · v${previewDoc.version} · ${previewDoc.category}` : ''}
         maxWidth="max-w-4xl"
@@ -1001,13 +1024,13 @@ export function DocumentsPage() {
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
               <iframe
                 title={`Pratinjau ${previewDoc.title}`}
-                src={`/api/files/${previewDoc.fileId}/preview`}
+                src={apiUrl(`/api/files/${previewDoc.fileId}/preview`)}
                 className="w-full h-[60vh]"
               />
             </div>
             <div className="flex justify-end">
               <a
-                href={`/api/files/${previewDoc.fileId}?download=1`}
+                href={apiUrl(`/api/files/${previewDoc.fileId}?download=1`)}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold"
