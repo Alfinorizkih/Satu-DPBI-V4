@@ -1,0 +1,620 @@
+import React, { useEffect, useState } from 'react';
+import { Download, Edit3, Eye, FileText, History, Info, Plus, Send } from 'lucide-react';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import {
+  EmptyState,
+  FileDropzone,
+  GlassCard,
+  LoadingSkeleton,
+  Modal,
+  Pagination,
+  StatusIndicator,
+} from '../components/ui/Primitives';
+import type { ProposalRecord } from '../lib/types';
+import { formatTanggalIndonesia } from '../lib/rbac';
+
+const PAGE_SIZE = 10;
+
+function getNextActionSummary(p: ProposalRecord): string {
+  switch (p.status) {
+    case 'draft':
+      return 'Langkah Berikutnya: Lengkapi rincian kegiatan dan klik "Kirim Pengajuan" agar dapat diperiksa peninjau.';
+    case 'diajukan':
+    case 'pemeriksaan_administrasi':
+    case 'pemeriksaan_wilayah':
+    case 'menunggu_persetujuan_nasional':
+      return `Langkah Berikutnya: Menunggu pemeriksaan & keputusan dari ${p.assignedApproverRole.replace(/_/g, ' ')}.`;
+    case 'perlu_revisi':
+      return 'Langkah Berikutnya: Pengaju wajib mengunggah revisi PDF sesuai catatan pemeriksaan di bawah.';
+    case 'disetujui':
+      return 'Langkah Berikutnya: Proposal telah disetujui. Laksanakan kegiatan lalu kirim Laporan Kegiatan Lapangan (LKL).';
+    case 'ditolak':
+      return 'Status Final: Proposal ditolak. Periksa catatan keputusan bila ingin mengajukan proposal baru.';
+    default:
+      return 'Proposal diarsipkan dalam catatan organisasi.';
+  }
+}
+
+export function ProposalsPage() {
+  const { user, can, notify } = useAuth();
+  const [proposals, setProposals] = useState<ProposalRecord[]>([]);
+  const [matrixRules, setMatrixRules] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ProposalRecord | null>(null);
+  const [versions, setVersions] = useState<Record<string, unknown>[]>([]);
+  const [decisionNote, setDecisionNote] = useState('');
+  const [reviseNote, setReviseNote] = useState('');
+  const [reviseFile, setReviseFile] = useState<{ fileId: string; fileName: string } | null>(null);
+  const [showMatrix, setShowMatrix] = useState(false);
+  const [previewPdfId, setPreviewPdfId] = useState<string | null>(null);
+
+  const defaultForm = {
+    title: '',
+    bidang: 'Kebudayaan',
+    category: 'Lokakarya / Literasi Pelajar',
+    riskLevel: 'sedang' as 'rendah' | 'sedang' | 'tinggi',
+    usesDpbiIdentity: true,
+    externalPermitNeeded: false,
+    objective: '',
+    targetAudience: 'Pelajar SMA/SMK/MA',
+    eventDate: '2026-12-10',
+    eventTime: '09:00 - 13:00 WIB',
+    location: '',
+    estimatedParticipants: 50,
+    activityMode: 'luring' as 'luring' | 'daring' | 'hibrida',
+    pdfFileId: null as string | null,
+    pdfFileName: null as string | null,
+  };
+
+  const [form, setForm] = useState(defaultForm);
+
+  const load = () => {
+    setLoading(true);
+    apiGet<{ proposals: ProposalRecord[]; matrixRules: Record<string, unknown>[] }>('/api/proposals')
+      .then((res) => {
+        setProposals(res.proposals);
+        setMatrixRules(res.matrixRules);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+  useEffect(() => { setPage(1); }, [statusFilter]);
+
+  const openDetail = async (p: ProposalRecord) => {
+    setSelected(p);
+    setDecisionNote('');
+    setReviseNote('');
+    setReviseFile(null);
+    setPreviewPdfId(null);
+    try {
+      const vRes = await apiGet<{ versions: Record<string, unknown>[] }>(`/api/proposals/${p.id}/versions`);
+      setVersions(vRes.versions);
+    } catch {
+      setVersions([]);
+    }
+  };
+
+  const openEditDraft = (p: ProposalRecord) => {
+    setEditingDraftId(p.id);
+    setForm({
+      title: p.title,
+      bidang: p.bidang,
+      category: p.category,
+      riskLevel: p.riskLevel,
+      usesDpbiIdentity: p.usesDpbiIdentity,
+      externalPermitNeeded: p.externalPermitNeeded,
+      objective: p.objective,
+      targetAudience: p.targetAudience,
+      eventDate: p.eventDate,
+      eventTime: p.eventTime,
+      location: p.location,
+      estimatedParticipants: p.estimatedParticipants,
+      activityMode: p.activityMode,
+      pdfFileId: p.pdfFileId,
+      pdfFileName: p.pdfFileName,
+    });
+    setCreateOpen(true);
+  };
+
+  const submitProposal = async (saveAsDraft: boolean) => {
+    if (!form.title.trim()) {
+      notify('Judul kegiatan wajib diisi.', 'error');
+      return;
+    }
+    if (!saveAsDraft && (!form.objective.trim() || !form.location.trim())) {
+      notify('Tujuan dan lokasi kegiatan wajib diisi sebelum dikirim.', 'error');
+      return;
+    }
+    try {
+      if (editingDraftId) {
+        await apiPatch(`/api/proposals/${editingDraftId}`, { ...form, submitNow: !saveAsDraft });
+        notify(
+          saveAsDraft ? 'Draft proposal diperbarui.' : 'Draft proposal berhasil dikirim untuk pemeriksaan.',
+          'success'
+        );
+      } else {
+        const res = await apiPost<{ referenceNumber: string; assignedApproverRole: string }>('/api/proposals', {
+          ...form,
+          saveAsDraft,
+        });
+        notify(
+          saveAsDraft
+            ? `Draft ${res.referenceNumber} tersimpan. Anda dapat melengkapinya kapan saja.`
+            : `Proposal ${res.referenceNumber} diajukan. Peninjau: ${res.assignedApproverRole.replace(/_/g, ' ')}.`,
+          'success'
+        );
+      }
+      setCreateOpen(false);
+      setEditingDraftId(null);
+      setForm(defaultForm);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menyimpan proposal.', 'error');
+    }
+  };
+
+  const handleDecide = async (decision: 'disetujui' | 'perlu_revisi' | 'ditolak') => {
+    if (!selected) return;
+    try {
+      await apiPost(`/api/proposals/${selected.id}/decide`, { decision, note: decisionNote });
+      notify(`Keputusan proposal: ${decision.replace(/_/g, ' ')}.`, 'success');
+      setSelected(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memproses keputusan.', 'error');
+    }
+  };
+
+  const handleRevise = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected) return;
+    try {
+      const res = await apiPost<{ version: number }>(`/api/proposals/${selected.id}/revise`, {
+        pdfFileId: reviseFile?.fileId,
+        pdfFileName: reviseFile?.fileName,
+        changeNote: reviseNote,
+      });
+      notify(`Revisi versi ${res.version} berhasil diunggah. Versi lama tetap tersimpan.`, 'success');
+      setSelected(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengunggah revisi.', 'error');
+    }
+  };
+
+  if (loading) return <LoadingSkeleton rows={5} />;
+
+  const filtered = proposals.filter((p) => !statusFilter || p.status === statusFilter);
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Manajemen Proposal Kegiatan</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Simpan draft atau ajukan proposal terstruktur + PDF, lihat tindakan berikutnya dengan jelas, dan kelola riwayat versi.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMatrix(true)}
+            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+          >
+            Approval Matrix
+          </button>
+          {can('proposal', 'create') && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingDraftId(null);
+                setForm(defaultForm);
+                setCreateOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
+            >
+              <Plus className="w-4 h-4" /> Ajukan Proposal Baru
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-200/70 dark:bg-slate-800/80 rounded-xl w-fit max-w-full overflow-x-auto">
+        {[
+          ['', 'Semua'],
+          ['draft', 'Draft'],
+          ['diajukan', 'Diajukan'],
+          ['menunggu_persetujuan_nasional', 'Menunggu Nasional'],
+          ['perlu_revisi', 'Perlu Revisi'],
+          ['disetujui', 'Disetujui'],
+          ['ditolak', 'Ditolak'],
+        ].map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => setStatusFilter(val)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+              statusFilter === val ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <GlassCard className="p-5 space-y-4">
+        {filtered.length === 0 ? (
+          <EmptyState
+            title="Belum ada proposal pada filter ini"
+            description="Simpan sebagai draft atau ajukan proposal kegiatan terstruktur dengan dokumen PDF pendukung."
+            actionLabel={can('proposal', 'create') ? 'Buat Proposal Pertama' : undefined}
+            onAction={can('proposal', 'create') ? () => setCreateOpen(true) : undefined}
+          />
+        ) : (
+          <>
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
+                  <tr>
+                    <th className="py-2.5 pr-4">Nomor Referensi</th>
+                    <th className="py-2.5 pr-4">Judul Kegiatan</th>
+                    <th className="py-2.5 pr-4">Pengaju & Wilayah</th>
+                    <th className="py-2.5 pr-4">Jadwal</th>
+                    <th className="py-2.5 pr-4">Status</th>
+                    <th className="py-2.5 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
+                  {paged.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                      <td className="py-3 pr-4 font-mono tabular-nums">
+                        <p className="font-semibold text-[#0EA5E9]">{p.referenceNumber}</p>
+                        <p className="text-[11px] text-slate-400">Versi {p.version}</p>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <p className="font-semibold text-slate-900 dark:text-white">{p.title}</p>
+                        <p className="text-[11px] text-slate-500">{p.bidang} · Risiko {p.riskLevel} · {p.activityMode}</p>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <p>{p.applicantName}</p>
+                        <p className="text-[11px] text-slate-500">{p.provinceName}</p>
+                      </td>
+                      <td className="py-3 pr-4 tabular-nums">
+                        <p>{formatTanggalIndonesia(p.eventDate)}</p>
+                        <p className="text-[11px] text-slate-500">{p.estimatedParticipants} peserta</p>
+                      </td>
+                      <td className="py-3 pr-4"><StatusIndicator status={p.status} /></td>
+                      <td className="py-3 text-right space-x-1.5 whitespace-nowrap">
+                        {p.status === 'draft' && can('proposal', 'edit') && (
+                          <button
+                            type="button"
+                            onClick={() => openEditDraft(p)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openDetail(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white font-semibold transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Detail
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards */}
+            <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
+              {paged.map((p) => (
+                <div key={p.id} className="py-3.5 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-mono text-[11px] text-[#0EA5E9]">{p.referenceNumber} · v{p.version}</p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{p.title}</p>
+                      <p className="text-[11px] text-slate-500">{p.applicantName} · {p.provinceName}</p>
+                    </div>
+                    <StatusIndicator status={p.status} />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    {p.status === 'draft' && can('proposal', 'edit') && (
+                      <button
+                        type="button"
+                        onClick={() => openEditDraft(p)}
+                        className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => openDetail(p)}
+                      className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Tinjau Proposal
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <Pagination page={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+          </>
+        )}
+      </GlassCard>
+
+      {/* Create / Edit Draft Proposal Modal */}
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title={editingDraftId ? 'Lanjutkan Draft Proposal' : 'Ajukan Proposal Kegiatan Baru'}
+      >
+        <div className="space-y-4 text-xs">
+          <div>
+            <label className="block font-semibold mb-1">Judul Kegiatan *</label>
+            <input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Bidang</label>
+              <select value={form.bidang} onChange={(e) => setForm({ ...form, bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                <option value="Kebudayaan">Kebudayaan</option>
+                <option value="Pendidikan">Pendidikan</option>
+                <option value="Program dan Operasional">Program dan Operasional</option>
+                <option value="Hubungan dan Kemitraan">Hubungan dan Kemitraan</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Kategori</label>
+              <input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Tingkat Risiko</label>
+              <select value={form.riskLevel} onChange={(e) => setForm({ ...form, riskLevel: e.target.value as 'rendah' | 'sedang' | 'tinggi' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                <option value="rendah">Rendah</option>
+                <option value="sedang">Sedang</option>
+                <option value="tinggi">Tinggi</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Tanggal Kegiatan</label>
+              <input type="date" required value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Moda Pelaksanaan</label>
+              <select value={form.activityMode} onChange={(e) => setForm({ ...form, activityMode: e.target.value as 'luring' | 'daring' | 'hibrida' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                <option value="luring">Luring (Tatap Muka)</option>
+                <option value="daring">Daring (Online)</option>
+                <option value="hibrida">Hibrida</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Estimasi Peserta</label>
+              <input type="number" min={1} required value={form.estimatedParticipants} onChange={(e) => setForm({ ...form, estimatedParticipants: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Lokasi / Platform Kegiatan</label>
+            <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Nama gedung/sekolah atau platform daring" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Tujuan & Sasaran Kegiatan *</label>
+            <textarea rows={3} required value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={form.usesDpbiIdentity} onChange={(e) => setForm({ ...form, usesDpbiIdentity: e.target.checked })} />
+              <span>Menggunakan Identitas Resmi DPBI</span>
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={form.externalPermitNeeded} onChange={(e) => setForm({ ...form, externalPermitNeeded: e.target.checked })} />
+              <span>Memerlukan Izin Eksternal / Mitra</span>
+            </label>
+          </div>
+          <FileDropzone
+            label="Unggah Dokumen Proposal Utama (PDF)"
+            accept=".pdf,application/pdf"
+            moduleName="proposal"
+            uploadedFileName={form.pdfFileName}
+            onUploaded={(res) => setForm({ ...form, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => submitProposal(true)}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+            >
+              Simpan Draft
+            </button>
+            <button
+              type="button"
+              onClick={() => submitProposal(false)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold hover:bg-sky-600"
+            >
+              <Send className="w-3.5 h-3.5" /> Kirim Pengajuan
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Proposal Detail, Preview, Decision, & Revision Modal */}
+      <Modal
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        title={selected?.title || 'Detail Proposal'}
+        subtitle={selected ? `${selected.referenceNumber} · Versi ${selected.version} · Peninjau: ${selected.assignedApproverRole.replace(/_/g, ' ')}` : ''}
+        maxWidth="max-w-3xl"
+      >
+        {selected && (
+          <div className="space-y-5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+              <StatusIndicator status={selected.status} />
+              {selected.pdfFileId && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewPdfId((prev) => (prev ? null : selected.pdfFileId))}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Tutup Pratinjau' : 'Pratinjau PDF'}
+                  </button>
+                  <a
+                    href={`/api/files/${selected.pdfFileId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Unduh ({selected.pdfFileName})
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* Clear Next Action Guidance */}
+            <div className="rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 p-3 flex items-start gap-2.5">
+              <Info className="w-4 h-4 text-[#0EA5E9] shrink-0 mt-0.5" />
+              <p className="text-slate-700 dark:text-slate-200 leading-relaxed">{getNextActionSummary(selected)}</p>
+            </div>
+
+            {previewPdfId && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
+                <iframe
+                  title="Pratinjau Dokumen Proposal PDF"
+                  src={`/api/files/${previewPdfId}/preview`}
+                  className="w-full h-[55vh]"
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <p><strong>Pengaju:</strong> {selected.applicantName}</p>
+              <p><strong>Wilayah:</strong> {selected.provinceName}</p>
+              <p><strong>Bidang:</strong> {selected.bidang}</p>
+              <p><strong>Jadwal:</strong> {formatTanggalIndonesia(selected.eventDate)} ({selected.eventTime})</p>
+              <p><strong>Lokasi:</strong> {selected.location || '—'}</p>
+              <p><strong>Estimasi Peserta:</strong> {selected.estimatedParticipants} ({selected.activityMode})</p>
+            </div>
+
+            <div>
+              <p className="font-semibold mb-1">Tujuan Kegiatan:</p>
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{selected.objective}</p>
+            </div>
+
+            {selected.decisionNote && (
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 border border-slate-200 dark:border-slate-700">
+                <p className="font-semibold">Catatan Keputusan ({selected.decidedBy}):</p>
+                <p className="mt-1">{selected.decisionNote}</p>
+              </div>
+            )}
+
+            {selected.status === 'draft' && can('proposal', 'edit') && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selected;
+                    setSelected(null);
+                    openEditDraft(target);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold"
+                >
+                  Lanjutkan & Kirim Draft Ini
+                </button>
+              </div>
+            )}
+
+            {/* Version History */}
+            <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <p className="font-semibold flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-[#0EA5E9]" /> Riwayat Versi Dokumen</p>
+              {versions.length === 0 ? (
+                <p className="text-slate-500">Belum ada riwayat versi tambahan.</p>
+              ) : (
+                versions.map((v) => (
+                  <div key={String(v.id)} className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800/60">
+                    <span>Versi {Number(v.version)} · {String(v.change_note)} ({String(v.uploaded_by)})</span>
+                    {v.pdf_file_id ? (
+                      <a href={`/api/files/${v.pdf_file_id}`} target="_blank" rel="noreferrer" className="text-[#0EA5E9] font-semibold">PDF</a>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Revision upload for applicant when perlu_revisi */}
+            {selected.status === 'perlu_revisi' && can('proposal', 'edit') && (
+              <form onSubmit={handleRevise} className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <p className="font-bold">Unggah Revisi Versi {selected.version + 1}</p>
+                <input required value={reviseNote} onChange={(e) => setReviseNote(e.target.value)} placeholder="Ringkasan perbaikan yang dilakukan..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <FileDropzone
+                  label="Unggah PDF Revisi Baru"
+                  accept=".pdf,application/pdf"
+                  moduleName="proposal"
+                  uploadedFileName={reviseFile?.fileName}
+                  onUploaded={(res) => setReviseFile({ fileId: res.fileId, fileName: res.fileName })}
+                />
+                <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim Revisi</button>
+              </form>
+            )}
+
+            {/* Decision controls for authorized reviewers */}
+            {can('proposal', 'review') && user?.role !== 'duta' && selected.status !== 'draft' && (
+              <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <p className="font-bold">Keputusan Peninjau / Persetujuan</p>
+                <input
+                  value={decisionNote}
+                  onChange={(e) => setDecisionNote(e.target.value)}
+                  placeholder="Catatan persetujuan atau alasan wajib untuk revisi/penolakan..."
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => handleDecide('disetujui')} className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-semibold">
+                    Setujui Proposal
+                  </button>
+                  <button type="button" onClick={() => handleDecide('perlu_revisi')} className="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-semibold">
+                    Minta Revisi
+                  </button>
+                  <button type="button" onClick={() => handleDecide('ditolak')} className="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-semibold">
+                    Tolak
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={showMatrix} onClose={() => setShowMatrix(false)} title="Approval Matrix Proposal SATU DPBI">
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-600 dark:text-slate-400">
+            Aturan persetujuan menentukan peninjau akhir secara otomatis berdasarkan bidang, risiko, penggunaan identitas DPBI, dan kebutuhan izin eksternal.
+          </p>
+          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+            {matrixRules.map((r) => (
+              <div key={String(r.id)} className="py-2.5">
+                <p className="font-bold">{String(r.bidang)} — {String(r.category)} (Risiko {String(r.risk_level)})</p>
+                <p className="text-[#0EA5E9] font-semibold mt-0.5">Penyetuju Akhir: {String(r.approver_role).replace(/_/g, ' ')}</p>
+                <p className="text-slate-500 mt-0.5">{String(r.notes)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}

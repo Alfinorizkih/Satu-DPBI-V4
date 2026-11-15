@@ -1,0 +1,3283 @@
+# MASTER PROMPT FINAL — SATU DPBI
+## Sistem Administrasi Terpadu Utama Duta Pelajar Berbudaya Indonesia
+### Complete Organizational Management Ecosystem | National Command Center | Integrated Regional Operations | Secure Digital Administration
+
+---
+
+# BAGIAN 0 — INSTRUKSI UTAMA DAN MANDAT PROYEK
+
+Anda bertindak sebagai satu tim pengembangan perangkat lunak profesional yang terdiri atas:
+
+- Principal Software Architect.
+- Senior Full-Stack Developer.
+- Senior Backend Engineer.
+- Senior Frontend Engineer.
+- UI/UX Designer.
+- Database Architect.
+- Cybersecurity Engineer.
+- DevOps and Deployment Engineer.
+- Quality Assurance Engineer.
+- Business Process Analyst.
+- Data Governance Specialist.
+
+Tugas Anda adalah **merancang, membangun, mengimplementasikan, menguji, dan menyerahkan SATU DPBI sebagai aplikasi organisasi yang benar-benar berfungsi, lengkap, terintegrasi, aman, profesional, dan siap digunakan.**
+
+Ini bukan tugas membuat landing page, mockup, prototype, template dashboard, atau sekadar memperbaiki satu error.
+
+Ini adalah proyek pembangunan sistem administrasi organisasi secara menyeluruh dari fondasi hingga implementasi.
+
+Saya menginginkan aplikasi yang benar-benar dapat digunakan oleh seluruh struktur organisasi DPBI, mulai dari pengelola tertinggi, pengurus nasional, sekretariat nasional, koordinator wilayah, Duta, hingga Alumni.
+
+Seluruh modul harus saling terhubung. Data tidak boleh tersebar menjadi sistem yang berdiri sendiri-sendiri. Setiap proses harus memiliki hubungan yang jelas dengan data personel, wilayah, angkatan, kegiatan, dokumen, tugas, dan riwayat organisasi.
+
+**Instruksi yang tidak boleh dilanggar:**
+
+1. Bangun ulang aplikasi secara menyeluruh dari fondasi yang bersih.
+2. Jangan menggunakan nama versi proyek lama sebagai identitas produk.
+3. Jangan sekadar mengganti tampilan aplikasi lama.
+4. Jangan hanya memperbaiki routing atau halaman 404.
+5. Jangan menghapus kebutuhan fitur penting dari spesifikasi ini.
+6. Jangan membuat fitur palsu, tombol dekoratif, grafik dummy, atau data buatan yang seolah-olah nyata.
+7. Jangan membuat halaman yang hanya berisi tulisan "Coming Soon" untuk menggantikan implementasi.
+8. Jangan menyatakan fitur selesai sebelum benar-benar diimplementasikan dan diuji.
+9. Jangan mengorbankan keamanan demi mempercepat pembangunan.
+10. Jangan membuat aplikasi yang terlalu rumit bagi pengguna operasional.
+11. Prioritaskan fitur yang memberikan manfaat nyata.
+12. Seluruh fitur wajib saling terintegrasi dan menggunakan sumber data yang konsisten.
+13. Jangan mengarang integrasi eksternal yang sebenarnya belum tersedia.
+14. Jangan meminta saya menentukan keputusan teknis yang dapat diputuskan secara profesional oleh tim pengembang.
+15. Apabila terdapat ketidakpastian teknis, dokumentasikan asumsi dan pilih solusi yang paling stabil, aman, serta sesuai hosting.
+
+Jika tersedia source code proyek sebelumnya, lakukan audit sebagai bahan referensi. Jangan terikat dengan desain atau struktur lama. Ambil bagian yang masih layak, lalu bangun ulang sistem berdasarkan spesifikasi final ini.
+
+Apabila tidak tersedia source code, bangun proyek baru dari nol.
+
+**Tujuan akhir: SATU DPBI harus menjadi pusat operasional digital organisasi yang dapat dipakai dalam banyak angkatan, banyak wilayah, dan dalam jangka panjang.**
+
+---
+
+# BAGIAN 1 — IDENTITAS PRODUK DAN KONSEP ORGANISASI
+
+## 1.1 Identitas resmi
+
+**Nama aplikasi:**
+
+SATU DPBI
+
+**Kepanjangan:**
+
+Sistem Administrasi Terpadu Utama
+
+**Organisasi:**
+
+Duta Pelajar Berbudaya Indonesia (DPBI)
+
+**Deskripsi:**
+
+Pusat administrasi, koordinasi, informasi, dan pengelolaan Duta Pelajar Berbudaya Indonesia.
+
+**Tagline aplikasi:**
+
+Satu Sistem, Satu Data, Satu Koordinasi.
+
+**Tagline organisasi:**
+
+Berbudaya, Bergerak, dan Berdampak Untuk Negeri.
+
+## 1.2 Tujuan aplikasi
+
+SATU DPBI dibuat untuk mengintegrasikan:
+
+- Administrasi nasional.
+- Kepengurusan nasional.
+- Pengelolaan koordinator wilayah.
+- Pengelolaan Duta.
+- Pengelolaan Alumni.
+- Data organisasi.
+- Data wilayah.
+- Pengelolaan angkatan.
+- Program kerja.
+- Proposal kegiatan.
+- Persetujuan kegiatan.
+- Laporan Kegiatan Lapangan.
+- Laporan koordinator.
+- Penugasan.
+- Pengarsipan.
+- Surat keputusan.
+- Dokumen organisasi.
+- Sertifikat.
+- Komunikasi internal.
+- Evaluasi.
+- Pengawasan.
+- Perlindungan peserta.
+- Pengelolaan akses.
+- Pelaporan nasional.
+
+Sistem harus dapat menampilkan hubungan antara seluruh data tersebut secara terpadu.
+
+Contoh:
+
+Ketika seorang Duta ditetapkan, sistem otomatis menghubungkan akun, profil, angkatan, provinsi, penugasan, dokumen penetapan, dan status masa jabatan.
+
+Ketika Duta mengajukan proposal, proposal tersebut terhubung dengan identitas pengaju, wilayah, angkatan, bidang kegiatan, dokumen PDF, peninjau, persetujuan, dan kalender kegiatan.
+
+Ketika kegiatan selesai, Duta mengirimkan LKL yang terhubung dengan proposal atau kegiatan terkait, formulir kegiatan, PDF, foto dokumentasi, lokasi, dan pemeriksaan Koordinator Wilayah.
+
+Ketika Koordinator memeriksa LKL, hasil pemeriksaan langsung memperbarui status laporan, rekap kegiatan wilayah, statistik nasional, dan notifikasi pihak yang terkait.
+
+**Jangan membuat setiap modul sebagai aplikasi terpisah yang tidak saling mengenali.**
+
+## 1.3 Prinsip organisasi
+
+DPBI merupakan organisasi independen yang berada di bawah naungan yayasan sesuai ketentuan organisasi.
+
+Jangan menggambarkan DPBI sebagai lembaga pemerintah, program resmi pemerintah, atau duta pemerintah.
+
+Integrasi dengan data pemerintah hanya dilakukan apabila terdapat akses dan kewenangan resmi.
+
+---
+
+# BAGIAN 2 — ARSITEKTUR PRODUK
+
+## 2.1 Bentuk aplikasi
+
+Bangun SATU DPBI sebagai:
+
+**Integrated Internal Organizational Management System.**
+
+Aplikasi terdiri dari dua area:
+
+### A. Public Access Portal
+
+Halaman publik sangat sederhana dan hanya berfungsi sebagai pintu masuk menuju portal internal.
+
+Jangan membuat website publik yang dipenuhi berita, artikel, direktori Duta, halaman promosi, atau informasi organisasi yang tidak diperlukan.
+
+Konten yang diperbolehkan:
+
+- Identitas SATU DPBI.
+- Logo DPBI dan identitas aplikasi.
+- Deskripsi singkat.
+- Form login.
+- Statistik organisasi tingkat umum yang telah disetujui untuk dipublikasikan.
+- Tautan pusat bantuan.
+- Informasi kebijakan privasi.
+- Informasi hak cipta dan identitas organisasi.
+
+Statistik publik hanya ditampilkan jika data memang tersedia dan telah disetujui. Jangan menampilkan informasi pribadi atau statistik internal yang sensitif.
+
+### B. Internal Organizational Portal
+
+Inilah bagian utama aplikasi.
+
+Portal ini memiliki:
+- Login email dan password.
+- Dashboard berdasarkan role.
+- Navigasi modul.
+- Database terpusat.
+- Pengelolaan personel.
+- Pengelolaan wilayah.
+- Pengelolaan angkatan.
+- Proposal.
+- LKL.
+- Laporan.
+- Dokumen.
+- Penugasan.
+- Komunikasi.
+- Kalender.
+- Arsip.
+- Keamanan.
+- Monitoring.
+- Administrasi nasional.
+
+Tidak ada pendaftaran akun publik secara bebas.
+
+## 2.2 Arsitektur teknis yang direkomendasikan
+
+Target deployment adalah hosting cPanel dengan fasilitas:
+
+- Penyimpanan NVMe 10 GB.
+- MySQL.
+- Bandwidth sesuai ketentuan paket.
+- SSH/Terminal jika tersedia.
+- Email hosting.
+- SSL/HTTPS.
+- Softaculous.
+- PHP yang tersedia pada server.
+
+Pilih arsitektur yang stabil dan kompatibel dengan shared hosting.
+
+**Prioritas rekomendasi:**
+
+- Backend: PHP 8.2+ atau versi kompatibel yang benar-benar tersedia pada hosting.
+- Framework backend: Laravel versi stabil yang kompatibel dengan PHP hosting.
+- Database: MySQL atau MariaDB.
+- Frontend: Blade, Livewire, Alpine.js, atau pendekatan lain yang sesuai dengan arsitektur Laravel.
+- Styling: Tailwind CSS.
+- Grafik: Recharts jika menggunakan frontend React atau library grafik yang kompatibel dengan arsitektur terpilih.
+- Peta: Leaflet atau solusi pemetaan lain yang stabil.
+- Ikon: Lucide Icons.
+- Build: Vite jika diperlukan.
+
+Gunakan satu arsitektur utama yang konsisten.
+
+Jangan mencampurkan React, PHP, Laravel, dan sistem API terpisah tanpa alasan teknis yang jelas.
+
+Untuk target cPanel, prioritaskan aplikasi monolitik modular yang memiliki routing server-side, database terpusat, dan proses deployment sederhana.
+
+Jika Laravel tidak dapat digunakan karena keterbatasan hosting, evaluasi alternatif PHP yang terstruktur, aman, dan mudah dirawat. Jangan langsung menggunakan kode PHP procedural yang berantakan.
+
+Pastikan seluruh dependency dapat dipasang dan dijalankan pada lingkungan hosting aktual.
+
+## 2.3 Prinsip arsitektur
+
+- Modular monolith.
+- Single source of truth.
+- Database relasional.
+- Separation of concerns.
+- Reusable components.
+- Server-side authorization.
+- Secure file storage.
+- Transaction-safe operations.
+- Configurable business rules.
+- Versioned documents.
+- Auditability.
+- Long-term maintainability.
+
+Jangan membangun microservices hanya untuk terlihat canggih. Gunakan arsitektur yang proporsional dengan kebutuhan dan kemampuan hosting.
+
+---
+
+# BAGIAN 3 — DESAIN VISUAL DAN PENGALAMAN PENGGUNA
+
+## 3.1 Arah desain utama
+
+Saya menginginkan tampilan:
+
+**Premium Institutional Glassmorphism Dashboard.**
+
+Karakter visual:
+
+- Profesional.
+- Modern.
+- Elegan.
+- Clean.
+- Berkelas.
+- Institusional.
+- Informatif.
+- Tidak terlalu ramai.
+- Tidak terlihat seperti template admin gratis.
+- Memiliki identitas visual yang kuat.
+
+Referensi arah desain:
+- Tailwind CSS.
+- Cruip Tailwind Dashboard Template.
+- Modern enterprise dashboard.
+- Premium institutional administration interface.
+- Frosted glass card design.
+- Clean data visualization.
+
+Gunakan referensi tersebut sebagai inspirasi desain dan jangan menyalin aset atau kode berlisensi tanpa mematuhi ketentuannya.
+
+## 3.2 Sistem warna
+
+Gunakan warna utama:
+
+| Elemen | Warna |
+|---|---|
+| Primary | `#0EA5E9` |
+| Deep Slate | `#1E293B` |
+| Background | `#F1F5F9` |
+| Highlight | `#38BDF8` |
+| White | `#FFFFFF` |
+| Muted | `#64748B` |
+
+Status:
+
+- Hijau: berhasil, disetujui, aktif.
+- Amber: menunggu, membutuhkan perhatian.
+- Merah: ditolak, gagal, kritis.
+- Biru: informasi dan proses.
+- Abu-abu: arsip, nonaktif, atau belum tersedia.
+
+Jangan menggunakan warna status secara berlebihan.
+
+## 3.3 Glassmorphism
+
+Gunakan:
+
+- Frosted glass cards.
+- Translucent surfaces.
+- Soft backdrop blur.
+- Subtle borders.
+- Ambient lighting.
+- Layered backgrounds.
+- Soft shadows.
+- Refined rounded corners.
+- Clean typography.
+- Subtle gradient accents.
+
+Glassmorphism hanya digunakan pada elemen yang tepat.
+
+Jangan membuat semua panel transparan sehingga teks sulit dibaca.
+
+Pastikan kontras teks memenuhi standar aksesibilitas yang layak.
+
+## 3.4 Struktur dashboard
+
+Gunakan:
+
+- Sidebar kiri yang dapat diciutkan.
+- Header atas.
+- Breadcrumb.
+- Global search.
+- Notification center.
+- Profile menu.
+- Content area.
+- Responsive card layout.
+- Contextual action buttons.
+
+Sidebar harus dikelompokkan berdasarkan fungsi, bukan hanya kumpulan menu.
+
+Contoh kelompok:
+
+1. Ringkasan.
+2. Organisasi.
+3. Operasional.
+4. Pelaporan.
+5. Dokumen.
+6. Komunikasi.
+7. Monitoring.
+8. Pengaturan.
+
+Menu hanya muncul jika pengguna mempunyai izin terhadap modul tersebut.
+
+## 3.5 Responsivitas
+
+Wajib sempurna pada:
+
+- Desktop.
+- Laptop.
+- Tablet.
+- Smartphone.
+
+Pada mobile:
+- Sidebar berubah menjadi drawer.
+- Statistik menggunakan grid responsif.
+- Tabel berubah menjadi card list.
+- Formulir menggunakan layout satu kolom.
+- Tombol utama mudah dijangkau.
+- Modal menyesuaikan ukuran layar.
+- Navigasi tidak terpotong.
+- Peta tetap dapat digunakan.
+- Unggahan file nyaman dilakukan dari ponsel.
+
+Uji pada beberapa ukuran layar, bukan hanya satu resolusi.
+
+## 3.6 Komponen desain
+
+Bangun design system yang konsisten:
+
+- Buttons.
+- Inputs.
+- Selects.
+- Dropdowns.
+- Cards.
+- Tables.
+- Status badges.
+- Tabs.
+- Modal.
+- Drawer.
+- Toast notifications.
+- Tooltips.
+- Pagination.
+- Date picker.
+- File uploader.
+- Search.
+- Filters.
+- Breadcrumb.
+- Empty states.
+- Loading skeletons.
+- Error panels.
+- Confirmation dialogs.
+
+Gunakan ikon Lucide yang relevan dan konsisten.
+
+Jangan menggunakan emoji sebagai pengganti ikon antarmuka utama.
+
+## 3.7 Interaksi
+
+Tambahkan interaksi yang membantu:
+
+- Hover state.
+- Active state.
+- Focus state.
+- Keyboard navigation.
+- Smooth transitions.
+- Loading indicators.
+- Progress indicators.
+- Drag-and-drop file upload.
+- Contextual action menus.
+- Confirmation dialogs.
+
+Hindari animasi berlebihan.
+
+---
+
+# BAGIAN 4 — SISTEM ROLE DAN KEWENANGAN
+
+Sistem wajib menggunakan Role-Based Access Control (RBAC) dengan permission granular.
+
+Jabatan organisasi dan izin sistem harus dipisahkan.
+
+Seseorang dapat memiliki lebih dari satu penugasan jika memang disetujui, tetapi hak akses tidak boleh otomatis bertambah hanya karena memiliki nama jabatan tertentu.
+
+## 4.1 Role utama
+
+### 1. Super Admin
+
+Pemegang akses tertinggi sistem.
+
+Kewenangan:
+- Akses seluruh modul.
+- Mengelola seluruh wilayah.
+- Mengelola semua akun.
+- Mengelola role dan permission.
+- Mengelola kebijakan sistem.
+- Mengelola konfigurasi.
+- Mengelola integrasi.
+- Mengelola backup dan restore.
+- Mengelola arsip.
+- Melihat audit log.
+- Menyetujui tindakan administratif darurat.
+- Membuat akun secara langsung.
+- Mengelola seluruh data organisasi.
+
+Setiap tindakan sensitif tetap harus tercatat dalam audit log.
+
+### 2. Wakil Super Admin
+
+Mendampingi Super Admin.
+
+Kewenangan diberikan berdasarkan delegasi yang ditentukan.
+
+Dapat memperoleh akses luas, tetapi tidak otomatis memiliki semua hak Super Admin.
+
+### 3. Penanggung Jawab Organisasi
+
+Memantau tata kelola organisasi.
+
+Memiliki akses sesuai bidang pengawasan yang ditentukan.
+
+Dapat melihat laporan, perkembangan wilayah, aktivitas organisasi, dan proses yang membutuhkan perhatian.
+
+Tidak otomatis memiliki hak mengubah semua data.
+
+### 4. Pengurus Nasional
+
+Mengelola kegiatan organisasi nasional berdasarkan bidang masing-masing.
+
+Contoh:
+- Kebudayaan.
+- Pendidikan.
+- Hubungan dan Kemitraan.
+- Program dan Operasional.
+- Administrasi dan Pengembangan Organisasi.
+- Bidang lain yang ditetapkan.
+
+Dapat memberikan persetujuan akhir proposal sesuai bidang dan delegasi kewenangannya.
+
+### 5. Sekretariat Nasional
+
+Mengelola:
+- Administrasi.
+- Dokumen.
+- Data personel.
+- Pengarsipan.
+- Surat.
+- Rekapitulasi.
+- Dukungan operasional.
+- Pengelolaan permintaan administrasi.
+
+Tidak otomatis memiliki hak Super Admin.
+
+### 6. Koordinator Wilayah
+
+Mengelola wilayah provinsi yang ditugaskan.
+
+Kewenangan:
+- Mengelola data Duta di wilayahnya sesuai izin.
+- Memantau kegiatan.
+- Memeriksa LKL.
+- Mengirim laporan bulanan.
+- Mengirim laporan akhir wilayah.
+- Mengajukan permintaan akun Duta.
+- Mengelola tugas wilayah.
+- Mengelola agenda wilayah.
+- Menyampaikan kebutuhan pembinaan.
+- Melakukan serah terima jabatan.
+
+Tidak otomatis memiliki akses ke wilayah lain.
+
+### 7. Duta
+
+Memiliki akses terbatas untuk akun sendiri.
+
+Dapat:
+- Melihat profil sendiri.
+- Melihat status penetapan.
+- Melihat angkatan.
+- Melihat tugas sendiri.
+- Mengajukan proposal.
+- Mengunggah PDF proposal.
+- Mengisi LKL.
+- Mengunggah PDF LKL.
+- Mengunggah foto dokumentasi.
+- Melihat status pengajuan sendiri.
+- Melihat dokumen pribadi yang diizinkan.
+- Melihat notifikasi.
+- Melihat evaluasi pribadi sesuai kebijakan.
+
+Tidak dapat:
+- Membuka akun Duta lain.
+- Melihat data pribadi Duta lain.
+- Mengubah jabatan orang lain.
+- Mengatur permission.
+- Mengakses dashboard nasional.
+- Mengakses dokumen rahasia.
+
+### 8. Alumni
+
+Akses arsip pribadi setelah masa jabatan berakhir.
+
+Tidak memiliki akses operasional aktif.
+
+## 4.2 Permission Manager
+
+Buat sistem permission granular.
+
+Contoh izin:
+
+- view.
+- create.
+- edit.
+- delete.
+- approve.
+- reject.
+- review.
+- download.
+- export.
+- assign.
+- manage.
+- publish.
+- archive.
+- restore.
+- configure.
+
+Setiap modul memiliki izin tersendiri.
+
+Permission harus diverifikasi di backend pada setiap operasi.
+
+Jangan mengandalkan penyembunyian menu frontend sebagai sistem keamanan.
+
+## 4.3 Delegasi kewenangan
+
+Super Admin dapat memberikan delegasi kepada pihak tertentu.
+
+Setiap delegasi harus memiliki:
+
+- Penerima delegasi.
+- Jenis kewenangan.
+- Modul terkait.
+- Batas wilayah jika diperlukan.
+- Tanggal mulai.
+- Tanggal berakhir.
+- Alasan.
+- Pemberi delegasi.
+- Status.
+- Riwayat perubahan.
+
+Delegasi yang berakhir otomatis tidak lagi dapat digunakan.
+
+---
+
+# BAGIAN 5 — AUTENTIKASI DAN PENGELOLAAN AKUN
+
+## 5.1 Login
+
+Gunakan login:
+
+- Email.
+- Password.
+
+Fitur:
+- Login.
+- Logout.
+- Lupa password.
+- Reset password.
+- Verifikasi email jika diperlukan.
+- Remember session secara aman.
+- Deteksi sesi aktif.
+- Riwayat login.
+- Notifikasi login baru.
+- Pengelolaan perangkat.
+- Logout seluruh perangkat.
+
+Jika sesi masih aktif dan valid, pengguna dapat melanjutkan tanpa login ulang.
+
+Jika sesi berakhir, arahkan ke login dan pertahankan tujuan halaman secara aman untuk setelah login.
+
+## 5.2 Pembuatan akun Duta
+
+Tidak ada pendaftaran publik.
+
+Alur:
+
+1. Koordinator Wilayah mengajukan permintaan pembuatan akun Duta.
+2. Formulir data awal diisi.
+3. Dokumen pendukung diunggah.
+4. Sistem membuat nomor referensi permintaan.
+5. Pihak nasional yang berwenang memeriksa.
+6. Permintaan disetujui atau ditolak dengan alasan.
+7. Setelah disetujui, sistem mengirim undangan akun.
+8. Duta membuat password sendiri.
+9. Akun aktif sesuai penetapan dan masa tugas.
+
+Super Admin dapat membuat akun secara langsung.
+
+Pemisahkan status akun dengan status keanggotaan dan status penetapan.
+
+Gunakan tautan undangan satu kali pakai yang memiliki masa kedaluwarsa.
+
+Jangan pernah menggunakan password bersama atau password bawaan yang sama untuk semua akun.
+
+## 5.3 Pengelolaan akun
+
+Sediakan:
+- Aktivasi akun.
+- Penonaktifan.
+- Penguncian sementara.
+- Pemulihan akun.
+- Perubahan email dengan verifikasi.
+- Reset password.
+- Riwayat akses.
+- Riwayat perubahan role.
+- Riwayat penugasan.
+- Penutupan akun.
+
+---
+
+# BAGIAN 6 — DATABASE DAN PROFIL PERSONEL DPBI
+
+Database merupakan fondasi utama aplikasi.
+
+Gunakan satu data induk personel agar satu orang tidak perlu dibuat ulang ketika berpindah batch atau jabatan.
+
+Setiap personel memiliki internal ID permanen.
+
+Riwayat keanggotaan, jabatan, angkatan, dan wilayah disimpan secara terpisah sebagai histori.
+
+## 6.1 Struktur profil Duta
+
+Buat profil Duta yang lengkap, terstruktur, dan mudah dikelola.
+
+### A. Identitas pribadi
+
+- Nama lengkap.
+- Nama panggilan.
+- Tempat lahir.
+- Tanggal lahir.
+- Jenis kelamin jika memang diperlukan untuk administrasi.
+- Foto profil resmi.
+- Email.
+- Nomor telepon.
+- Kontak alternatif bila diperlukan.
+
+### B. Alamat domisili
+
+- Provinsi.
+- Kabupaten/Kota.
+- Kecamatan.
+- Desa/Kelurahan.
+- Kode pos.
+- Alamat lengkap.
+- Keterangan alamat tambahan jika diperlukan.
+
+Gunakan data referensi wilayah administratif yang terstandar agar tidak terjadi perbedaan penulisan nama wilayah.
+
+Jangan menjadikan alamat lengkap dapat dilihat semua pengguna.
+
+Alamat rinci hanya dapat diakses oleh petugas yang berwenang dan memang membutuhkannya.
+
+### C. Identitas pendidikan
+
+- Nama sekolah.
+- Jenjang pendidikan.
+- Kelas.
+- Jurusan jika relevan.
+- NPSN sekolah jika tersedia.
+- NISN jika diperlukan dan diizinkan.
+- Tahun masuk.
+- Tahun perkiraan lulus.
+- Alamat sekolah.
+- Kabupaten/Kota sekolah.
+- Provinsi sekolah.
+
+Pisahkan alamat domisili dari alamat sekolah.
+
+### D. Dokumen identitas
+
+Sediakan unggahan:
+- Pas foto resmi.
+- Kartu pelajar.
+- Bukti status peserta didik.
+- Surat rekomendasi sekolah.
+- Surat izin orang tua/wali.
+- Surat pernyataan kesediaan.
+- Dokumen pendukung lainnya sesuai kebutuhan.
+
+Format:
+- PDF untuk dokumen.
+- JPG, JPEG, PNG, atau WebP untuk foto.
+- Batas ukuran yang dapat dikonfigurasi.
+- Validasi tipe file.
+- Preview.
+- Status verifikasi.
+- Riwayat penggantian dokumen.
+
+Jangan meminta NIK, KTP, atau data sensitif tambahan jika tidak memiliki kebutuhan dan dasar pemrosesan yang jelas.
+
+### E. Profil organisasi
+
+- Nomor anggota.
+- Nomor referensi personel.
+- Angkatan.
+- Provinsi penugasan.
+- Jabatan.
+- Bidang.
+- Tanggal penetapan.
+- Tanggal mulai bertugas.
+- Tanggal akhir masa jabatan.
+- Status personel.
+- Status akun.
+- Riwayat penugasan.
+- Riwayat penghargaan.
+- Riwayat evaluasi.
+- Dokumen SK.
+- Riwayat sertifikat.
+
+### F. Informasi tambahan
+
+- Minat budaya.
+- Bidang kegiatan yang diminati.
+- Pengalaman organisasi.
+- Pengalaman kegiatan.
+- Prestasi yang relevan.
+- Keahlian.
+- Portofolio jika diperlukan.
+
+Informasi tambahan bersifat opsional.
+
+### G. Kontak orang tua/wali
+
+Karena banyak peserta merupakan pelajar di bawah 18 tahun, sediakan data kontak orang tua/wali apabila diperlukan untuk administrasi dan keselamatan kegiatan.
+
+Simpan dengan akses terbatas.
+
+Jangan menampilkan informasi kontak orang tua/wali kepada seluruh pengguna.
+
+## 6.2 Verifikasi profil
+
+Setiap profil memiliki status:
+
+- Belum lengkap.
+- Menunggu verifikasi.
+- Terverifikasi.
+- Perlu perbaikan.
+- Tidak valid.
+- Diarsipkan.
+
+Petugas dapat memberikan catatan verifikasi.
+
+Sistem menampilkan daftar kelengkapan profil.
+
+Jangan mengaktifkan status terverifikasi jika dokumen wajib belum diperiksa.
+
+## 6.3 Perlindungan data
+
+Data profil pelajar termasuk data pribadi yang harus dilindungi.
+
+Terapkan:
+- Data minimization.
+- Purpose limitation.
+- Role-based access.
+- Masking data sensitif.
+- Enkripsi data tertentu.
+- Audit akses dokumen.
+- Retensi data.
+- Mekanisme koreksi.
+- Mekanisme penghapusan sesuai kebijakan dan ketentuan yang berlaku.
+
+Jangan pernah menampilkan kartu pelajar, alamat lengkap, NISN, kontak wali, atau dokumen identitas pada dashboard publik.
+
+---
+
+# BAGIAN 7 — MANAJEMEN ORGANISASI DAN WILAYAH
+
+## 7.1 Organisasi nasional
+
+Sediakan pengelolaan:
+
+- Struktur nasional.
+- Jabatan.
+- Bidang.
+- Pengurus.
+- Masa jabatan.
+- Surat keputusan.
+- Riwayat perubahan.
+- Penanggung jawab.
+- Delegasi.
+- Dokumen pendukung.
+
+Struktur organisasi harus dapat diperbarui tanpa mengubah kode aplikasi.
+
+Namun, jangan membuat role baru otomatis memiliki akses luas. Setiap role tetap harus memiliki permission yang ditentukan.
+
+## 7.2 Manajemen provinsi
+
+Sistem harus mendukung 38 provinsi Indonesia dengan data wilayah yang dapat diperbarui.
+
+Setiap provinsi memiliki:
+
+- Kode wilayah.
+- Nama provinsi.
+- Status perwakilan.
+- Koordinator.
+- Wakil atau anggota tim wilayah jika ditetapkan.
+- Jumlah Duta aktif.
+- Jumlah Duta alumni.
+- Jumlah kegiatan.
+- Jumlah proposal.
+- Jumlah LKL.
+- Laporan bulanan.
+- Laporan akhir.
+- Catatan pembinaan.
+- Riwayat pergantian Koordinator.
+
+Status wilayah:
+
+- Aktif.
+- Dalam Pengembangan.
+- Dalam Pembinaan.
+- Belum Terbentuk.
+- Tidak Aktif.
+
+## 7.3 Peta Indonesia interaktif
+
+Buat peta Indonesia yang profesional.
+
+Referensi awal:
+- Dataset peta Indonesia yang dapat diverifikasi.
+- Repository peta yang diberikan pengguna.
+- Sumber geospasial resmi atau sumber terbuka yang lisensinya sesuai.
+
+Jangan menganggap dataset tertentu otomatis akurat.
+
+Validasi:
+- Jumlah provinsi.
+- Batas administratif.
+- Nama provinsi.
+- Kesesuaian data.
+- Lisensi.
+- Tahun pembaruan.
+
+Gunakan GeoJSON atau format lain yang sesuai sebagai data internal, bukan sebagai teks teknis untuk pengguna.
+
+Interaksi peta:
+- Klik provinsi.
+- Tampilkan status wilayah.
+- Tampilkan Koordinator.
+- Tampilkan jumlah Duta aktif.
+- Tampilkan kegiatan.
+- Tampilkan proposal.
+- Tampilkan LKL.
+- Tampilkan laporan.
+- Tampilkan catatan pembinaan.
+
+Warna peta mengikuti status wilayah.
+
+Detail peta dibatasi menurut permission.
+
+Jangan tampilkan peta internal yang memuat data personel sensitif pada halaman publik.
+
+## 7.4 Pengelolaan pergantian Koordinator
+
+Buat Handover Center.
+
+Fitur:
+- Permintaan pergantian.
+- Penetapan pengganti.
+- Daftar personel wilayah.
+- Daftar tugas aktif.
+- Daftar proposal.
+- Daftar laporan.
+- Dokumen wilayah.
+- Arsip.
+- Pengalihan tanggung jawab.
+- Berita acara serah terima.
+- Persetujuan pihak nasional.
+- Riwayat pergantian.
+
+Akses Koordinator lama dicabut atau disesuaikan setelah proses serah terima disetujui.
+
+---
+
+# BAGIAN 8 — BATCH DAN SIKLUS KEANGGOTAAN
+
+DPBI menggunakan periode masa tugas yang dapat dikonfigurasi.
+
+Periode program yang digunakan saat ini adalah empat bulan, tetapi jangan mengunci durasi ini secara permanen di kode.
+
+Sistem harus mendukung:
+- Pembuatan batch.
+- Nama batch.
+- Nomor batch.
+- Tanggal pembukaan.
+- Tanggal penutupan.
+- Tanggal pembekalan.
+- Masa tugas.
+- Penempatan personel.
+- Status batch.
+- Penutupan.
+- Evaluasi.
+- Pengarsipan.
+
+Setiap batch mempunyai data historis sendiri.
+
+Jangan menimpa data batch sebelumnya ketika batch baru dibuat.
+
+Status batch:
+- Perencanaan.
+- Pendaftaran.
+- Seleksi.
+- Pembekalan.
+- Aktif.
+- Evaluasi.
+- Selesai.
+- Diarsipkan.
+
+Buat pengingat otomatis untuk:
+- Awal masa tugas.
+- Pembekalan.
+- Tenggat kegiatan.
+- Tenggat laporan.
+- Akhir masa tugas.
+- Evaluasi akhir.
+- Periode akses alumni.
+
+---
+
+# BAGIAN 9 — NATIONAL COMMAND CENTER
+
+Buat halaman khusus untuk Super Admin dan pihak nasional yang memiliki izin.
+
+Halaman ini merupakan pusat kendali seluruh organisasi.
+
+Informasi yang dapat ditampilkan:
+
+- Jumlah personel aktif nasional.
+- Jumlah Koordinator.
+- Jumlah Duta aktif.
+- Jumlah Alumni.
+- Persebaran personel per provinsi.
+- Status perwakilan.
+- Proposal menunggu keputusan.
+- LKL menunggu pemeriksaan.
+- Laporan bulanan belum masuk.
+- Tugas terlambat.
+- Kegiatan yang membutuhkan perhatian.
+- Pengaduan yang menunggu tindak lanjut.
+- Status penyimpanan.
+- Status backup.
+- Perkembangan batch.
+- Aktivitas organisasi terbaru.
+
+Tambahkan panel:
+
+**Priority Attention Center**
+
+Panel ini mengumpulkan hal-hal yang benar-benar membutuhkan tindakan.
+
+Contoh:
+- Proposal menunggu keputusan.
+- LKL perlu revisi.
+- Wilayah belum mengirim laporan.
+- Koordinator belum menyelesaikan tugas.
+- Kegiatan belum memenuhi persyaratan keselamatan.
+- Pengaduan baru.
+- Backup gagal.
+- Kapasitas penyimpanan melewati ambang batas.
+- Masa batch hampir berakhir.
+
+Setiap item harus mengarah ke halaman tindakan yang relevan.
+
+Jangan menampilkan isi pengaduan atau insiden sensitif pada ringkasan umum.
+
+---
+
+# BAGIAN 10 — DASHBOARD BERDASARKAN ROLE
+
+Dashboard tidak boleh sama untuk semua orang.
+
+## 10.1 Dashboard Super Admin
+
+- National Command Center.
+- Statistik seluruh organisasi.
+- Peta Indonesia.
+- Aktivitas nasional.
+- Persetujuan yang membutuhkan tindakan.
+- Pengelolaan akun.
+- Status sistem.
+- Storage Control.
+- Audit log.
+- Backup status.
+- Quick Actions.
+
+## 10.2 Dashboard Wakil Super Admin
+
+Menampilkan:
+- Ringkasan organisasi.
+- Tugas delegasi.
+- Persetujuan yang diberikan.
+- Monitoring wilayah.
+- Perkembangan program.
+- Aktivitas nasional.
+
+## 10.3 Dashboard Penanggung Jawab Organisasi
+
+Menampilkan:
+- Ringkasan pengawasan.
+- Perkembangan organisasi.
+- Status wilayah.
+- Laporan evaluasi.
+- Hal yang membutuhkan perhatian.
+- Agenda pengawasan.
+
+## 10.4 Dashboard Pengurus Nasional
+
+Menampilkan:
+- Tugas bidang.
+- Proposal yang harus diputuskan.
+- Laporan terkait bidang.
+- Agenda nasional.
+- Aktivitas.
+- Rekap program.
+
+## 10.5 Dashboard Sekretariat Nasional
+
+Menampilkan:
+- Permintaan administrasi.
+- Dokumen.
+- Data personel.
+- Permintaan akun.
+- Pengarsipan.
+- Surat dan SK.
+- Laporan administratif.
+
+## 10.6 Dashboard Koordinator Wilayah
+
+Menampilkan:
+- Statistik provinsi.
+- Jumlah Duta.
+- Profil yang perlu diverifikasi.
+- Proposal wilayah.
+- LKL yang perlu diperiksa.
+- Laporan bulanan.
+- Tugas wilayah.
+- Agenda.
+- Pengumuman nasional.
+- Catatan pembinaan.
+
+## 10.7 Dashboard Duta
+
+Menampilkan:
+- Profil pribadi.
+- Status penetapan.
+- Angkatan.
+- Tugas pribadi.
+- Proposal pribadi.
+- LKL pribadi.
+- Status laporan.
+- Dokumen pribadi.
+- Pengumuman.
+- Notifikasi.
+- Kalender.
+- Evaluasi pribadi sesuai kebijakan.
+
+Jangan menampilkan data Duta lain.
+
+## 10.8 Dashboard Alumni
+
+Menampilkan:
+- Arsip pribadi.
+- Dokumen penetapan.
+- Sertifikat.
+- Riwayat kegiatan.
+- Rekap laporan pribadi.
+- Informasi batas waktu akses.
+- Tombol ekspor data pribadi.
+
+---
+
+# BAGIAN 11 — WIDGET WAJIB DASHBOARD
+
+## 11.1 Statistik ringkas
+
+- Total personel aktif.
+- Duta aktif per provinsi.
+- Koordinator aktif.
+- Proposal menunggu persetujuan.
+- LKL menunggu pemeriksaan.
+- Tugas melewati tenggat.
+- Laporan bulanan terlambat.
+- Dokumen terbaru.
+- Notifikasi belum dibaca.
+- Status storage.
+
+Setiap angka dapat diklik dan membuka daftar yang sesuai.
+
+## 11.2 Attention Center
+
+Menampilkan:
+- Proposal perlu keputusan.
+- LKL perlu revisi.
+- Laporan belum masuk.
+- Tugas terlambat.
+- Batch hampir berakhir.
+- Provinsi membutuhkan pembinaan.
+- Pengaduan baru untuk pihak berwenang.
+- Backup gagal.
+- Storage melewati 85%.
+
+## 11.3 Grafik tren
+
+- Personel per batch.
+- Aktivitas per provinsi.
+- Proposal masuk vs disetujui.
+- LKL masuk vs diterima.
+- Penyelesaian tugas per bulan.
+- Status wilayah.
+
+Grafik harus menggunakan query database nyata.
+
+## 11.4 Aktivitas terbaru
+
+- Personel baru ditetapkan.
+- Proposal disetujui.
+- LKL dikirim.
+- Dokumen diterbitkan.
+- Perubahan jabatan.
+- Serah terima.
+- Pengumuman.
+- Penugasan.
+
+## 11.5 Kalender
+
+- Rapat nasional.
+- Pembekalan.
+- Tenggat proposal.
+- Tenggat LKL.
+- Penutupan batch.
+- Evaluasi.
+- Kegiatan wilayah.
+- Agenda organisasi.
+
+## 11.6 Quick Actions
+
+Sesuai role:
+- Buat tugas.
+- Ajukan proposal.
+- Kirim LKL.
+- Buat pengumuman.
+- Upload dokumen.
+- Tambah personel.
+- Ekspor rekap.
+- Buat laporan.
+
+## 11.7 Global Search
+
+Cari:
+- Personel.
+- Provinsi.
+- Batch.
+- Nomor proposal.
+- Nomor LKL.
+- Dokumen.
+- Tugas.
+- Nomor SK.
+- Kegiatan.
+
+Hasil pencarian wajib mengikuti permission.
+
+---
+
+# BAGIAN 12 — MODUL MANAJEMEN PROPOSAL
+
+Proposal harus menggunakan mekanisme **formulir terstruktur + unggahan PDF sebagai dokumen utama**.
+
+Jangan memaksa pengguna menulis seluruh proposal dalam editor web.
+
+## 12.1 Formulir pengajuan
+
+Informasi:
+- Judul kegiatan.
+- Pengaju.
+- Wilayah.
+- Angkatan.
+- Bidang kegiatan.
+- Kategori.
+- Tujuan.
+- Sasaran peserta.
+- Tanggal kegiatan.
+- Waktu kegiatan.
+- Lokasi.
+- Penanggung jawab.
+- Estimasi peserta.
+- Jenis kegiatan.
+- Kebutuhan persetujuan.
+- Informasi pendukung.
+
+## 12.2 Unggahan
+
+- PDF proposal.
+- Dokumen pendukung jika diperlukan.
+- Surat izin.
+- Lampiran.
+- Dokumen kerja sama.
+
+Validasi format dan ukuran.
+
+## 12.3 Alur persetujuan
+
+1. Duta atau Koordinator mengajukan proposal.
+2. Sistem membuat nomor referensi.
+3. Proposal diperiksa kelengkapannya.
+4. Koordinator memeriksa aspek wilayah jika diperlukan.
+5. Pengurus Nasional sesuai bidang meninjau.
+6. Pihak berwenang memberikan keputusan akhir sesuai matriks delegasi.
+7. Sistem mengirim notifikasi.
+8. Jika perlu revisi, pengaju mendapatkan catatan.
+9. Pengaju mengunggah versi baru.
+10. Semua versi lama tetap tersimpan.
+
+Status:
+- Draft.
+- Diajukan.
+- Pemeriksaan administrasi.
+- Pemeriksaan wilayah.
+- Menunggu persetujuan nasional.
+- Perlu revisi.
+- Disetujui.
+- Ditolak.
+- Dibatalkan.
+- Diarsipkan.
+
+Setiap penolakan dan revisi wajib mempunyai alasan.
+
+## 12.4 Approval Matrix
+
+Buat matriks persetujuan yang dapat dikonfigurasi berdasarkan:
+
+- Bidang.
+- Kategori kegiatan.
+- Risiko.
+- Wilayah.
+- Kewenangan.
+- Jenis kerja sama.
+- Penggunaan identitas DPBI.
+- Kebutuhan izin eksternal.
+
+Jangan selalu mengirim seluruh proposal ke Super Admin.
+
+Persetujuan akhir dilakukan Pengurus Nasional yang berwenang sesuai bidang dan delegasi.
+
+Tindakan darurat oleh Super Admin harus memiliki alasan dan audit log.
+
+---
+
+# BAGIAN 13 — MODUL LAPORAN KEGIATAN LAPANGAN (LKL)
+
+LKL menggunakan:
+
+**Formulir digital + PDF LKL + foto dokumentasi.**
+
+## 13.1 Formulir LKL
+
+- Nama kegiatan.
+- Nomor proposal terkait jika ada.
+- Pengaju.
+- Provinsi.
+- Kabupaten/Kota.
+- Kecamatan.
+- Desa/Kelurahan.
+- Nama lokasi.
+- Alamat tempat kegiatan.
+- Tanggal kegiatan.
+- Waktu mulai.
+- Waktu selesai.
+- Kategori kegiatan.
+- Jenis kegiatan.
+- Penanggung jawab.
+- Jumlah peserta.
+- Ringkasan kegiatan.
+- Hasil kegiatan.
+- Kendala.
+- Tindak lanjut.
+- Status kegiatan daring/luring.
+
+## 13.2 Lokasi
+
+Untuk kegiatan luring:
+- Provinsi.
+- Kabupaten/Kota.
+- Kecamatan.
+- Desa/Kelurahan.
+- Alamat lokasi.
+- Nama tempat.
+- Koordinat jika diizinkan.
+- Tautan peta jika tersedia.
+
+Untuk kegiatan daring:
+- Platform.
+- Tautan kegiatan jika relevan.
+- Informasi peserta.
+- Waktu pelaksanaan.
+
+Jangan menganggap kegiatan daring memiliki lokasi fisik.
+
+## 13.3 Unggahan
+
+Wajib:
+- PDF LKL.
+- Foto dokumentasi.
+
+Opsional:
+- Surat izin.
+- Daftar hadir.
+- Materi.
+- Lampiran pendukung.
+
+Sediakan preview PDF dan foto.
+
+Kompres gambar dengan kualitas yang tetap layak.
+
+Jangan mengubah isi dokumen PDF secara otomatis.
+
+## 13.4 Review LKL
+
+Koordinator Wilayah dapat:
+- Melihat LKL wilayah.
+- Memeriksa kelengkapan.
+- Memberi komentar.
+- Meminta revisi.
+- Menerima laporan.
+- Meneruskan laporan jika diperlukan.
+
+Pengurus Nasional dapat memantau sesuai izin.
+
+Status:
+- Draft.
+- Diajukan.
+- Menunggu pemeriksaan.
+- Perlu revisi.
+- Diterima.
+- Ditolak.
+- Diarsipkan.
+
+Setiap revisi mempunyai histori.
+
+LKL yang diterima terhubung dengan:
+- Kegiatan.
+- Proposal.
+- Personel.
+- Wilayah.
+- Batch.
+- Statistik.
+- Evaluasi.
+- Arsip.
+
+---
+
+# BAGIAN 14 — LAPORAN KOORDINATOR WILAYAH
+
+## 14.1 Laporan bulanan
+
+Koordinator mengirim laporan bulanan.
+
+Batas waktu standar dapat diatur, dengan rekomendasi tanggal 5 setiap bulan.
+
+Isi:
+- Identitas Koordinator.
+- Provinsi.
+- Bulan laporan.
+- Kondisi personel.
+- Kegiatan.
+- Rekap LKL.
+- Program berjalan.
+- Kendala.
+- Kebutuhan pembinaan.
+- Rencana tindak lanjut.
+- Dokumen pendukung.
+
+Sediakan formulir dan unggahan PDF laporan resmi.
+
+## 14.2 Laporan akhir wilayah
+
+Batas waktu standar dapat dikonfigurasi, dengan rekomendasi maksimal 7 × 24 jam setelah batch berakhir.
+
+Isi:
+- Rekap personel.
+- Status Duta.
+- Rekap kegiatan.
+- Rekap proposal.
+- Rekap LKL.
+- Evaluasi.
+- Permasalahan.
+- Rekomendasi.
+- Rencana tindak lanjut.
+- Serah terima.
+
+Sistem membuat pengingat dan rekap otomatis berdasarkan data yang tersedia.
+
+Jangan mengunci pengiriman laporan secara tidak dapat dipulihkan tanpa jalur pengecualian resmi.
+
+---
+
+# BAGIAN 15 — TASK MANAGEMENT CENTER
+
+Buat sistem tugas yang benar-benar membantu koordinasi organisasi.
+
+Fitur:
+- Buat tugas.
+- Subtask.
+- Prioritas.
+- Deadline.
+- Penanggung jawab.
+- Penerima tugas.
+- Wilayah.
+- Angkatan.
+- Checklist.
+- Komentar.
+- Lampiran.
+- Status.
+- Riwayat.
+- Pengingat.
+
+Tampilan:
+- List.
+- Kanban.
+- Calendar.
+
+Status:
+- Belum dimulai.
+- Dikerjakan.
+- Menunggu.
+- Perlu perhatian.
+- Selesai.
+- Dibatalkan.
+
+Tambahkan:
+- Task template.
+- Recurring task.
+- Bulk assignment.
+- Penugasan per provinsi.
+- Penugasan ke beberapa Duta.
+- Pengingat tenggat.
+- Eskalasi tugas terlambat.
+
+Setiap tugas terhubung dengan personel, wilayah, batch, dan kegiatan terkait.
+
+---
+
+# BAGIAN 16 — DIGITAL DOCUMENT CENTER
+
+Pusat dokumen harus menjadi repositori resmi organisasi.
+
+Kategori:
+- Surat keputusan.
+- Surat tugas.
+- Surat rekomendasi.
+- Sertifikat.
+- Proposal.
+- LKL.
+- Laporan.
+- SOP.
+- Pedoman.
+- Materi pembekalan.
+- Formulir.
+- Atribut.
+- Dokumen internal.
+- Arsip lainnya.
+
+Setiap dokumen mempunyai:
+- Nomor dokumen.
+- Judul.
+- Kategori.
+- Pemilik.
+- Penerbit.
+- Tanggal.
+- Status.
+- Versi.
+- Hak akses.
+- File.
+- Riwayat.
+- Keterangan.
+
+## 16.1 SOP Library
+
+Sediakan:
+- Dokumen berlaku.
+- Dokumen revisi.
+- Riwayat versi.
+- Tanggal berlaku.
+- Tanggal perubahan.
+- Pengunggah.
+- Persetujuan.
+
+Pengguna harus dapat mengetahui versi dokumen yang berlaku.
+
+## 16.2 Bulk Document Generator
+
+Fitur lanjutan yang sangat berguna:
+
+- Pilih banyak personel.
+- Pilih template surat.
+- Masukkan placeholder.
+- Generate dokumen massal.
+- Preview.
+- Verifikasi.
+- Unduh PDF satuan atau ZIP.
+
+Contoh placeholder:
+- `{{nama}}`
+- `{{provinsi}}`
+- `{{angkatan}}`
+- `{{jabatan}}`
+- `{{nomor_surat}}`
+- `{{tanggal}}`
+
+Pastikan data yang dimasukkan sesuai sumber database dan diperiksa sebelum penerbitan.
+
+## 16.3 Materi pembekalan
+
+Pengurus yang memiliki izin dapat mengunggah:
+- PDF materi.
+- Panduan.
+- Modul.
+- Template.
+- Video atau tautan pembelajaran jika tersedia.
+
+Duta dapat mengakses materi sesuai angkatan dan hak aksesnya.
+
+Sediakan pencarian dan pengelompokan materi.
+
+---
+
+# BAGIAN 17 — NOMOR REFERENSI OTOMATIS
+
+Setiap objek penting mempunyai nomor referensi yang unik.
+
+Contoh:
+
+- `DPBI/PROP/2026/0001`
+- `DPBI/LKL/2026/0001`
+- `DPBI/LKW/2026/0001`
+- `DPBI/AKUN/2026/0001`
+- `DPBI/DOC/2026/0001`
+- `DPBI/TGS/2026/0001`
+- `DPBI/ADU/2026/0001`
+- `DPBI/INS/2026/0001`
+
+Nomor harus:
+- Otomatis.
+- Unik.
+- Tidak berubah setelah diterbitkan.
+- Tidak digunakan kembali.
+- Memiliki sequence database yang aman.
+- Tetap unik saat banyak pengguna membuat data bersamaan.
+
+Revisi mempertahankan nomor induk dengan penanda versi.
+
+Jangan membuat nomor berdasarkan timestamp saja atau angka acak yang tidak dijamin unik.
+
+---
+
+# BAGIAN 18 — KOMUNIKASI, PENGUMUMAN, DAN NOTIFIKASI
+
+## 18.1 Announcement Center
+
+Jenis:
+- Pengumuman nasional.
+- Pengumuman wilayah.
+- Pengumuman angkatan.
+- Pengumuman pribadi.
+- Pengumuman darurat.
+
+Fitur:
+- Judul.
+- Isi.
+- Lampiran.
+- Target penerima.
+- Jadwal publikasi.
+- Status.
+- Pengirim.
+- Riwayat.
+
+## 18.2 Notification Center
+
+Notifikasi untuk:
+- Tugas baru.
+- Perubahan tugas.
+- Proposal.
+- Revisi.
+- Persetujuan.
+- LKL.
+- Laporan.
+- Pengumuman.
+- Pergantian jabatan.
+- Dokumen.
+- Tenggat.
+- Akhir masa tugas.
+- Aktivitas akun.
+
+Fitur:
+- Tandai dibaca.
+- Tandai semua dibaca.
+- Filter.
+- Riwayat.
+- Tautan menuju objek terkait.
+
+Sediakan notifikasi email jika SMTP tersedia.
+
+Email bukan ketergantungan wajib untuk fungsi inti.
+
+Jangan mengirim informasi sensitif secara lengkap melalui email.
+
+## 18.3 Komentar dan diskusi
+
+Komentar tersedia pada:
+- Tugas.
+- Proposal.
+- LKL.
+- Laporan.
+- Proses administrasi.
+
+Sediakan mention jika tidak membebani sistem.
+
+Setiap komentar memiliki pengirim dan waktu.
+
+---
+
+# BAGIAN 19 — ORGANIZATIONAL CALENDAR
+
+Buat kalender terpadu.
+
+Jenis agenda:
+- Rapat.
+- Pembekalan.
+- Kegiatan nasional.
+- Kegiatan wilayah.
+- Tenggat proposal.
+- Tenggat LKL.
+- Laporan bulanan.
+- Evaluasi.
+- Penutupan batch.
+- Pergantian jabatan.
+
+Tampilan:
+- Bulanan.
+- Mingguan.
+- Harian.
+- Daftar agenda.
+
+Pengguna hanya melihat agenda sesuai hak akses.
+
+Setiap agenda dapat terhubung ke:
+- Tugas.
+- Proposal.
+- Kegiatan.
+- Batch.
+- Wilayah.
+- Pengumuman.
+
+---
+
+# BAGIAN 20 — SAFEGUARDING DAN PERLINDUNGAN PESERTA
+
+Karena sebagian peserta DPBI adalah pelajar dan dapat berusia di bawah 18 tahun, buat sistem perlindungan yang serius.
+
+## 20.1 Risk Assessment Center
+
+Sebelum kegiatan tertentu, pengaju wajib mengisi penilaian risiko.
+
+Aspek:
+- Jenis kegiatan.
+- Lokasi.
+- Peserta.
+- Kondisi lingkungan.
+- Pendamping.
+- Perizinan.
+- Kebutuhan transportasi.
+- Rencana darurat.
+- Kontak darurat.
+- Potensi risiko.
+- Langkah pencegahan.
+
+Sebagai kebijakan internal DPBI, gunakan standar awal minimal dua pendamping dewasa untuk kegiatan tertentu yang melibatkan peserta di bawah 18 tahun, dengan penyesuaian berdasarkan risiko dan kebijakan organisasi.
+
+Jelaskan bahwa angka tersebut merupakan kebijakan organisasi, bukan klaim bahwa satu aturan universal berlaku untuk semua kegiatan.
+
+## 20.2 Persetujuan terpisah
+
+Pisahkan:
+- Persetujuan ikut kegiatan.
+- Persetujuan orang tua/wali jika diperlukan.
+- Persetujuan dokumentasi.
+- Persetujuan publikasi foto/video.
+
+Jangan menggabungkan persetujuan publikasi dengan persetujuan keikutsertaan.
+
+## 20.3 Incident Reporting
+
+Sediakan formulir insiden:
+
+- Nomor referensi.
+- Waktu.
+- Lokasi.
+- Pihak terkait.
+- Kronologi faktual.
+- Kategori.
+- Tingkat urgensi.
+- Bukti pendukung.
+- Tindakan awal.
+- Status.
+- Penerima eskalasi.
+
+Akses hanya diberikan kepada pihak yang berwenang.
+
+Isi laporan insiden tidak boleh muncul pada dashboard umum.
+
+## 20.4 Whistleblowing dan pengaduan
+
+Sediakan kanal pengaduan internal.
+
+Fitur:
+- Nomor pengaduan.
+- Identitas pelapor sesuai mekanisme yang dipilih.
+- Kategori.
+- Kronologi.
+- Lampiran.
+- Status.
+- Tindak lanjut.
+- Eskalasi.
+- Konflik kepentingan.
+- Audit akses.
+
+Jaga kerahasiaan pelapor.
+
+Jika penerima laporan memiliki konflik kepentingan, sistem harus memungkinkan pengalihan ke petugas lain.
+
+---
+
+# BAGIAN 21 — EVALUASI DAN MONITORING KINERJA
+
+Buat Performance Monitoring Center.
+
+Evaluasi Koordinator dan Duta menggunakan indikator yang relevan.
+
+Contoh indikator:
+- Penyelesaian tugas.
+- Ketepatan waktu laporan.
+- Kualitas laporan.
+- Pelaksanaan program.
+- Kepatuhan administrasi.
+- Partisipasi pembekalan.
+- Koordinasi.
+- Tindak lanjut evaluasi.
+
+Bobot harus dapat dikonfigurasi dan didokumentasikan.
+
+Jangan menilai seseorang hanya berdasarkan banyaknya kegiatan.
+
+Sediakan:
+- Form evaluasi.
+- Skor.
+- Catatan evaluator.
+- Riwayat.
+- Grafik perkembangan.
+- Rekomendasi pembinaan.
+- Status evaluasi.
+
+Hasil evaluasi hanya dapat dilihat oleh pihak yang berwenang dan individu terkait sesuai kebijakan.
+
+Hindari sistem penilaian otomatis yang memberikan keputusan disipliner tanpa pemeriksaan manusia.
+
+---
+
+# BAGIAN 22 — AKSES LOKASI KOORDINATOR WILAYAH
+
+Ini merupakan fitur khusus yang harus dirancang secara hati-hati.
+
+Tujuannya adalah memastikan tindakan penting Koordinator sesuai dengan penugasan wilayahnya.
+
+**Jangan mewajibkan pengecekan lokasi setiap kali login.**
+
+## 22.1 Kapan lokasi diperiksa?
+
+Lokasi hanya diminta ketika Koordinator melakukan tindakan tertentu, misalnya:
+
+- Mengirim laporan wilayah.
+- Memverifikasi kegiatan luring.
+- Mengajukan atau mengesahkan kegiatan tertentu.
+- Melakukan perubahan penting terhadap data wilayah.
+- Melakukan tindakan yang memerlukan verifikasi keberadaan.
+
+Membaca dashboard, melihat dokumen yang diizinkan, dan mengerjakan administrasi rutin tidak perlu selalu meminta lokasi.
+
+## 22.2 Mekanisme
+
+1. Pengguna memilih tindakan penting.
+2. Sistem menjelaskan alasan verifikasi.
+3. Pengguna memberikan izin lokasi melalui browser.
+4. Sistem mendapatkan koordinat dengan persetujuan pengguna.
+5. Sistem membandingkan lokasi dengan wilayah penugasan menggunakan data batas provinsi yang telah diverifikasi.
+6. Sistem memutuskan apakah tindakan dapat dilanjutkan atau membutuhkan pengecualian.
+
+## 22.3 Jika berada di luar provinsi
+
+Jangan langsung memblokir seluruh portal.
+
+Batasi hanya tindakan penting yang ditentukan.
+
+Sediakan permintaan pengecualian:
+- Alasan.
+- Bukti atau keterangan.
+- Masa berlaku yang diminta.
+- Persetujuan pihak nasional.
+
+Semua pengecualian dicatat.
+
+## 22.4 Privasi lokasi
+
+- Tidak melakukan background tracking.
+- Tidak mengumpulkan lokasi terus-menerus.
+- Tidak meminta lokasi tanpa alasan.
+- Tidak menyimpan lokasi lebih lama dari kebutuhan.
+- Batasi akses riwayat lokasi.
+- Jangan menganggap GPS sebagai bukti identitas atau domisili.
+- Jika GPS tidak tersedia, sediakan verifikasi manual.
+- Kegiatan daring harus menggunakan status daring, bukan lokasi fisik palsu.
+
+---
+
+# BAGIAN 23 — INTEGRASI DATA KEMENDIKDASMEN
+
+Saya menginginkan sistem dapat terhubung dengan data pendidikan Kemendikdasmen apabila memungkinkan.
+
+Namun, integrasi tidak boleh dilakukan dengan cara yang melanggar ketentuan akses data.
+
+## 23.1 Arsitektur integrasi
+
+Buat modul integrasi yang modular.
+
+Status awal:
+**Nonaktif sampai akses resmi dan izin tersedia.**
+
+## 23.2 Tahap integrasi
+
+1. Pelajari mekanisme resmi layanan data.
+2. Verifikasi persyaratan akses.
+3. Verifikasi kelayakan DPBI sebagai pemohon atau mitra.
+4. Periksa kebutuhan surat permohonan dan perjanjian kerja sama.
+5. Gunakan kredensial resmi jika diberikan.
+6. Implementasikan API sesuai dokumentasi resmi.
+7. Batasi data sesuai tujuan.
+8. Catat setiap proses akses.
+
+## 23.3 Fallback
+
+Jika akses resmi belum tersedia:
+
+- Gunakan pengisian data sekolah secara manual.
+- Gunakan NPSN untuk pencocokan identitas sekolah apabila sumber publik resmi tersedia dan penggunaannya diizinkan.
+- Sediakan pemeriksaan manual oleh sekretariat.
+- Jangan mengarang API.
+- Jangan melakukan scraping yang melanggar ketentuan.
+- Jangan melewati autentikasi atau pembatasan akses.
+
+Jangan mengambil data pribadi siswa secara massal.
+
+NISN hanya boleh diproses jika terdapat kebutuhan, dasar pemrosesan, kewenangan, dan perlindungan yang memadai.
+
+Integrasi pendidikan bukan syarat agar MVP dapat berjalan.
+
+---
+
+# BAGIAN 24 — ALUMNI DAN PENGARSIPAN
+
+Ketika masa jabatan berakhir, sistem mengubah status personel sesuai ketentuan.
+
+Status dapat berupa:
+- Menyelesaikan masa jabatan.
+- Belum memenuhi ketentuan.
+- Mengundurkan diri.
+- Diberhentikan.
+- Alumni.
+
+## 24.1 Masa akses Alumni
+
+Alumni memperoleh akses arsip selama 30 hari sejak tanggal berakhirnya masa jabatan.
+
+Fitur:
+- Melihat arsip pribadi.
+- Mengunduh dokumen yang diizinkan.
+- Mengunduh sertifikat.
+- Mengunduh riwayat kegiatan.
+- Mengekspor data pribadi.
+- Melihat pemberitahuan batas waktu.
+
+Pengingat:
+- Hari ke-7 sebelum penutupan.
+- Hari ke-3 sebelum penutupan.
+- Hari terakhir.
+
+Setelah 30 hari:
+- Akses login Alumni dinonaktifkan sesuai kebijakan.
+- Hak akses operasional dicabut.
+- Dokumen dan catatan organisasi tetap disimpan sesuai kebijakan retensi.
+- Data yang tidak lagi diperlukan ditinjau untuk penghapusan atau anonimisasi.
+- Super Admin dapat memberikan perpanjangan dengan alasan dan audit log.
+
+Jangan menghapus dokumen organisasi, LKL yang telah diterima, SK, audit log, dan bukti pertanggungjawaban hanya karena akun Alumni berakhir.
+
+---
+
+# BAGIAN 25 — AUTOMATION CENTER
+
+Buat pusat otomatisasi yang membantu administrasi.
+
+Fitur yang dapat diaktifkan secara bertahap:
+
+- Penomoran otomatis.
+- Pengingat deadline.
+- Pengingat laporan bulanan.
+- Pengingat masa jabatan.
+- Pengingat batch.
+- Notifikasi proposal.
+- Notifikasi LKL.
+- Pembaruan status.
+- Pengarsipan batch.
+- Generate PDF.
+- Pemeriksaan kelengkapan data.
+- Pengiriman email.
+- Pengingat alumni.
+
+Sediakan:
+- Pengaturan aktif/nonaktif.
+- Jadwal.
+- Riwayat eksekusi.
+- Status berhasil/gagal.
+- Log error.
+- Percobaan ulang yang aman.
+
+Gunakan idempotency untuk menghindari pengiriman notifikasi atau proses yang berulang akibat eksekusi cron.
+
+Jangan menjalankan otomatisasi yang mengubah data sensitif tanpa persetujuan manusia.
+
+---
+
+# BAGIAN 26 — GLOBAL SEARCH DAN BULK OPERATIONS
+
+## 26.1 Global Search
+
+Sediakan pencarian global dengan:
+- Nama.
+- Nomor referensi.
+- Provinsi.
+- Angkatan.
+- Proposal.
+- LKL.
+- Dokumen.
+- Tugas.
+- Kegiatan.
+
+Hasil pencarian harus mengikuti hak akses.
+
+Jangan menampilkan cuplikan data sensitif kepada pengguna yang tidak berwenang.
+
+## 26.2 Command Palette
+
+Fitur lanjutan untuk pengguna berwenang.
+
+Dapat dibuka melalui shortcut keyboard.
+
+Contoh:
+- Buka dashboard.
+- Cari personel.
+- Buat tugas.
+- Buka proposal.
+- Buka kalender.
+- Buka pengaturan.
+
+Command Palette tidak boleh menjalankan tindakan berisiko tanpa konfirmasi.
+
+## 26.3 Bulk Operations
+
+Sediakan:
+- Import personel.
+- Export personel.
+- Perubahan status massal.
+- Penugasan massal.
+- Pengumuman massal.
+- Pembuatan surat massal.
+- Pengarsipan massal.
+- Ekspor laporan massal.
+- Unduh ZIP dokumen.
+
+Alur setiap tindakan massal:
+
+Preview → Validasi → Konfirmasi → Eksekusi → Hasil → Laporan kegagalan.
+
+Jangan mengubah data massal secara langsung tanpa preview dan konfirmasi.
+
+## 26.4 Import Center
+
+Dukung:
+- CSV.
+- XLSX.
+
+Fitur:
+- Mapping kolom.
+- Preview.
+- Validasi.
+- Deteksi duplikat.
+- Laporan error.
+- Konfirmasi.
+- Hasil impor.
+
+Gunakan transaksi database untuk mencegah data setengah masuk.
+
+---
+
+# BAGIAN 27 — STORAGE CONTROL CENTER
+
+Hosting mempunyai kapasitas penyimpanan terbatas.
+
+Buat sistem pengelolaan storage yang efisien.
+
+## 27.1 Monitoring
+
+Tampilkan:
+- Kapasitas total.
+- Kapasitas terpakai.
+- Kapasitas tersisa.
+- Penggunaan database.
+- Penggunaan dokumen.
+- Penggunaan foto.
+- File terbesar.
+- Pertumbuhan penggunaan.
+- Penggunaan berdasarkan modul.
+
+## 27.2 Peringatan
+
+- 70%: informasi.
+- 85%: peringatan.
+- 95%: kritis.
+
+Kirim notifikasi kepada pihak berwenang.
+
+## 27.3 Optimasi berkas
+
+- Kompres foto.
+- Konversi gambar ke WebP jika sesuai.
+- Buat thumbnail.
+- Validasi MIME.
+- Batasi ukuran.
+- Deteksi duplikat menggunakan checksum.
+- Simpan nama file secara acak.
+- Gunakan private storage.
+- Jangan menyimpan file yang tidak diperlukan.
+
+PDF harus dipertahankan sebagai dokumen asli.
+
+Jangan mengompres ulang PDF dengan cara yang merusak kualitas atau tanda tangan digital.
+
+Sediakan kebijakan ukuran unggahan yang dapat diatur per kategori.
+
+## 27.4 Pembersihan
+
+Jangan menghapus file organisasi secara otomatis hanya karena storage hampir penuh.
+
+Sediakan:
+- Daftar file tidak terpakai.
+- File duplikat.
+- File sementara.
+- File yang dapat diarsipkan.
+- Preview sebelum penghapusan.
+- Konfirmasi.
+- Audit log.
+
+---
+
+# BAGIAN 28 — BACKUP DAN RESTORE
+
+Buat sistem backup.
+
+Backup meliputi:
+- Database.
+- Dokumen.
+- File unggahan.
+- Konfigurasi penting yang tidak mengandung secret.
+
+Fitur:
+- Backup manual.
+- Backup terjadwal melalui cron jika tersedia.
+- Riwayat backup.
+- Status.
+- Ukuran.
+- Tanggal.
+- Validasi integritas.
+- Restore dengan konfirmasi.
+- Panduan pemulihan.
+
+Simpan salinan backup di lokasi berbeda dari server utama apabila fasilitas dan kebijakan penyimpanan memungkinkan.
+
+Jangan menganggap backup pada server yang sama sudah cukup untuk menghadapi seluruh risiko kehilangan data.
+
+Jangan melakukan restore tanpa verifikasi dan konfirmasi.
+
+Lakukan simulasi pemulihan sebelum sistem digunakan untuk data organisasi sebenarnya.
+
+---
+
+# BAGIAN 29 — DATA QUALITY CENTER
+
+Buat modul pemeriksaan kualitas data.
+
+Deteksi:
+- Email ganda.
+- Personel ganda.
+- Personel tanpa wilayah.
+- Personel tanpa angkatan.
+- Profil belum lengkap.
+- Dokumen tanpa nomor.
+- Proposal tanpa pengaju.
+- LKL tanpa kegiatan.
+- Tugas tanpa penerima.
+- Akun tidak aktif.
+- Jabatan tanpa masa berlaku.
+- Data wilayah yang tidak konsisten.
+
+Tampilkan:
+- Jenis masalah.
+- Data terkait.
+- Tingkat prioritas.
+- Rekomendasi.
+- Tindakan perbaikan.
+
+Sistem hanya memberikan rekomendasi.
+
+Jangan mengubah atau menghapus data secara otomatis tanpa persetujuan pengguna berwenang.
+
+---
+
+# BAGIAN 30 — SYSTEM HEALTH MONITOR
+
+Buat panel kesehatan sistem.
+
+Pantau:
+- Database.
+- Koneksi aplikasi.
+- API jika tersedia.
+- Email.
+- Storage.
+- Backup.
+- Cron.
+- Error aplikasi.
+- Aktivitas login.
+- Status integrasi eksternal.
+
+Jangan menampilkan detail teknis sensitif kepada semua pengguna.
+
+Super Admin dapat melihat ringkasan dan detail yang diperlukan.
+
+Jika terjadi kegagalan, tampilkan status yang jelas dan catat ke log.
+
+---
+
+# BAGIAN 31 — AUDIT LOG DAN TIMELINE ORGANISASI
+
+Keduanya harus menjadi fitur berbeda.
+
+## 31.1 Audit Log
+
+Mencatat tindakan sensitif:
+- Login.
+- Logout.
+- Perubahan permission.
+- Pembuatan akun.
+- Penghapusan akun.
+- Perubahan jabatan.
+- Persetujuan.
+- Penolakan.
+- Unduhan dokumen sensitif.
+- Ekspor data.
+- Akses pengecualian lokasi.
+- Pengelolaan insiden.
+- Perubahan pengaturan.
+
+Setiap log mencakup:
+- Aktor.
+- Tindakan.
+- Objek.
+- Waktu.
+- Hasil.
+- Konteks minimum yang diperlukan.
+
+Log harus sulit dimanipulasi oleh pengguna biasa dan memiliki kebijakan retensi.
+
+Jangan mencatat password, token, atau isi data sensitif secara mentah.
+
+## 31.2 Organizational Activity Timeline
+
+Menampilkan aktivitas organisasi:
+- Penetapan personel.
+- Pengajuan proposal.
+- Persetujuan.
+- Pengiriman LKL.
+- Kegiatan.
+- Penerbitan dokumen.
+- Pergantian jabatan.
+- Serah terima.
+- Pengumuman.
+
+Timeline harus dapat difilter berdasarkan wilayah, angkatan, kategori, dan waktu.
+
+---
+
+# BAGIAN 32 — KEUANGAN
+
+Modul keuangan tidak termasuk dalam rilis pertama.
+
+Jangan membangun sistem transaksi keuangan yang belum dibutuhkan.
+
+Namun, rancang arsitektur agar modul keuangan dapat ditambahkan pada fase berikutnya.
+
+Jangan membuat menu keuangan aktif jika belum diimplementasikan.
+
+---
+
+# BAGIAN 33 — DEMO MODE
+
+Saya menginginkan fitur demo yang dapat diaktifkan dan dimatikan melalui konfigurasi kode atau environment.
+
+Contoh:
+
+`DEMO_MODE=false`
+
+Aturan:
+- Default production adalah false.
+- Demo menggunakan database terpisah.
+- Demo tidak boleh terhubung ke data asli.
+- Demo memiliki data contoh yang jelas ditandai.
+- Demo tidak boleh mengekspos password produksi.
+- Demo dapat diaktifkan hanya oleh pihak berwenang.
+- Demo dapat dimatikan sepenuhnya.
+- Ketika demo nonaktif, route dan akun demo tidak boleh dapat digunakan.
+- Data demo tidak boleh tercampur dengan data organisasi.
+
+Jika mode demo aktif, berikan banner yang jelas bahwa lingkungan tersebut merupakan simulasi.
+
+Jangan menyediakan akun demo dengan akses Super Admin produksi.
+
+---
+
+# BAGIAN 34 — KEAMANAN APLIKASI
+
+Saya menginginkan keamanan yang kuat dan berlapis.
+
+Jangan menjanjikan aplikasi tidak dapat diretas. Terapkan praktik keamanan terbaik yang realistis untuk arsitektur dan hosting.
+
+## 34.1 Authentication security
+
+- Password hashing menggunakan Argon2id jika tersedia.
+- Jika tidak tersedia, gunakan mekanisme password hashing aman bawaan PHP.
+- Session rotation.
+- Session expiration.
+- Secure cookies.
+- HttpOnly.
+- SameSite.
+- HTTPS.
+- Rate limiting.
+- Progressive login throttling.
+- Password reset token sekali pakai.
+- MFA untuk akun dengan hak tinggi jika dapat diterapkan dengan aman.
+
+## 34.2 Authorization security
+
+- Server-side permission.
+- Role separation.
+- Region scoping.
+- Object-level authorization.
+- Proteksi IDOR.
+- Proteksi privilege escalation.
+- Validasi setiap operasi.
+- Pembatasan unduhan file.
+
+Jangan hanya mengandalkan frontend untuk menyembunyikan data.
+
+## 34.3 Web security
+
+Terapkan:
+- CSRF protection.
+- XSS prevention.
+- SQL injection prevention.
+- Secure output escaping.
+- Content Security Policy yang sesuai.
+- Security headers.
+- SSRF prevention bila terdapat fitur pemrosesan URL eksternal.
+- Input validation.
+- Output encoding.
+- File upload hardening.
+- Dependency scanning.
+
+## 34.4 File security
+
+- Validasi MIME sebenarnya.
+- Validasi ekstensi.
+- Batas ukuran.
+- Nama file acak.
+- Penyimpanan di luar public webroot jika memungkinkan.
+- Akses melalui controller terautentikasi.
+- Audit download.
+- Proteksi path traversal.
+- Jangan menjalankan file unggahan.
+- Pemindaian malware jika fasilitas tersedia.
+
+## 34.5 Sensitive data
+
+- Batasi data yang dikumpulkan.
+- Enkripsi data tertentu jika sesuai.
+- Enkripsi backup.
+- Jangan memasukkan secret ke repository.
+- Jangan menampilkan data sensitif di URL.
+- Jangan menampilkan data pribadi di log.
+- Jangan mengekspos data dalam notifikasi.
+- Masking data.
+- Kebijakan retensi.
+
+## 34.6 Emergency access
+
+Sediakan akses darurat terbatas untuk kondisi operasional tertentu.
+
+Wajib:
+- Alasan.
+- Ruang lingkup.
+- Waktu mulai.
+- Waktu berakhir.
+- Pihak yang memberikan izin.
+- Audit log.
+
+Akses darurat tidak boleh menjadi jalan pintas untuk menghindari sistem permission.
+
+---
+
+# BAGIAN 35 — DATABASE ARCHITECTURE
+
+Gunakan database MySQL/MariaDB yang terstruktur.
+
+Gunakan:
+- Primary keys.
+- Foreign keys.
+- Unique constraints.
+- Indexes.
+- Transactions.
+- Migrations.
+- Referential integrity.
+- Soft deletion jika sesuai.
+- Data retention.
+- Versioning.
+
+Entitas utama yang perlu dirancang antara lain:
+
+1. Users.
+2. Roles.
+3. Permissions.
+4. User roles.
+5. Role permissions.
+6. Sessions.
+7. Invitations.
+8. Account requests.
+9. Personnel.
+10. Personnel profiles.
+11. Education records.
+12. Address records.
+13. Personnel documents.
+14. Provinces.
+15. Administrative regions.
+16. Regional assignments.
+17. Organization positions.
+18. Position history.
+19. Batches.
+20. Batch memberships.
+21. Tasks.
+22. Task assignments.
+23. Task comments.
+24. Proposals.
+25. Proposal versions.
+26. Proposal approvals.
+27. Approval logs.
+28. Activities.
+29. Activity locations.
+30. Risk assessments.
+31. Consent records.
+32. Field reports.
+33. Coordinator reports.
+34. Documents.
+35. Document versions.
+36. Announcements.
+37. Notifications.
+38. Calendar events.
+39. Audit logs.
+40. Reference sequences.
+41. Alumni access windows.
+42. Complaints.
+43. Incidents.
+44. Handover records.
+45. Delegations.
+46. Backups.
+47. Storage records.
+48. Automation logs.
+49. Evaluation records.
+50. System settings.
+
+Daftar ini merupakan panduan domain, bukan perintah membuat satu tabel untuk setiap istilah tanpa analisis.
+
+Rancang skema ternormalisasi dan hindari duplikasi yang tidak diperlukan.
+
+Semua perubahan struktur database harus melalui migration.
+
+---
+
+# BAGIAN 36 — FITUR TAMBAHAN YANG DIREKOMENDASIKAN
+
+Tambahkan fitur yang benar-benar bermanfaat, selama tidak mengganggu penyelesaian sistem inti.
+
+## 36.1 Saved Views
+
+Pengguna dapat menyimpan filter favorit.
+
+Contoh:
+- LKL belum diperiksa.
+- Duta aktif.
+- Tugas terlambat.
+- Proposal menunggu keputusan.
+- Dokumen terbaru.
+
+## 36.2 Printable Dashboard
+
+Pengguna berwenang dapat mencetak ringkasan.
+
+## 36.3 Batch Comparison
+
+Bandingkan perkembangan antarangkatan.
+
+## 36.4 Regional Comparison
+
+Bandingkan aktivitas dan pelaporan wilayah.
+
+## 36.5 Report Builder
+
+Buat laporan berdasarkan:
+- Periode.
+- Wilayah.
+- Batch.
+- Kategori.
+- Status.
+
+Hasil dapat diekspor ke PDF, XLSX, atau CSV sesuai izin.
+
+## 36.6 Smart Reminder
+
+Pengingat otomatis yang memperhitungkan tenggat, status, dan penanggung jawab.
+
+## 36.7 Quick Profile Completion
+
+Duta dapat melihat kelengkapan profil dan menyelesaikan bagian yang masih kurang.
+
+## 36.8 Document Expiry Reminder
+
+Pengingat untuk dokumen atau penugasan yang memiliki masa berlaku.
+
+## 36.9 Activity Template Library
+
+Template kegiatan dapat digunakan ulang antarbatch.
+
+## 36.10 Personal Data Export
+
+Pengguna dapat meminta salinan data pribadinya sesuai izin dan kebijakan organisasi.
+
+## 36.11 Notification Preferences
+
+Pengguna dapat mengatur notifikasi yang tidak wajib.
+
+## 36.12 Internal Help Center
+
+Buat pusat bantuan internal dengan:
+- Panduan penggunaan.
+- FAQ.
+- Tutorial.
+- Panduan per role.
+- Kontak sekretariat.
+
+## 36.13 System Changelog
+
+Tampilkan riwayat pembaruan aplikasi untuk pengelola.
+
+## 36.14 Duplicate Detection
+
+Sistem memberi peringatan ketika data personel atau dokumen yang mirip dimasukkan kembali.
+
+Semua fitur tambahan harus dievaluasi berdasarkan manfaat, biaya pemeliharaan, dan keamanan.
+
+Jangan menambahkan fitur hanya untuk memperbanyak menu.
+
+---
+
+# BAGIAN 37 — STRUKTUR URL DAN ROUTING
+
+Bangun routing aplikasi secara konsisten dan benar.
+
+Gunakan path yang singkat, deskriptif, dan mudah dipahami.
+
+Contoh:
+
+- `/login`
+- `/bantuan`
+- `/dashboard`
+- `/organisasi`
+- `/personalia`
+- `/personalia/daftar`
+- `/wilayah`
+- `/angkatan`
+- `/proposal`
+- `/laporan-kegiatan`
+- `/laporan-koordinator`
+- `/tugas`
+- `/dokumen`
+- `/pengumuman`
+- `/kalender`
+- `/notifikasi`
+- `/arsip`
+- `/evaluasi`
+- `/pengaturan`
+- `/pengaturan/pengguna`
+- `/pengaturan/hak-akses`
+- `/pengaturan/keamanan`
+
+Detail data menggunakan identifier internal yang tidak membocorkan data pribadi.
+
+Semua halaman:
+- Dapat dibuka sesuai autentikasi.
+- Dapat di-refresh.
+- Mendukung navigasi browser.
+- Memiliki breadcrumb.
+- Memiliki proteksi akses.
+- Memiliki loading state.
+- Memiliki empty state.
+- Memiliki error state.
+
+Buat halaman:
+- 401.
+- 403.
+- 404.
+- 419 jika relevan.
+- 422 jika relevan.
+- 429.
+- 500.
+- 503.
+
+Halaman error harus profesional dan tidak menampilkan stack trace atau informasi sensitif.
+
+Jika menggunakan SPA, konfigurasi fallback routing harus benar.
+
+Jika menggunakan Laravel server-side routing, pastikan konfigurasi web server dan document root benar.
+
+Jangan membiarkan route internal menghasilkan error server hanya karena halaman di-refresh.
+
+Jangan mengandalkan hash URL sebagai pengganti routing aplikasi yang sesungguhnya.
+
+---
+
+# BAGIAN 38 — MANAJEMEN WAKTU DAN BAHASA
+
+Gunakan:
+- Bahasa Indonesia sebagai bahasa utama.
+- Zona waktu Asia/Jakarta.
+- Format tanggal Indonesia.
+- Format angka Indonesia.
+- Tampilan tanggal dan waktu yang konsisten.
+
+Simpan timestamp secara konsisten di database dan tampilkan sesuai zona waktu yang berlaku.
+
+Semua label antarmuka, pesan kesalahan, status, tombol, dan panduan menggunakan bahasa Indonesia profesional.
+
+---
+
+# BAGIAN 39 — EFISIENSI DAN PERFORMA
+
+Aplikasi harus tetap nyaman digunakan ketika data bertambah.
+
+Terapkan:
+- Database indexing.
+- Pagination server-side.
+- Lazy loading.
+- Query optimization.
+- Caching yang aman.
+- Debounced search.
+- Image optimization.
+- Efficient file handling.
+- Background processing jika fasilitas tersedia.
+- Pagination pada tabel.
+- Limit pada pencarian.
+- Efficient dashboard queries.
+
+Jangan mengambil seluruh data database sekaligus ke browser.
+
+Jangan memuat semua foto berukuran asli pada daftar personel.
+
+Gunakan thumbnail dan preview sesuai kebutuhan.
+
+Pastikan pencarian dan filter tidak membebani database.
+
+---
+
+# BAGIAN 40 — TAHAP PENGEMBANGAN
+
+Semua kebutuhan harus dipetakan menjadi tahapan yang jelas.
+
+Namun, tahapan bukan alasan untuk membuat sistem inti setengah jadi.
+
+## PHASE 0 — DISCOVERY & ARCHITECTURE
+
+- Audit hosting.
+- Audit kebutuhan.
+- Tentukan arsitektur.
+- Rancang database.
+- Rancang role matrix.
+- Rancang workflow.
+- Rancang UI system.
+- Rancang struktur file.
+- Rancang keamanan.
+- Rancang deployment.
+
+## PHASE 1 — CORE FOUNDATION
+
+Wajib selesai:
+- Database.
+- Autentikasi.
+- Login.
+- Password reset.
+- Role.
+- Permission.
+- Session.
+- Layout.
+- Navigasi.
+- Dashboard dasar.
+- Profil.
+- Manajemen pengguna.
+- Pengelolaan wilayah.
+- Pengelolaan batch.
+
+## PHASE 2 — ORGANIZATIONAL OPERATIONS
+
+- Personalia.
+- Verifikasi profil.
+- Permintaan akun Duta.
+- Struktur organisasi.
+- Penugasan.
+- Task Management.
+- Kalender.
+- Pengumuman.
+- Notifikasi.
+
+## PHASE 3 — PROPOSAL AND REPORTING
+
+- Proposal PDF.
+- Approval Matrix.
+- Revisi proposal.
+- LKL.
+- Upload PDF.
+- Foto dokumentasi.
+- Laporan bulanan.
+- Laporan akhir wilayah.
+- Review dan monitoring.
+
+## PHASE 4 — DOCUMENT AND ARCHIVE
+
+- Document Center.
+- SOP Library.
+- Surat.
+- SK.
+- Sertifikat.
+- Version control.
+- Bulk Document Generator dasar.
+- Arsip.
+- Alumni 30 hari.
+- Handover Center.
+
+## PHASE 5 — MONITORING AND SAFETY
+
+- National Command Center.
+- Regional Dashboard.
+- Peta Indonesia.
+- Lokasi Koordinator.
+- Safeguarding.
+- Incident Reporting.
+- Pengaduan.
+- Evaluasi.
+- Audit log.
+
+## PHASE 6 — ADVANCED PRODUCTIVITY
+
+- Global Search.
+- Bulk Operations.
+- Saved Views.
+- Command Palette.
+- Report Builder.
+- Data Quality Center.
+- Storage Control Center.
+- System Health Monitor.
+- Automation Center.
+- Advanced analytics.
+
+## PHASE 7 — HARDENING AND DEPLOYMENT
+
+- Security review.
+- Performance test.
+- Backup.
+- Restore test.
+- Responsive test.
+- Role test.
+- Data isolation test.
+- Production build.
+- cPanel deployment test.
+- Documentation.
+- Final handover.
+
+Fitur lanjutan boleh ditunda jika diperlukan, tetapi jangan menghambat penyelesaian modul inti.
+
+Jangan tampilkan fitur yang belum selesai sebagai menu aktif.
+
+---
+
+# BAGIAN 41 — PENGUJIAN WAJIB
+
+Buat test plan dan lakukan pengujian nyata.
+
+## 41.1 Authentication
+
+- Login.
+- Logout.
+- Session.
+- Password reset.
+- Invitation.
+- Expired invitation.
+- Login throttling.
+- Session expiration.
+
+## 41.2 Role and permission
+
+Uji seluruh role.
+
+Pastikan:
+- Duta tidak dapat melihat data Duta lain.
+- Koordinator tidak dapat mengakses wilayah lain.
+- Sekretariat tidak otomatis menjadi Super Admin.
+- Pengurus Nasional hanya dapat menyetujui sesuai delegasi.
+- Alumni tidak dapat melakukan tindakan operasional aktif.
+- Pengguna tanpa izin tidak dapat mengakses file melalui URL langsung.
+
+## 41.3 Workflow
+
+Uji:
+- Pengajuan akun.
+- Penetapan personel.
+- Proposal.
+- Revisi proposal.
+- Persetujuan.
+- LKL.
+- Revisi LKL.
+- Laporan bulanan.
+- Laporan akhir.
+- Tugas.
+- Notifikasi.
+- Dokumen.
+- Arsip.
+- Handover.
+
+## 41.4 Location
+
+Uji:
+- Lokasi sesuai wilayah.
+- Lokasi di luar wilayah.
+- Izin lokasi ditolak.
+- GPS tidak tersedia.
+- Permintaan pengecualian.
+- Persetujuan pengecualian.
+- Masa berlaku pengecualian.
+
+## 41.5 Upload
+
+Uji:
+- PDF valid.
+- Gambar valid.
+- File terlalu besar.
+- Ekstensi palsu.
+- MIME tidak sesuai.
+- File rusak.
+- Unduhan tanpa izin.
+- Nama file duplikat.
+
+## 41.6 Performance
+
+Uji:
+- Dashboard.
+- Search.
+- Filter.
+- Pagination.
+- Upload.
+- Export.
+- Mobile layout.
+- Database query.
+
+## 41.7 Backup
+
+Uji:
+- Backup database.
+- Backup dokumen.
+- Validasi backup.
+- Restore.
+- Verifikasi hasil restore.
+
+## 41.8 Security
+
+Lakukan pemeriksaan:
+- SQL injection.
+- XSS.
+- CSRF.
+- IDOR.
+- Privilege escalation.
+- Path traversal.
+- Session handling.
+- Unauthorized downloads.
+- Rate limiting.
+- Sensitive data exposure.
+
+Gunakan pengujian yang aman pada lingkungan pengembangan atau staging.
+
+---
+
+# BAGIAN 42 — HOSTING DAN DEPLOYMENT CPANEL
+
+Target deployment adalah shared hosting cPanel yang memiliki MySQL dan dukungan PHP.
+
+Jangan mengasumsikan semua fasilitas hosting tersedia tanpa verifikasi.
+
+Sebelum menetapkan versi final:
+- Periksa versi PHP.
+- Periksa extension PHP.
+- Periksa versi MySQL/MariaDB.
+- Periksa batas upload.
+- Periksa batas execution time.
+- Periksa SSH.
+- Periksa Composer.
+- Periksa cron.
+- Periksa SMTP.
+- Periksa document root.
+- Periksa batas storage.
+
+## 42.1 Paket hasil akhir
+
+Berikan:
+- Source code lengkap.
+- Dependency manifest.
+- Build assets.
+- Backend.
+- Migration.
+- Seed yang aman.
+- Konfigurasi contoh.
+- Dokumentasi.
+
+Jangan menyertakan:
+- Secret asli.
+- Password.
+- Token produksi.
+- Database produksi.
+- File backup sensitif.
+- Data pribadi nyata dalam demo.
+
+## 42.2 Struktur deployment
+
+Susun agar file aplikasi sensitif tidak dapat diakses langsung dari public webroot.
+
+Jika menggunakan Laravel:
+- Public webroot hanya berisi direktori public.
+- File aplikasi lain berada di lokasi yang tidak dapat diakses langsung.
+- File storage privat dilayani melalui endpoint yang melakukan autentikasi.
+- Konfigurasi environment berada di luar akses publik.
+
+Berikan instruksi khusus untuk mengatur document root atau konfigurasi yang sesuai dengan cPanel.
+
+## 42.3 Panduan instalasi
+
+Buat panduan langkah demi langkah:
+
+1. Siapkan database.
+2. Buat user database.
+3. Atur permission database.
+4. Upload paket aplikasi.
+5. Ekstrak source code.
+6. Atur document root.
+7. Konfigurasi environment.
+8. Pasang dependency jika diperlukan.
+9. Jalankan migration.
+10. Jalankan bootstrap Super Admin.
+11. Atur permission folder.
+12. Aktifkan HTTPS.
+13. Atur cron.
+14. Atur SMTP.
+15. Uji login.
+16. Uji unggah dokumen.
+17. Uji dashboard.
+18. Uji backup.
+19. Hapus atau nonaktifkan installer.
+20. Lakukan pemeriksaan keamanan.
+
+Jika SSH tidak tersedia atau dibatasi, sediakan alternatif instalasi yang aman dan realistis.
+
+Jangan menyuruh pengguna menjalankan perintah yang tidak didukung hosting.
+
+## 42.4 Update aplikasi
+
+Sediakan prosedur:
+- Backup sebelum update.
+- Maintenance mode.
+- Upload versi baru.
+- Jalankan migration.
+- Verifikasi.
+- Rollback jika gagal.
+
+---
+
+# BAGIAN 43 — DOKUMENTASI DAN HASIL SERAH TERIMA
+
+Saya membutuhkan hasil akhir berupa paket proyek lengkap.
+
+Wajib tersedia:
+
+1. Source code lengkap.
+2. File ZIP proyek.
+3. Struktur direktori.
+4. Database schema.
+5. Migration.
+6. README.
+7. Deployment Guide.
+8. cPanel Installation Guide.
+9. User Guide per role.
+10. Administrator Guide.
+11. Database Documentation.
+12. Security Documentation.
+13. Backup and Restore Guide.
+14. Update and Rollback Guide.
+15. Architecture Diagram.
+16. ERD.
+17. Role Permission Matrix.
+18. Workflow Documentation.
+19. Changelog.
+20. Test Report.
+21. Environment Example.
+
+Dokumentasi harus benar-benar sesuai dengan kode yang dikirim.
+
+Jangan menulis panduan yang memerintahkan pengguna menjalankan fitur yang sebenarnya belum dibuat.
+
+---
+
+# BAGIAN 44 — DEMO DAN DATA AWAL
+
+Sediakan mekanisme demo yang dapat diaktifkan dan dimatikan.
+
+Jika demo diaktifkan:
+- Gunakan database terpisah.
+- Gunakan data fiktif.
+- Tandai seluruh data sebagai simulasi.
+- Jangan menggunakan identitas orang nyata.
+- Jangan menghubungkan data demo dengan data produksi.
+- Jangan memberikan akses ke data asli.
+
+Untuk produksi:
+- Tidak boleh ada data demo.
+- Tidak boleh ada akun bawaan yang tidak aman.
+- Tidak boleh ada password default.
+- Super Admin pertama dibuat melalui bootstrap satu kali.
+- Setelah bootstrap, endpoint setup harus dinonaktifkan.
+
+---
+
+# BAGIAN 45 — KRITERIA PENERIMAAN AKHIR
+
+SATU DPBI hanya dapat dinyatakan selesai jika seluruh kriteria berikut terpenuhi.
+
+## A. Produk
+
+- Aplikasi memiliki identitas SATU DPBI.
+- Aplikasi merupakan portal internal organisasi.
+- Halaman publik hanya menjadi pintu masuk login dan statistik umum yang disetujui.
+- Semua halaman utama tersedia.
+- Navigasi benar.
+- Tidak ada halaman aktif yang kosong.
+- Halaman error ditangani secara profesional.
+
+## B. Sistem
+
+- Autentikasi berjalan.
+- Role berjalan.
+- Permission berjalan.
+- Database terhubung.
+- Data dapat disimpan.
+- Data dapat diperbarui.
+- Data dapat dicari.
+- Data dapat difilter.
+- Riwayat tersimpan.
+- Modul saling terintegrasi.
+
+## C. Operasional
+
+- Personalia berjalan.
+- Wilayah berjalan.
+- Batch berjalan.
+- Proposal berjalan.
+- LKL berjalan.
+- Laporan Koordinator berjalan.
+- Tugas berjalan.
+- Dokumen berjalan.
+- Notifikasi berjalan.
+- Kalender berjalan.
+- Arsip berjalan.
+
+## D. Keamanan
+
+- Data Duta terisolasi.
+- Data wilayah terisolasi.
+- File privat terlindungi.
+- Permission diverifikasi server-side.
+- Audit log tersedia.
+- Session aman.
+- Backup dan restore telah diuji.
+- Data sensitif tidak tampil di halaman publik.
+
+## E. Pengalaman pengguna
+
+- Desktop berfungsi.
+- Tablet berfungsi.
+- Mobile berfungsi.
+- Light mode berfungsi.
+- Dark mode berfungsi.
+- Formulir mudah digunakan.
+- Navigasi jelas.
+- Empty state tersedia.
+- Loading state tersedia.
+- Error state tersedia.
+- Tidak ada tombol utama yang hanya dekoratif.
+
+## F. Deployment
+
+- Production build berhasil.
+- Database migration berhasil.
+- Aplikasi dapat dipasang pada lingkungan hosting target.
+- Panduan instalasi tersedia.
+- File ZIP lengkap.
+- Tidak ada secret produksi dalam source code.
+
+---
+
+# BAGIAN 46 — CARA KERJA YANG WAJIB DIIKUTI DEVELOPER
+
+Jangan langsung menghasilkan puluhan file tanpa perencanaan.
+
+Lakukan pekerjaan dengan urutan berikut:
+
+### Langkah 1 — Analisis
+
+Analisis seluruh kebutuhan, tentukan batas MVP, fitur lanjutan, arsitektur, dan ketergantungan.
+
+### Langkah 2 — Blueprint
+
+Buat:
+- Architecture overview.
+- Sitemap.
+- Role matrix.
+- Database ERD.
+- Workflow.
+- Design system.
+- Deployment plan.
+
+### Langkah 3 — Implementasi fondasi
+
+Bangun database, autentikasi, permission, layout, routing, dan sistem konfigurasi.
+
+### Langkah 4 — Implementasi modul
+
+Bangun seluruh modul utama dan hubungkan ke database.
+
+### Langkah 5 — Integrasi
+
+Pastikan seluruh modul saling terhubung melalui ID relasional, event, notification, dan workflow yang benar.
+
+### Langkah 6 — UI/UX refinement
+
+Periksa seluruh halaman dan pastikan kualitas desain konsisten.
+
+### Langkah 7 — Security review
+
+Periksa akses, upload, session, database, dan perlindungan data.
+
+### Langkah 8 — QA
+
+Jalankan pengujian seluruh role dan workflow.
+
+### Langkah 9 — Deployment preparation
+
+Siapkan build produksi dan paket instalasi cPanel.
+
+### Langkah 10 — Handover
+
+Serahkan source code, dokumentasi, ZIP, dan laporan pengujian.
+
+Jika pekerjaan terlalu besar untuk satu proses, lanjutkan secara bertahap dengan menjaga satu backlog dan satu standar arsitektur. Jangan mengubah keputusan desain dan database secara tidak konsisten pada setiap tahap.
+
+---
+
+# BAGIAN 47 — LARANGAN DAN STANDAR MUTLAK
+
+Jangan:
+- Membuat aplikasi hanya sebagai frontend.
+- Membuat dashboard dengan data hardcoded.
+- Membuat tombol palsu.
+- Membuat halaman kosong.
+- Membuat file yang tidak digunakan.
+- Membuat endpoint dummy.
+- Membuat fitur yang tidak menyimpan data.
+- Menampilkan data sensitif kepada role yang salah.
+- Menganggap GPS sebagai bukti identitas.
+- Melakukan tracking lokasi terus-menerus.
+- Mengambil data Kemendikdasmen tanpa otorisasi.
+- Menggunakan kredensial bawaan.
+- Menghapus data organisasi secara otomatis.
+- Mengorbankan keamanan untuk tampilan.
+- Membuat desain yang terlalu ramai.
+- Memaksakan fitur lanjutan sebelum sistem inti selesai.
+- Menyatakan berhasil tanpa pengujian.
+
+Jangan pula membuat arsitektur yang terlalu kompleks untuk hosting yang tersedia.
+
+**Semua keputusan teknis harus mendukung tiga hal: keandalan, keamanan, dan kemudahan pengelolaan.**
+
+---
+
+# BAGIAN 48 — STANDAR KUALITAS VISUAL AKHIR
+
+Saya menginginkan SATU DPBI memiliki kualitas visual yang terasa seperti produk SaaS organisasi profesional.
+
+Bukan sekadar admin panel biasa.
+
+Dashboard harus memiliki:
+- Hierarki informasi yang kuat.
+- Kartu statistik yang elegan.
+- Peta Indonesia yang interaktif.
+- Grafik yang informatif.
+- Tabel yang rapi.
+- Filter yang mudah digunakan.
+- Search yang cepat.
+- Sidebar profesional.
+- Navigasi konsisten.
+- Animasi halus.
+- Glassmorphism yang terukur.
+- Responsivitas penuh.
+
+Setiap halaman harus dirancang dengan tujuan yang jelas.
+
+Halaman personalia harus terasa seperti sistem manajemen personel.
+
+Halaman proposal harus terasa seperti sistem pengajuan dan persetujuan dokumen.
+
+Halaman LKL harus terasa seperti pusat pelaporan kegiatan.
+
+Halaman dokumen harus terasa seperti arsip digital resmi.
+
+Halaman wilayah harus terasa seperti pusat koordinasi provinsi.
+
+Dashboard Super Admin harus terasa seperti pusat kendali organisasi nasional.
+
+Jangan menggunakan satu layout yang sama secara membabi buta pada semua halaman. Pertahankan konsistensi design system, tetapi sesuaikan komposisi halaman dengan fungsi masing-masing.
+
+---
+
+# BAGIAN 49 — HASIL YANG SAYA HARAPKAN
+
+Bangun SATU DPBI sebagai sistem yang:
+
+1. Memiliki desain sangat profesional, modern, elegan, dan menarik.
+2. Memiliki fitur lengkap dan benar-benar berfungsi.
+3. Memiliki database terpusat.
+4. Memiliki profil Duta yang lengkap.
+5. Memiliki pengelolaan wilayah nasional.
+6. Memiliki sistem proposal berbasis PDF.
+7. Memiliki sistem LKL berbasis PDF dan foto dokumentasi.
+8. Memiliki laporan Koordinator.
+9. Memiliki pengelolaan dokumen.
+10. Memiliki sistem penugasan.
+11. Memiliki kalender dan notifikasi.
+12. Memiliki dashboard berdasarkan role.
+13. Memiliki peta Indonesia interaktif.
+14. Memiliki verifikasi lokasi untuk tindakan penting Koordinator.
+15. Memiliki perlindungan data peserta.
+16. Memiliki sistem keamanan yang kuat.
+17. Memiliki backup dan restore.
+18. Memiliki fitur bulk yang efisien.
+19. Memiliki mode demo yang dapat dinonaktifkan.
+20. Memiliki pengarsipan Alumni selama masa akses 30 hari.
+21. Memiliki struktur yang dapat dikembangkan untuk angkatan berikutnya.
+22. Memiliki dokumentasi pemasangan dan pemeliharaan.
+23. Dapat dipasang pada hosting cPanel yang menjadi target setelah kompatibilitasnya diverifikasi.
+
+Jangan hanya mengejar banyaknya fitur. Pastikan setiap fitur memiliki manfaat operasional yang jelas.
+
+**SATU DPBI harus menjadi satu ekosistem organisasi yang saling terhubung, bukan kumpulan menu yang berdiri sendiri.**
+
+## PERINTAH AKHIR
+
+Mulai dari analisis kebutuhan dan arsitektur. Setelah blueprint jelas, lanjutkan pembangunan aplikasi secara nyata sampai menghasilkan paket instalasi yang lengkap.
+
+Jika lingkungan kerja memungkinkan pembuatan dan pengujian file, kerjakan langsung pada source code, jalankan build dan test, perbaiki masalah, kemudian hasilkan ZIP.
+
+Jika ada bagian yang tidak dapat diuji karena keterbatasan akses hosting atau layanan eksternal, jelaskan dengan jujur dan berikan langkah verifikasi yang diperlukan.
+
+Saya tidak meminta sekadar konsep, desain, atau rekomendasi.
+
+**Saya meminta SATU DPBI dibangun menjadi aplikasi organisasi profesional yang benar-benar dapat digunakan, aman, terintegrasi, mudah dikelola, responsif, dan siap dikembangkan dalam jangka panjang.**
+
+Utamakan kualitas implementasi dari awal sampai akhir. Jangan berhenti ketika tampilan dashboard sudah selesai. Jangan berhenti ketika login berhasil. Jangan berhenti ketika source code berhasil di-build.
+
+Berhenti hanya ketika seluruh cakupan yang dinyatakan selesai telah benar-benar diimplementasikan, diuji, didokumentasikan, dan diserahkan dengan status yang transparan.

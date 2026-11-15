@@ -1,0 +1,366 @@
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { apiGet, apiPost, setApiHandlers } from '../lib/api';
+import type { AuthUser, ModuleCode, PermissionAction } from '../lib/types';
+import { hasPermission } from '../lib/rbac';
+
+interface ToastItem {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+export interface RecentRouteItem {
+  path: string;
+  title: string;
+  visitedAt: string;
+}
+
+export const ROUTE_TITLES: Record<string, string> = {
+  '/dashboard': 'Dashboard & Ringkasan',
+  '/organisasi': 'Organisasi & Delegasi',
+  '/personalia': 'Personalia & Verifikasi Profil',
+  '/wilayah': 'Wilayah 38 Provinsi & Peta Indonesia',
+  '/angkatan': 'Angkatan & Siklus Masa Tugas',
+  '/proposal': 'Manajemen Proposal PDF',
+  '/laporan-kegiatan': 'Laporan Kegiatan Lapangan (LKL)',
+  '/laporan-koordinator': 'Laporan Koordinator Wilayah',
+  '/tugas': 'Task Management Center',
+  '/dokumen': 'Digital Document Center & SOP',
+  '/pengumuman': 'Pusat Pengumuman',
+  '/kalender': 'Kalender Organisasi',
+  '/notifikasi': 'Pusat Notifikasi',
+  '/perlindungan': 'Safeguarding & Perlindungan Peserta',
+  '/evaluasi': 'Monitoring & Evaluasi Kinerja',
+  '/arsip': 'Arsip Organisasi & Alumni',
+  '/sistem': 'Kontrol Sistem, Storage, Backup & Audit',
+  '/pengaturan': 'Pengaturan Akun & Hak Akses',
+  '/bantuan': 'Pusat Bantuan Internal',
+};
+
+interface AuthContextValue {
+  user: AuthUser | null;
+  loading: boolean;
+  isDemoMode: boolean;
+  currentPath: string;
+  theme: 'light' | 'dark';
+  offline: boolean;
+  sessionExpiredReason: string | null;
+  accountPending: boolean;
+  idleWarningSecondsLeft: number | null;
+  idleMinutes: number;
+  recentlyViewed: RecentRouteItem[];
+  onboardingDone: boolean;
+  navigate: (path: string) => void;
+  toggleTheme: () => void;
+  refreshUser: () => Promise<void>;
+  extendSession: () => Promise<void>;
+  clearSessionExpired: () => void;
+  setAccountPending: (val: boolean) => void;
+  dismissOnboarding: () => void;
+  logout: () => Promise<void>;
+  can: (module: ModuleCode, action?: PermissionAction) => boolean;
+  notify: (message: string, type?: 'success' | 'error' | 'info') => void;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname || '/');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('satu_dpbi_theme');
+    return saved === 'dark' ? 'dark' : 'light';
+  });
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [offline, setOffline] = useState(() => (typeof navigator !== 'undefined' ? !navigator.onLine : false));
+  const [sessionExpiredReason, setSessionExpiredReason] = useState<string | null>(null);
+  const [accountPending, setAccountPending] = useState(false);
+  const [idleMinutes, setIdleMinutes] = useState(30);
+  const [idleWarningSecondsLeft, setIdleWarningSecondsLeft] = useState<number | null>(null);
+  const [recentlyViewed, setRecentlyViewed] = useState<RecentRouteItem[]>([]);
+  const [onboardingDone, setOnboardingDone] = useState(true);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('satu_dpbi_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const onPop = () => setCurrentPath(window.location.pathname || '/');
+    const onOnline = () => setOffline(false);
+    const onOffline = () => setOffline(true);
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  const notify = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  }, []);
+
+  useEffect(() => {
+    setApiHandlers({
+      onSessionExpired: (reason) => {
+        setUser(null);
+        setIdleWarningSecondsLeft(null);
+        setSessionExpiredReason(
+          reason || 'Sesi Anda telah berakhir karena batas waktu atau periode tidak aktif. Silakan masuk kembali.'
+        );
+      },
+      onNetworkError: (isOffline) => {
+        setOffline(isOffline);
+      },
+    });
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await apiGet<{
+        authenticated: boolean;
+        user: AuthUser | null;
+        isDemoMode: boolean;
+        idleMinutes?: number;
+        expiredReason?: string | null;
+      }>('/api/auth/session', true);
+      setUser(data.user);
+      setIsDemoMode(data.isDemoMode);
+      if (data.idleMinutes && data.idleMinutes > 0) {
+        setIdleMinutes(data.idleMinutes);
+      }
+      if (data.user) {
+        setSessionExpiredReason(null);
+        setAccountPending(false);
+        lastActivityRef.current = Date.now();
+        setIdleWarningSecondsLeft(null);
+        const recentRaw = localStorage.getItem(`satu_dpbi_recent_${data.user.id}`);
+        if (recentRaw) {
+          try {
+            setRecentlyViewed(JSON.parse(recentRaw));
+          } catch {
+            setRecentlyViewed([]);
+          }
+        }
+        setOnboardingDone(localStorage.getItem(`satu_dpbi_onboarded_${data.user.id}`) === '1');
+      } else if (data.expiredReason) {
+        setSessionExpiredReason(data.expiredReason);
+      }
+    } catch {
+      setUser(null);
+      try {
+        const pub = await apiGet<{ isDemoMode: boolean }>('/api/public/overview', true);
+        setIsDemoMode(pub.isDemoMode);
+      } catch {
+        // ignore
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUser();
+  }, [refreshUser]);
+
+  // Activity tracking & pre-expiry idle warning (shows 120s before backend idle timeout)
+  useEffect(() => {
+    if (!user) {
+      setIdleWarningSecondsLeft(null);
+      return;
+    }
+
+    const markActive = () => {
+      lastActivityRef.current = Date.now();
+      setIdleWarningSecondsLeft((prev) => (prev !== null ? null : prev));
+    };
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach((ev) => window.addEventListener(ev, markActive, { passive: true }));
+
+    const interval = setInterval(() => {
+      const totalIdleSec = Math.max(180, idleMinutes * 60);
+      const elapsedSec = Math.floor((Date.now() - lastActivityRef.current) / 1000);
+      const remainingSec = totalIdleSec - elapsedSec;
+
+      if (remainingSec <= 0) {
+        setIdleWarningSecondsLeft(null);
+        refreshUser();
+      } else if (remainingSec <= 120) {
+        setIdleWarningSecondsLeft(remainingSec);
+      } else {
+        setIdleWarningSecondsLeft(null);
+      }
+    }, 1000);
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, markActive));
+      clearInterval(interval);
+    };
+  }, [user, idleMinutes, refreshUser]);
+
+  // Track recently viewed internal pages (only when user has access, non-sensitive route names only)
+  useEffect(() => {
+    if (!user) return;
+    const title = ROUTE_TITLES[currentPath];
+    if (!title || currentPath === '/' || currentPath === '/login') return;
+    const routeModuleMap: Partial<Record<string, ModuleCode>> = {
+      '/dashboard': 'dashboard',
+      '/organisasi': 'organisasi',
+      '/personalia': 'personalia',
+      '/wilayah': 'wilayah',
+      '/angkatan': 'angkatan',
+      '/proposal': 'proposal',
+      '/laporan-kegiatan': 'lkl',
+      '/laporan-koordinator': 'laporan_koordinator',
+      '/tugas': 'tugas',
+      '/dokumen': 'dokumen',
+      '/pengumuman': 'pengumuman',
+      '/kalender': 'kalender',
+      '/perlindungan': 'perlindungan',
+      '/evaluasi': 'evaluasi',
+      '/arsip': 'arsip',
+      '/sistem': 'sistem',
+      '/pengaturan': 'pengaturan',
+    };
+    const mod = routeModuleMap[currentPath];
+    if (mod && !hasPermission(user.permissions, mod, 'view')) return;
+    setRecentlyViewed((prev) => {
+      const next = [
+        { path: currentPath, title, visitedAt: new Date().toISOString() },
+        ...prev.filter((item) => item.path !== currentPath),
+      ].slice(0, 6);
+      try {
+        localStorage.setItem(`satu_dpbi_recent_${user.id}`, JSON.stringify(next));
+      } catch {
+        // ignore storage quota
+      }
+      return next;
+    });
+  }, [user, currentPath]);
+
+  const extendSession = useCallback(async () => {
+    lastActivityRef.current = Date.now();
+    setIdleWarningSecondsLeft(null);
+    await refreshUser();
+    notify('Sesi aktif Anda berhasil diperpanjang.', 'success');
+  }, [refreshUser, notify]);
+
+  const clearSessionExpired = useCallback(() => {
+    setSessionExpiredReason(null);
+  }, []);
+
+  const dismissOnboarding = useCallback(() => {
+    if (user) {
+      localStorage.setItem(`satu_dpbi_onboarded_${user.id}`, '1');
+    }
+    setOnboardingDone(true);
+  }, [user]);
+
+  const navigate = useCallback((path: string) => {
+    const target = path.startsWith('/') ? path : `/${path}`;
+    if (window.location.pathname !== target) {
+      window.history.pushState({}, '', target);
+    }
+    setCurrentPath(target);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await apiPost('/api/auth/logout', undefined, true);
+    } catch {
+      // ignore
+    }
+    setUser(null);
+    setSessionExpiredReason(null);
+    setIdleWarningSecondsLeft(null);
+    navigate('/');
+    notify('Anda telah keluar dari portal SATU DPBI.', 'info');
+  }, [navigate, notify]);
+
+  const can = useCallback(
+    (module: ModuleCode, action: PermissionAction = 'view') => {
+      if (!user) return false;
+      return hasPermission(user.permissions, module, action);
+    },
+    [user]
+  );
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        isDemoMode,
+        currentPath,
+        theme,
+        offline,
+        sessionExpiredReason,
+        accountPending,
+        idleWarningSecondsLeft,
+        idleMinutes,
+        recentlyViewed,
+        onboardingDone,
+        navigate,
+        toggleTheme,
+        refreshUser,
+        extendSession,
+        clearSessionExpired,
+        setAccountPending,
+        dismissOnboarding,
+        logout,
+        can,
+        notify,
+      }}
+    >
+      {children}
+      {/* Toast Notifications */}
+      <div
+        aria-live="polite"
+        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"
+      >
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            className={`pointer-events-auto rounded-xl px-4 py-3 text-sm font-medium shadow-lg border backdrop-blur-md transition-all ${
+              t.type === 'success'
+                ? 'bg-emerald-50/95 dark:bg-emerald-950/90 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
+                : t.type === 'error'
+                ? 'bg-rose-50/95 dark:bg-rose-950/90 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-100'
+                : 'bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100'
+            }`}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
+  return ctx;
+}
