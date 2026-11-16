@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Eye, FileText, MapPin, Plus, Save } from 'lucide-react';
+import { Download, Eye, FileText, MapPin, Plus, Printer, Save } from 'lucide-react';
 import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -14,6 +14,7 @@ import {
   StatusIndicator,
 } from '../components/ui';
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { LklRecord, ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
@@ -40,6 +41,7 @@ export function LklPage({
   const [lightboxPhotoId, setLightboxPhotoId] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState('');
   const [locModalOpen, setLocModalOpen] = useState(false);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const draftKey = user ? `satu_dpbi_lkl_draft_${user.id}` : 'satu_dpbi_lkl_draft';
 
@@ -430,20 +432,55 @@ export function LklPage({
           <div className="space-y-4 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
               <StatusIndicator status={selected.status} />
-              {selected.pdfFileId && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewPdfId((prev) => (prev ? null : selected.pdfFileId))}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Sembunyikan PDF' : 'Tampilkan Pratinjau PDF'}
-                  </button>
-                  <a href={apiUrl(`/api/files/${selected.pdfFileId}`)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
-                    <Download className="w-3.5 h-3.5" /> Unduh PDF LKL
-                  </a>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPrintConfig({
+                      template: 'lkl',
+                      documentNumber: selected.referenceNumber,
+                      title: selected.activityName,
+                      subtitle: `Laporan Kegiatan Lapangan · ${selected.provinceName}`,
+                      issuedDate: selected.eventDate,
+                      metadata: [
+                        { label: 'Pelapor', value: selected.submitterName },
+                        { label: 'Wilayah', value: selected.provinceName },
+                        { label: 'Moda & Lokasi', value: selected.activityMode === 'daring' ? `Daring (${selected.platformName || 'Online'})` : `${selected.venueName}, ${selected.regency}` },
+                        { label: 'Tanggal & Waktu', value: `${formatTanggalIndonesia(selected.eventDate)} (${selected.startTime}–${selected.endTime})` },
+                        { label: 'Jumlah Peserta', value: `${selected.participantCount} orang` },
+                        { label: 'Ref Proposal', value: selected.proposalRef || 'Non-Proposal' },
+                      ],
+                      sections: [
+                        { heading: 'Ringkasan Pelaksanaan', body: selected.summary },
+                        { heading: 'Hasil & Dampak Kegiatan', body: selected.outcomes },
+                        ...(selected.obstacles ? [{ heading: 'Kendala Lapangan', body: selected.obstacles }] : []),
+                        ...(selected.followUp ? [{ heading: 'Rencana Tindak Lanjut', body: selected.followUp }] : []),
+                      ],
+                      photoFileIds: selected.photoFileIds,
+                      signatoryName: selected.submitterName,
+                      signatoryRole: 'Pelapor Kegiatan Lapangan',
+                      signatoryLocation: selected.provinceName,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                >
+                  <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak LKL A4
+                </button>
+                {selected.pdfFileId && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewPdfId((prev) => (prev ? null : selected.pdfFileId))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Sembunyikan PDF' : 'Tampilkan Pratinjau PDF'}
+                    </button>
+                    <a href={apiUrl(`/api/files/${selected.pdfFileId}`)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
+                      <Download className="w-3.5 h-3.5" /> Unduh PDF LKL
+                    </a>
+                  </>
+                )}
+              </div>
             </div>
 
             {previewPdfId && (
@@ -546,6 +583,12 @@ export function LklPage({
         danger
         onConfirm={confirmLeave}
         onCancel={cancelLeave}
+      />
+
+      <A4PrintModal
+        open={Boolean(printConfig)}
+        config={printConfig}
+        onClose={() => setPrintConfig(null)}
       />
     </div>
   );

@@ -5,22 +5,26 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Globe,
   Megaphone,
   Plus,
 } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { EmptyState, GlassCard, LoadingSkeleton, Modal } from '../components/ui/Primitives';
 import { formatTanggalIndonesia } from '../lib/rbac';
 import type { NotificationRecord, TaskRecord } from '../lib/types';
 
 export function AnnouncementsPage() {
-  const { can, notify } = useAuth();
+  const { user, can, notify } = useAuth();
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
   const [scopeTab, setScopeTab] = useState<'semua' | 'nasional' | 'wilayah' | 'angkatan'>('semua');
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ title: '', body: '', scope: 'nasional', priority: 'normal' });
+  const [form, setForm] = useState({ title: '', body: '', scope: 'nasional', priority: 'normal', isPublic: false });
+  const canPublishPublic = ['super_admin', 'wakil_super_admin', 'sekretariat_nasional', 'pengurus_nasional'].includes(
+    user?.role || ''
+  );
 
   const load = () => {
     setLoading(true);
@@ -39,10 +43,23 @@ export function AnnouncementsPage() {
       await apiPost('/api/announcements', form);
       notify('Pengumuman diterbitkan.', 'success');
       setOpen(false);
-      setForm({ title: '', body: '', scope: 'nasional', priority: 'normal' });
+      setForm({ title: '', body: '', scope: 'nasional', priority: 'normal', isPublic: false });
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menerbitkan pengumuman.', 'error');
+    }
+  };
+
+  const togglePublic = async (id: string, currentlyPublic: boolean) => {
+    try {
+      await apiPatch(`/api/announcements/${id}`, { isPublic: !currentlyPublic });
+      notify(
+        !currentlyPublic ? 'Pengumuman ditampilkan di Website Publik DPBI.' : 'Pengumuman ditarik ke lingkup internal saja.',
+        'success'
+      );
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengubah visibilitas publik.', 'error');
     }
   };
 
@@ -100,6 +117,7 @@ export function AnnouncementsPage() {
         <div className="space-y-4">
           {filtered.map((a) => {
             const prio = String(a.priority || 'normal');
+            const isPub = Boolean(a.is_public);
             return (
               <GlassCard key={String(a.id)} className="p-5 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
@@ -113,12 +131,29 @@ export function AnnouncementsPage() {
                     }`}
                   >
                     <Megaphone className="w-3.5 h-3.5" /> Lingkup {String(a.scope).toUpperCase()} · Prioritas {prio}
+                    {isPub && (
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        · <Globe className="w-3 h-3" /> Tampil di Website Publik
+                      </span>
+                    )}
                   </span>
                   <span className="tabular-nums">{formatTanggalIndonesia(String(a.published_at), true)}</span>
                 </div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">{String(a.title)}</h2>
                 <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{String(a.body)}</p>
-                <p className="text-xs text-slate-400 pt-1">Diterbitkan oleh: {String(a.author_name)}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+                  <p className="text-slate-400">Diterbitkan oleh: {String(a.author_name)}</p>
+                  {canPublishPublic && can('pengumuman', 'edit') && (
+                    <button
+                      type="button"
+                      onClick={() => togglePublic(String(a.id), isPub)}
+                      className="inline-flex items-center gap-1 text-[#0EA5E9] font-semibold hover:underline"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      {isPub ? 'Sembunyikan dari Website Publik' : 'Tampilkan di Website Publik'}
+                    </button>
+                  )}
+                </div>
               </GlassCard>
             );
           })}
@@ -172,6 +207,16 @@ export function AnnouncementsPage() {
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
             />
           </div>
+          {canPublishPublic && (
+            <label className="flex items-center gap-2 pt-1 cursor-pointer text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.isPublic}
+                onChange={(e) => setForm({ ...form, isPublic: e.target.checked })}
+              />
+              <span>Tampilkan di Pengumuman Publik Website (tanpa data internal/PII)</span>
+            </label>
+          )}
           <div className="flex justify-end pt-2">
             <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">
               Terbitkan Pengumuman

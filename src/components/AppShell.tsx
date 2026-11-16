@@ -15,6 +15,7 @@ import {
   FileCheck2,
   FileSpreadsheet,
   FolderOpen,
+  Globe,
   GraduationCap,
   HelpCircle,
   KeyRound,
@@ -48,6 +49,7 @@ interface NavItem {
   path: string;
   module?: ModuleCode;
   action?: PermissionAction;
+  canShow?: (user: { role: string; bidang?: string | null } | null, can: (m: ModuleCode, a: PermissionAction) => boolean) => boolean;
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -112,6 +114,15 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Pengguna', path: '/pengaturan/pengguna', module: 'pengaturan', action: 'manage', icon: Users },
       { label: 'Hak Akses', path: '/pengaturan/hak-akses', module: 'pengaturan', icon: KeyRound },
       { label: 'Pengaturan', path: '/pengaturan', module: 'pengaturan', icon: Settings },
+      {
+        label: 'CMS & Website Publik',
+        path: '/pengaturan/cms',
+        icon: Globe,
+        canShow: (u, checkCan) =>
+          checkCan('pengaturan', 'manage') ||
+          u?.role === 'sekretariat_nasional' ||
+          (u?.role === 'pengurus_nasional' && (u.bidang || '').toLowerCase().includes('media')),
+      },
       { label: 'Audit Log', path: '/audit-log', module: 'sistem', icon: ShieldCheck },
       { label: 'Status Sistem', path: '/status-sistem', module: 'sistem', icon: ServerCog },
       { label: 'Perlindungan', path: '/perlindungan', module: 'perlindungan', icon: ShieldAlert },
@@ -241,7 +252,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Grouped navigation with collapsible submenus */}
       <nav aria-label="Navigasi Portal Internal" className="flex-1 overflow-y-auto px-2.5 py-3 space-y-3">
         {NAV_GROUPS.map((grp) => {
-          const visibleItems = grp.items.filter((item) => !item.module || can(item.module, item.action || 'view'));
+          const visibleItems = grp.items.filter((item) => {
+            if (item.canShow) return item.canShow(user, can);
+            return !item.module || can(item.module, item.action || 'view');
+          });
           if (visibleItems.length === 0) return null;
           const isGroupCollapsed = Boolean(collapsedGroups[grp.id]) && !collapsed;
 
@@ -552,6 +566,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       >
                         <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
                         <span>Pusat Bantuan Internal</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          navigate('/tentang');
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left"
+                      >
+                        <Globe className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Website Publik DPBI</span>
                       </button>
                       <button
                         type="button"

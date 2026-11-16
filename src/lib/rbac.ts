@@ -2,8 +2,11 @@ import { INDONESIA_PROVINCES, PROVINCE_BY_CODE } from './provinces';
 import type {
   DelegationRecord,
   ModuleCode,
+  OfficialBidang,
   PermissionAction,
   PersonnelRecord,
+  ProvinceStatus,
+  RegencyRecord,
   RoleCode,
 } from './types';
 
@@ -17,6 +20,126 @@ export const ROLE_LABELS: Record<RoleCode, string> = {
   duta: 'Duta',
   alumni: 'Alumni',
 };
+
+export interface BidangDefinition {
+  id: OfficialBidang;
+  code: string;
+  label: OfficialBidang;
+  number: string;
+  shortName: string;
+  summary: string;
+  description: string;
+  primaryModules: ModuleCode[];
+  proposalFocus: string[];
+  aliases: string[];
+}
+
+export const OFFICIAL_BIDANGS: BidangDefinition[] = [
+  {
+    id: 'Bidang Administrasi & Organisasi',
+    code: 'administrasi_organisasi',
+    label: 'Bidang Administrasi & Organisasi',
+    number: '01',
+    shortName: 'Administrasi & Organisasi',
+    summary: 'Tata kelola struktur organisasi, SK jabatan, verifikasi personalia, dan persuratan internal.',
+    description: 'Tata kelola struktur organisasi, SK jabatan, verifikasi personalia, dan persuratan internal.',
+    primaryModules: ['dashboard', 'organisasi', 'personalia', 'angkatan', 'dokumen', 'arsip'],
+    proposalFocus: ['Administrasi', 'Organisasi', 'Tata Kelola'],
+    aliases: ['administrasi', 'organisasi', 'administrasi dan pengembangan organisasi', 'tata kelola nasional'],
+  },
+  {
+    id: 'Bidang Program & Operasional',
+    code: 'program_operasional',
+    label: 'Bidang Program & Operasional',
+    number: '02',
+    shortName: 'Program & Operasional',
+    summary: 'Pengendalian alur proposal kegiatan, evaluasi LKL, kalender kerja, dan penugasan operasional.',
+    description: 'Pengendalian alur proposal kegiatan, evaluasi LKL, kalender kerja, dan penugasan operasional.',
+    primaryModules: ['dashboard', 'proposal', 'lkl', 'laporan_koordinator', 'tugas', 'kalender', 'evaluasi'],
+    proposalFocus: ['Program dan Operasional', 'Operasional', 'Lokakarya / Literasi Pelajar', 'Aksi Pelajar'],
+    aliases: ['program', 'operasional', 'program dan operasional'],
+  },
+  {
+    id: 'Bidang Pengembangan Wilayah',
+    code: 'pengembangan_wilayah',
+    label: 'Bidang Pengembangan Wilayah',
+    number: '03',
+    shortName: 'Pengembangan Wilayah',
+    summary: 'Pembinaan 38 provinsi dan kabupaten/kota, serah terima koordinator, dan laporan bulanan wilayah.',
+    description: 'Pembinaan 38 provinsi dan kabupaten/kota, serah terima koordinator, dan laporan bulanan wilayah.',
+    primaryModules: ['dashboard', 'wilayah', 'laporan_koordinator', 'personalia', 'tugas', 'evaluasi'],
+    proposalFocus: ['Pengembangan Wilayah', 'Koordinasi Wilayah'],
+    aliases: ['wilayah', 'pengembangan wilayah', 'koordinasi wilayah'],
+  },
+  {
+    id: 'Bidang Pendidikan & Kebudayaan',
+    code: 'pendidikan_kebudayaan',
+    label: 'Bidang Pendidikan & Kebudayaan',
+    number: '04',
+    shortName: 'Pendidikan & Kebudayaan',
+    summary: 'Kurikulum pembekalan, festival budaya pelajar, literasi aksara/bahasa daerah, dan materi edukasi.',
+    description: 'Kurikulum pembekalan, festival budaya pelajar, literasi aksara/bahasa daerah, dan materi edukasi.',
+    primaryModules: ['dashboard', 'proposal', 'lkl', 'dokumen', 'kalender', 'angkatan'],
+    proposalFocus: ['Kebudayaan', 'Pendidikan', 'Festival / Pameran Budaya', 'Lokakarya / Literasi Pelajar', 'Seminar Daring'],
+    aliases: ['pendidikan', 'kebudayaan', 'pendidikan dan kebudayaan'],
+  },
+  {
+    id: 'Bidang Hubungan & Kemitraan',
+    code: 'hubungan_kemitraan',
+    label: 'Bidang Hubungan & Kemitraan',
+    number: '05',
+    shortName: 'Hubungan & Kemitraan',
+    summary: 'Verifikasi proposal kemitraan eksternal, jejaring sekolah/komunitas, dan kepatuhan izin lembaga.',
+    description: 'Verifikasi proposal kemitraan eksternal, jejaring sekolah/komunitas, dan kepatuhan izin lembaga.',
+    primaryModules: ['dashboard', 'proposal', 'dokumen', 'pengumuman', 'kalender'],
+    proposalFocus: ['Hubungan dan Kemitraan', 'Kemitraan Eksternal / Lintas Lembaga', 'Kemitraan'],
+    aliases: ['hubungan', 'kemitraan', 'hubungan dan kemitraan'],
+  },
+  {
+    id: 'Bidang Media, Publikasi & Teknologi',
+    code: 'media_publikasi_teknologi',
+    label: 'Bidang Media, Publikasi & Teknologi',
+    number: '06',
+    shortName: 'Media, Publikasi & Teknologi',
+    summary: 'Pengelolaan informasi website publik (CMS), pengumuman resmi, dokumentasi kegiatan, dan pusat bantuan.',
+    description: 'Pengelolaan informasi website publik (CMS), pengumuman resmi, dokumentasi kegiatan, dan pusat bantuan.',
+    primaryModules: ['dashboard', 'pengumuman', 'dokumen', 'kalender', 'lkl'],
+    proposalFocus: ['Media', 'Publikasi', 'Teknologi', 'Kampanye Digital'],
+    aliases: ['media', 'publikasi', 'teknologi', 'media publikasi & teknologi'],
+  },
+];
+
+export function resolveBidangDefinition(rawBidang: string | null | undefined): BidangDefinition | null {
+  if (!rawBidang) return null;
+  const clean = rawBidang.trim().toLowerCase();
+  const exact = OFFICIAL_BIDANGS.find(
+    (b) => b.id.toLowerCase() === clean || b.code.toLowerCase() === clean || b.shortName.toLowerCase() === clean
+  );
+  if (exact) return exact;
+  return (
+    OFFICIAL_BIDANGS.find((b) =>
+      b.aliases.some((alias) => clean.includes(alias))
+    ) ?? null
+  );
+}
+
+export function isRecordRelevantToBidang(
+  userBidang: string | null | undefined,
+  recordBidang: string | null | undefined,
+  recordCategory?: string | null | undefined
+): boolean {
+  const def = resolveBidangDefinition(userBidang);
+  if (!def) return true;
+  const targets = [recordBidang, recordCategory].filter((v): v is string => Boolean(v && v.trim()));
+  if (targets.length === 0) return false;
+  return targets.some((target) => {
+    const cleanTarget = target.trim().toLowerCase();
+    if (cleanTarget === def.id.toLowerCase() || cleanTarget.includes(def.shortName.toLowerCase())) return true;
+    if (def.aliases.some((a) => cleanTarget.includes(a))) return true;
+    if (def.proposalFocus.some((f) => cleanTarget.includes(f.toLowerCase()))) return true;
+    return false;
+  });
+}
 
 const ALL_ACTIONS: PermissionAction[] = [
   'view', 'create', 'edit', 'delete', 'approve', 'reject', 'review',
@@ -56,7 +179,7 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     laporan_koordinator: ['view', 'review'],
     tugas: ['view', 'create', 'edit', 'assign'],
     dokumen: ['view', 'download', 'publish'],
-    pengumuman: ['view', 'create', 'publish'],
+    pengumuman: ['view', 'create', 'edit', 'publish'],
     kalender: ['view', 'create', 'edit'],
     perlindungan: ['view', 'review'],
     evaluasi: ['view', 'review', 'export'],
@@ -94,7 +217,7 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     laporan_koordinator: ['view', 'review'],
     tugas: ['view', 'create', 'edit', 'assign'],
     dokumen: ['view', 'create', 'download', 'publish'],
-    pengumuman: ['view', 'create', 'publish'],
+    pengumuman: ['view', 'create', 'edit', 'publish'],
     kalender: ['view', 'create', 'edit'],
     perlindungan: ['view', 'review'],
     evaluasi: ['view', 'create', 'review'],
@@ -112,7 +235,7 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     laporan_koordinator: ['view', 'review'],
     tugas: ['view', 'create', 'edit', 'assign'],
     dokumen: ['view', 'create', 'edit', 'download', 'publish', 'archive'],
-    pengumuman: ['view', 'create', 'publish'],
+    pengumuman: ['view', 'create', 'edit', 'publish'],
     kalender: ['view', 'create', 'edit'],
     perlindungan: ['view', 'create'],
     evaluasi: ['view'],
@@ -285,7 +408,6 @@ export function verifyCoordinateInProvince(
     };
   }
 
-  // Allow small coastal/GPS tolerance of ~0.25 deg
   const tol = 0.25;
   const inBox =
     lat >= prov.minLat - tol &&
@@ -304,6 +426,108 @@ export function verifyCoordinateInProvince(
     reason: inBox
       ? `Koordinat terkonfirmasi berada dalam cakupan wilayah ${prov.name}.`
       : `Koordinat berada di luar batas referensi ${prov.name} (jarak ~${distanceKmFromCenter} km dari titik tengah provinsi).`,
+  };
+}
+
+/**
+ * Derive honest regency operational status without conflating domicile vs official assignment vs active activities.
+ */
+export function classifyRegencyPresence(reg: {
+  coordinatorName?: string | null;
+  domicileDutaCount: number;
+  assignmentDutaCount: number;
+  lklCount: number;
+  proposalCount: number;
+}): {
+  derivedStatus: ProvinceStatus;
+  hasOfficialCoordinator: boolean;
+  hasActivity: boolean;
+  hasDomicileOnly: boolean;
+  summaryLabel: string;
+} {
+  const hasOfficialCoordinator = Boolean(reg.coordinatorName?.trim());
+  const hasActivity = reg.lklCount > 0 || reg.proposalCount > 0;
+  const hasAssignment = reg.assignmentDutaCount > 0;
+  const hasDomicileOnly = reg.domicileDutaCount > 0 && !hasAssignment && !hasActivity && !hasOfficialCoordinator;
+
+  if (hasOfficialCoordinator && (hasAssignment || hasActivity)) {
+    return {
+      derivedStatus: 'aktif',
+      hasOfficialCoordinator,
+      hasActivity,
+      hasDomicileOnly: false,
+      summaryLabel: 'Aktif (Koordinator & Kegiatan/Penugasan)',
+    };
+  }
+  if (hasAssignment || hasActivity || hasOfficialCoordinator) {
+    return {
+      derivedStatus: 'dalam_pengembangan',
+      hasOfficialCoordinator,
+      hasActivity,
+      hasDomicileOnly: false,
+      summaryLabel: hasAssignment ? 'Memiliki Duta Penugasan' : 'Dalam Pengembangan / Ada Kegiatan',
+    };
+  }
+  if (hasDomicileOnly) {
+    return {
+      derivedStatus: 'dalam_pembinaan',
+      hasOfficialCoordinator: false,
+      hasActivity: false,
+      hasDomicileOnly: true,
+      summaryLabel: 'Domisili Duta Saja (Belum Ada Penugasan/Koordinator)',
+    };
+  }
+  return {
+    derivedStatus: 'belum_terbentuk',
+    hasOfficialCoordinator: false,
+    hasActivity: false,
+    hasDomicileOnly: false,
+    summaryLabel: 'Belum Terjangkau',
+  };
+}
+
+export function summarizeRegencyCoverage(regencies: RegencyRecord[]): {
+  total: number;
+  active: number;
+  developing: number;
+  domicileCovered: number;
+  assignmentCovered: number;
+  withActivities: number;
+} {
+  return {
+    total: regencies.length,
+    active: regencies.filter((r) => r.status === 'aktif').length,
+    developing: regencies.filter((r) => r.status === 'dalam_pengembangan' || r.status === 'dalam_pembinaan').length,
+    domicileCovered: regencies.filter((r) => r.domicileDutaCount > 0).length,
+    assignmentCovered: regencies.filter((r) => r.assignmentDutaCount > 0).length,
+    withActivities: regencies.filter((r) => r.lklCount > 0 || r.proposalCount > 0).length,
+  };
+}
+
+export function sanitizePublicStatsPayload(
+  raw: {
+    activeProvinces: number;
+    developingProvinces?: number;
+    totalProvinces: number;
+    coveredRegencies?: number;
+    totalRegencies?: number;
+    activePersonnel: number;
+    approvedActivities: number;
+    activeBatches: number;
+    showPublicDutaCount?: boolean;
+  },
+  showDutaOverride?: boolean
+) {
+  const allowDutaCount = showDutaOverride ?? raw.showPublicDutaCount ?? false;
+  return {
+    activeProvinces: raw.activeProvinces,
+    developingProvinces: raw.developingProvinces ?? 0,
+    totalProvinces: raw.totalProvinces,
+    coveredRegencies: raw.coveredRegencies ?? 0,
+    totalRegencies: raw.totalRegencies ?? 0,
+    approvedActivities: raw.approvedActivities,
+    activeBatches: raw.activeBatches,
+    activePersonnel: allowDutaCount ? raw.activePersonnel : null,
   };
 }
 

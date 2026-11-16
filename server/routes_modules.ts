@@ -54,6 +54,8 @@ export function registerModuleRoutes(app: Express): void {
         checklist: JSON.parse(String(r.checklist_json || '[]')),
         isTemplate: Boolean(r.is_template),
         recurrence: String(r.recurrence),
+        attachmentFileId: r.attachment_file_id ? String(r.attachment_file_id) : null,
+        attachmentFileName: r.attachment_file_name ? String(r.attachment_file_name) : null,
         commentCount,
         createdAt: String(r.created_at),
       };
@@ -75,13 +77,15 @@ export function registerModuleRoutes(app: Express): void {
     const assigneeRow = db.prepare('SELECT full_name FROM users WHERE id = ?').get(assigneeId) as { full_name: string } | undefined;
 
     db.prepare(
-      `INSERT INTO tasks (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, created_at)
-       VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, attachment_file_id, attachment_file_name, created_at)
+       VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, refNo, String(b.title), String(b.description || ''), String(b.priority || 'sedang'), String(b.deadline),
       b.provinceCode ? String(b.provinceCode) : user.provinceCode, String(b.batchId || 'batch-3'),
       assigneeId, assigneeRow?.full_name || user.fullName, user.id, user.fullName,
-      JSON.stringify(Array.isArray(b.checklist) ? b.checklist : []), b.isTemplate ? 1 : 0, String(b.recurrence || 'tidak'), new Date().toISOString()
+      JSON.stringify(Array.isArray(b.checklist) ? b.checklist : []), b.isTemplate ? 1 : 0, String(b.recurrence || 'tidak'),
+      b.attachmentFileId ? String(b.attachmentFileId) : null, b.attachmentFileName ? String(b.attachmentFileName) : null,
+      new Date().toISOString()
     );
 
     if (assigneeId !== user.id) {
@@ -121,11 +125,20 @@ export function registerModuleRoutes(app: Express): void {
   });
 
   app.patch('/api/tasks/:id', requireAuth, requirePermission('tugas', 'edit'), (req: AuthenticatedRequest, res: Response) => {
-    const { status, checklist } = req.body ?? {};
+    const { status, checklist, attachmentFileId, attachmentFileName } = req.body ?? {};
     const db = getDb();
-    db.prepare('UPDATE tasks SET status = COALESCE(?, status), checklist_json = COALESCE(?, checklist_json) WHERE id = ?').run(
+    db.prepare(
+      `UPDATE tasks SET
+         status = COALESCE(?, status),
+         checklist_json = COALESCE(?, checklist_json),
+         attachment_file_id = COALESCE(?, attachment_file_id),
+         attachment_file_name = COALESCE(?, attachment_file_name)
+       WHERE id = ?`
+    ).run(
       status ?? null,
       checklist ? JSON.stringify(checklist) : null,
+      attachmentFileId ?? null,
+      attachmentFileName ?? null,
       String(req.params.id)
     );
     res.json({ ok: true });
@@ -276,7 +289,7 @@ export function registerModuleRoutes(app: Express): void {
   });
 
   app.post('/api/announcements', requireAuth, requirePermission('pengumuman', 'create'), (req: AuthenticatedRequest, res: Response) => {
-    const { title, body, scope, provinceCode, priority } = req.body ?? {};
+    const { title, body, scope, provinceCode, priority, isPublic } = req.body ?? {};
     if (!title || !body) {
       res.status(422).json({ error: 'Judul dan isi pengumuman wajib diisi.' });
       return;
@@ -284,12 +297,25 @@ export function registerModuleRoutes(app: Express): void {
     const db = getDb();
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const allowPublic = Boolean(isPublic) && ['super_admin', 'wakil_super_admin', 'sekretariat_nasional', 'pengurus_nasional'].includes(req.authUser!.role);
     db.prepare(
-      `INSERT INTO announcements (id, title, body, scope, province_code, batch_id, priority, author_name, published_at, status)
-       VALUES (?, ?, ?, ?, ?, 'batch-3', ?, ?, ?, 'terbit')`
-    ).run(id, String(title), String(body), String(scope || 'nasional'), provinceCode ? String(provinceCode) : null, String(priority || 'normal'), req.authUser!.fullName, now);
+      `INSERT INTO announcements (id, title, body, scope, province_code, batch_id, priority, author_name, published_at, status, is_public)
+       VALUES (?, ?, ?, ?, ?, 'batch-3', ?, ?, ?, 'terbit', ?)`
+    ).run(id, String(title), String(body), String(scope || 'nasional'), provinceCode ? String(provinceCode) : null, String(priority || 'normal'), req.authUser!.fullName, now, allowPublic ? 1 : 0);
     writeActivityTimeline(db, 'Pengumuman', String(title), String(body).slice(0, 140), req.authUser!.fullName, provinceCode ? String(provinceCode) : null, null, '/pengumuman');
     res.status(201).json({ ok: true, id });
+  });
+
+  app.patch('/api/announcements/:id', requireAuth, requirePermission('pengumuman', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const { isPublic, status } = req.body ?? {};
+    const db = getDb();
+    db.prepare('UPDATE announcements SET is_public = COALESCE(?, is_public), status = COALESCE(?, status) WHERE id = ?').run(
+      isPublic !== undefined ? (isPublic ? 1 : 0) : null,
+      status ?? null,
+      String(req.params.id)
+    );
+    writeAuditLog(db, req.authUser!, 'UPDATE_ANNOUNCEMENT', 'announcement', String(req.params.id));
+    res.json({ ok: true });
   });
 
   app.get('/api/calendar', requireAuth, (_req, res: Response) => {
@@ -949,5 +975,99 @@ export function registerModuleRoutes(app: Express): void {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="SATU_DPBI_${scope}_${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(csv);
+  });
+
+  // ==================== CMS PUBLIC CONTENT & HELP CENTER ====================
+  const requireCmsEditor = (req: AuthenticatedRequest, res: Response, next: () => void) => {
+    const user = req.authUser;
+    if (!user) {
+      res.status(401).json({ error: 'Autentikasi diperlukan.' });
+      return;
+    }
+    const canManage =
+      ['super_admin', 'wakil_super_admin', 'sekretariat_nasional'].includes(user.role) ||
+      (user.role === 'pengurus_nasional' && (user.bidang || '').toLowerCase().includes('media'));
+    if (!canManage) {
+      res.status(403).json({ error: 'Pengelolaan CMS Website & Pusat Bantuan khusus Admin/Sekretariat/Bidang Media.' });
+      return;
+    }
+    next();
+  };
+
+  app.get('/api/cms', requireAuth, requireCmsEditor, (_req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const contents = db.prepare('SELECT key, title, body, updated_by, updated_at FROM cms_contents ORDER BY key ASC').all();
+    const helpArticles = db.prepare('SELECT * FROM help_articles ORDER BY sort_order ASC, title ASC').all();
+    res.json({ contents, helpArticles });
+  });
+
+  app.put('/api/cms/:key', requireAuth, requireCmsEditor, (req: AuthenticatedRequest, res: Response) => {
+    const key = String(req.params.key).replace(/[^a-z0-9_]/gi, '');
+    const { title, body } = req.body ?? {};
+    if (!key || !title || !body) {
+      res.status(422).json({ error: 'Judul dan isi konten CMS wajib diisi.' });
+      return;
+    }
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO cms_contents (key, title, body, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET title = excluded.title, body = excluded.body, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+    ).run(key, String(title).trim(), String(body).trim(), req.authUser!.fullName, now);
+    writeAuditLog(db, req.authUser!, 'UPDATE_CMS_CONTENT', 'cms', key, 'berhasil', String(title));
+    res.json({ ok: true });
+  });
+
+  app.post('/api/help-articles', requireAuth, requireCmsEditor, (req: AuthenticatedRequest, res: Response) => {
+    const { title, category, roleTarget, summary, content, sortOrder, isPublished } = req.body ?? {};
+    if (!title || !content) {
+      res.status(422).json({ error: 'Judul dan isi artikel bantuan wajib diisi.' });
+      return;
+    }
+    const db = getDb();
+    const id = crypto.randomUUID();
+    const slug = `${String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48)}-${Date.now().toString(36)}`;
+    db.prepare(
+      `INSERT INTO help_articles (id, slug, category, role_target, title, summary, content, sort_order, is_published, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, slug, String(category || 'Umum & Publik'), String(roleTarget || 'umum'),
+      String(title).trim(), String(summary || String(content).slice(0, 140)), String(content).trim(),
+      Number(sortOrder || 10), isPublished === false ? 0 : 1, new Date().toISOString()
+    );
+    writeAuditLog(db, req.authUser!, 'CREATE_HELP_ARTICLE', 'help_article', id, 'berhasil', String(title));
+    res.status(201).json({ ok: true, id });
+  });
+
+  app.patch('/api/help-articles/:id', requireAuth, requireCmsEditor, (req: AuthenticatedRequest, res: Response) => {
+    const { title, category, roleTarget, summary, content, sortOrder, isPublished } = req.body ?? {};
+    const db = getDb();
+    db.prepare(
+      `UPDATE help_articles SET
+         title = COALESCE(?, title),
+         category = COALESCE(?, category),
+         role_target = COALESCE(?, role_target),
+         summary = COALESCE(?, summary),
+         content = COALESCE(?, content),
+         sort_order = COALESCE(?, sort_order),
+         is_published = COALESCE(?, is_published),
+         updated_at = ?
+       WHERE id = ?`
+    ).run(
+      title ?? null, category ?? null, roleTarget ?? null, summary ?? null, content ?? null,
+      sortOrder !== undefined ? Number(sortOrder) : null,
+      isPublished !== undefined ? (isPublished ? 1 : 0) : null,
+      new Date().toISOString(), String(req.params.id)
+    );
+    writeAuditLog(db, req.authUser!, 'UPDATE_HELP_ARTICLE', 'help_article', String(req.params.id));
+    res.json({ ok: true });
+  });
+
+  app.delete('/api/help-articles/:id', requireAuth, requireCmsEditor, (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    db.prepare('DELETE FROM help_articles WHERE id = ?').run(String(req.params.id));
+    writeAuditLog(db, req.authUser!, 'DELETE_HELP_ARTICLE', 'help_article', String(req.params.id));
+    res.json({ ok: true });
   });
 }

@@ -650,6 +650,63 @@ function initSchema(db: DatabaseSync): void {
       error_message TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS regencies (
+      code TEXT PRIMARY KEY,
+      province_code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'kabupaten',
+      status TEXT NOT NULL DEFAULT 'belum_terbentuk',
+      coordinator_name TEXT,
+      coaching_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_regencies_province ON regencies(province_code);
+
+    CREATE TABLE IF NOT EXISTS districts (
+      code TEXT PRIMARY KEY,
+      regency_code TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_districts_regency ON districts(regency_code);
+
+    CREATE TABLE IF NOT EXISTS villages (
+      code TEXT PRIMARY KEY,
+      district_code TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_villages_district ON villages(district_code);
+
+    CREATE TABLE IF NOT EXISTS region_history (
+      id TEXT PRIMARY KEY,
+      region_type TEXT NOT NULL,
+      region_code TEXT NOT NULL,
+      action TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      actor_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_region_history_code ON region_history(region_code);
+
+    CREATE TABLE IF NOT EXISTS cms_contents (
+      key TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      updated_by TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS help_articles (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      role_target TEXT NOT NULL DEFAULT 'umum',
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      content TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 1,
+      is_published INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Safe idempotent column migrations for existing databases
@@ -657,9 +714,37 @@ function initSchema(db: DatabaseSync): void {
   if (!personnelCols.some((c) => c.name === 'avatar_file_id')) {
     db.exec('ALTER TABLE personnel ADD COLUMN avatar_file_id TEXT;');
   }
+  if (!personnelCols.some((c) => c.name === 'assignment_province_code')) {
+    db.exec('ALTER TABLE personnel ADD COLUMN assignment_province_code TEXT;');
+  }
+  if (!personnelCols.some((c) => c.name === 'regency_code')) {
+    db.exec('ALTER TABLE personnel ADD COLUMN regency_code TEXT;');
+  }
+
   const userCols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
   if (!userCols.some((c) => c.name === 'notification_prefs_json')) {
     db.exec("ALTER TABLE users ADD COLUMN notification_prefs_json TEXT DEFAULT '{}';");
+  }
+
+  const provCols = db.prepare('PRAGMA table_info(provinces)').all() as { name: string }[];
+  if (!provCols.some((c) => c.name === 'logo_file_id')) {
+    db.exec('ALTER TABLE provinces ADD COLUMN logo_file_id TEXT;');
+  }
+  if (!provCols.some((c) => c.name === 'description')) {
+    db.exec('ALTER TABLE provinces ADD COLUMN description TEXT;');
+  }
+
+  const taskCols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+  if (!taskCols.some((c) => c.name === 'attachment_file_id')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN attachment_file_id TEXT;');
+  }
+  if (!taskCols.some((c) => c.name === 'attachment_file_name')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN attachment_file_name TEXT;');
+  }
+
+  const annCols = db.prepare('PRAGMA table_info(announcements)').all() as { name: string }[];
+  if (!annCols.some((c) => c.name === 'is_public')) {
+    db.exec('ALTER TABLE announcements ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0;');
   }
 }
 

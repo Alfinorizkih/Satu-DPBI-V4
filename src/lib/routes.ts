@@ -20,7 +20,7 @@ export type MatchedPrivateRoute =
   | { kind: 'evaluations'; module: ModuleCode; title: string }
   | { kind: 'archive'; module: ModuleCode; title: string }
   | { kind: 'system'; module: ModuleCode; title: string; initialTab: 'storage' | 'audit' | 'kesehatan' }
-  | { kind: 'settings'; module: ModuleCode; title: string; initialTab: 'profil' | 'keamanan' | 'sesi' | 'preferensi' | 'pengguna' | 'hak_akses' | 'organisasi' }
+  | { kind: 'settings'; module: ModuleCode; title: string; initialTab: 'profil' | 'keamanan' | 'sesi' | 'preferensi' | 'pengguna' | 'hak_akses' | 'organisasi' | 'cms' }
   | { kind: 'help'; title: string };
 
 export const VALID_ERROR_CODES: HttpErrorCode[] = [400, 401, 403, 404, 419, 422, 429, 500, 502, 503];
@@ -33,10 +33,14 @@ export function normalizePathname(pathname: string): string {
   return clean || '/';
 }
 
-export function isPublicAuthPath(pathname: string): boolean {
+export function isPublicWebsitePath(pathname: string): boolean {
   const p = normalizePathname(pathname);
   return (
     p === '/' ||
+    p === '/tentang' ||
+    p === '/wilayah' ||
+    p.startsWith('/wilayah/') ||
+    p === '/bantuan' ||
     p === '/login' ||
     p === '/lupa-password' ||
     p === '/reset-password' ||
@@ -71,7 +75,7 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   if (p === '/perlindungan') return { kind: 'safeguarding', module: 'perlindungan', title: 'Perlindungan Peserta & Pengaduan' };
   if (p === '/evaluasi') return { kind: 'evaluations', module: 'evaluasi', title: 'Monitoring & Evaluasi Kinerja' };
   if (p === '/arsip') return { kind: 'archive', module: 'arsip', title: 'Arsip Organisasi' };
-  if (p === '/bantuan') return { kind: 'help', title: 'Pusat Bantuan Internal' };
+  if (p === '/bantuan') return { kind: 'help', title: 'Pusat Bantuan & Panduan' };
 
   // System & Governance sub-routes
   if (p === '/sistem') return { kind: 'system', module: 'sistem', title: 'Kontrol Sistem, Storage & Backup', initialTab: 'storage' };
@@ -79,15 +83,16 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   if (p === '/status-sistem') return { kind: 'system', module: 'sistem', title: 'Status & Kesehatan Sistem', initialTab: 'kesehatan' };
 
   // Settings & Profile sub-routes
-  if (p === '/profil') return { kind: 'settings', module: 'pengaturan', title: 'Profil Pribadi', initialTab: 'profil' };
+  if (p === '/profil' || p === '/pengaturan/profil') return { kind: 'settings', module: 'pengaturan', title: 'Profil Pribadi', initialTab: 'profil' };
   if (p === '/pengaturan') return { kind: 'settings', module: 'pengaturan', title: 'Pengaturan Akun & Sistem', initialTab: 'profil' };
   if (p === '/pengaturan/keamanan') return { kind: 'settings', module: 'pengaturan', title: 'Keamanan & Kata Sandi', initialTab: 'keamanan' };
   if (p === '/pengaturan/sesi') return { kind: 'settings', module: 'pengaturan', title: 'Perangkat & Sesi Aktif', initialTab: 'sesi' };
   if (p === '/pengaturan/pengguna') return { kind: 'settings', module: 'pengaturan', title: 'Manajemen Pengguna', initialTab: 'pengguna' };
   if (p === '/pengaturan/hak-akses') return { kind: 'settings', module: 'pengaturan', title: 'Hak Akses & Peran (RBAC)', initialTab: 'hak_akses' };
+  if (p === '/pengaturan/cms' || p === '/cms') return { kind: 'settings', module: 'pengaturan', title: 'CMS Portal Publik & Bantuan', initialTab: 'cms' };
 
   // Personalia
-  if (p === '/personalia') return { kind: 'personnel', module: 'personalia', title: 'Personalia & Verifikasi Profil', mode: 'list' };
+  if (p === '/personalia' || p === '/personalia/daftar') return { kind: 'personnel', module: 'personalia', title: 'Personalia & Verifikasi Profil', mode: 'list' };
   if (p === '/personalia/tambah') return { kind: 'personnel', module: 'personalia', title: 'Tambah Personel Baru', mode: 'create' };
   if (p === '/personalia/riwayat') return { kind: 'personnel', module: 'personalia', title: 'Riwayat Jabatan & Aktivitas Personel', mode: 'history' };
   if (p.startsWith('/personalia/')) {
@@ -103,7 +108,7 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   }
 
   // Wilayah
-  if (p === '/wilayah') return { kind: 'regions', module: 'wilayah', title: 'Wilayah 38 Provinsi & Peta Indonesia' };
+  if (p === '/wilayah') return { kind: 'regions', module: 'wilayah', title: 'Wilayah 38 Provinsi & Kabupaten/Kota' };
   if (p.startsWith('/wilayah/')) {
     const id = safeSegment(p.slice('/wilayah/'.length));
     return id ? { kind: 'regions', module: 'wilayah', title: 'Detail Wilayah Provinsi', id } : null;
@@ -161,9 +166,10 @@ export function resolveBaseNavPath(pathname: string): string {
   if (p === '/alumni') return '/alumni';
   if (p === '/audit-log') return '/audit-log';
   if (p === '/status-sistem') return '/status-sistem';
-  if (p === '/profil' || p === '/pengaturan' || p === '/pengaturan/keamanan' || p === '/pengaturan/sesi') return '/pengaturan';
+  if (p === '/profil' || p === '/pengaturan' || p === '/pengaturan/profil' || p === '/pengaturan/keamanan' || p === '/pengaturan/sesi') return '/pengaturan';
   if (p === '/pengaturan/pengguna') return '/pengaturan/pengguna';
   if (p === '/pengaturan/hak-akses') return '/pengaturan/hak-akses';
+  if (p === '/pengaturan/cms' || p === '/cms') return '/pengaturan/cms';
   if (p.startsWith('/personalia')) return '/personalia';
   if (p.startsWith('/wilayah')) return '/wilayah';
   if (p.startsWith('/angkatan')) return '/angkatan';

@@ -5,6 +5,8 @@ import {
   CheckCircle2,
   DatabaseBackup,
   Download,
+  Edit3,
+  Globe,
   HardDrive,
   Hash,
   KeyRound,
@@ -19,7 +21,7 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import {
@@ -30,7 +32,7 @@ import {
   Modal,
   StatusIndicator,
 } from '../components/ui/Primitives';
-import { BASE_ROLE_PERMISSIONS, formatTanggalIndonesia, ROLE_LABELS } from '../lib/rbac';
+import { BASE_ROLE_PERMISSIONS, formatTanggalIndonesia, OFFICIAL_BIDANGS, ROLE_LABELS } from '../lib/rbac';
 import type { ModuleCode, RoleCode } from '../lib/types';
 
 export function SystemAdminPage({
@@ -455,18 +457,21 @@ const MODULE_LABELS: Record<ModuleCode, string> = {
 export function SettingsPage({
   initialTab = 'profil',
 }: {
-  initialTab?: 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'preferensi' | 'hak_akses' | 'organisasi';
+  initialTab?: 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'cms' | 'preferensi' | 'hak_akses' | 'organisasi';
 }) {
-  const mapTab = (t: typeof initialTab): 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' => {
+  const mapTab = (t: typeof initialTab): 'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'cms' => {
     if (t === 'preferensi') return 'tampilan';
     if (t === 'hak_akses') return 'rbac';
     if (t === 'organisasi') return 'sistem';
     return t;
   };
   const { user, can, theme, toggleTheme, notify, logout, refreshUser, navigate } = useAuth();
-  const [tab, setTab] = useState<'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem'>(
+  const [tab, setTab] = useState<'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'cms'>(
     mapTab(initialTab)
   );
+  const canManageCms =
+    ['super_admin', 'wakil_super_admin', 'sekretariat_nasional'].includes(user?.role || '') ||
+    (user?.role === 'pengurus_nasional' && (user?.bidang || '').toLowerCase().includes('media'));
 
   useEffect(() => {
     setTab(mapTab(initialTab));
@@ -478,6 +483,20 @@ export function SettingsPage({
   const [config, setConfig] = useState<{ settings: Record<string, string>; sequences: any[] }>({
     settings: {},
     sequences: [],
+  });
+  const [cmsContents, setCmsContents] = useState<{ key: string; title: string; body: string; updated_by?: string; updated_at?: string }[]>([]);
+  const [helpArticles, setHelpArticles] = useState<any[]>([]);
+  const [cmsSavingKey, setCmsSavingKey] = useState<string | null>(null);
+  const [articleModalOpen, setArticleModalOpen] = useState(false);
+  const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
+  const [articleForm, setArticleForm] = useState({
+    title: '',
+    category: 'Umum & Publik',
+    roleTarget: 'umum',
+    summary: '',
+    content: '',
+    sortOrder: 10,
+    isPublished: true,
   });
   const [loading, setLoading] = useState(true);
 
@@ -500,7 +519,7 @@ export function SettingsPage({
     password: '',
     role: 'duta' as RoleCode,
     provinceCode: '32',
-    bidang: 'Kebudayaan',
+    bidang: 'Umum',
   });
   const [confirmToggleUser, setConfirmToggleUser] = useState<{ id: string; name: string; next: string } | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
@@ -520,6 +539,11 @@ export function SettingsPage({
         const uRes = await apiGet<{ users: any[] }>('/api/settings/users');
         setUsers(uRes.users);
       }
+      if (canManageCms) {
+        const cmsRes = await apiGet<{ contents: any[]; helpArticles: any[] }>('/api/cms');
+        setCmsContents(cmsRes.contents || []);
+        setHelpArticles(cmsRes.helpArticles || []);
+      }
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal memuat pengaturan.', 'error');
     } finally {
@@ -529,7 +553,7 @@ export function SettingsPage({
 
   useEffect(() => {
     load();
-  }, []);
+  }, [canManageCms]);
 
   useEffect(() => {
     if (user?.fullName) setFullName(user.fullName);
@@ -591,7 +615,7 @@ export function SettingsPage({
       await apiPost('/api/settings/users', userForm);
       notify('Akun pengguna baru berhasil dibuat.', 'success');
       setCreateUserOpen(false);
-      setUserForm({ fullName: '', email: '', password: '', role: 'duta', provinceCode: '32', bidang: 'Kebudayaan' });
+      setUserForm({ fullName: '', email: '', password: '', role: 'duta', provinceCode: '32', bidang: 'Umum' });
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal membuat akun.', 'error');
@@ -623,16 +647,73 @@ export function SettingsPage({
     }
   };
 
+  const handleSaveCmsSection = async (key: string, title: string, body: string) => {
+    setCmsSavingKey(key);
+    try {
+      await apiPut(`/api/cms/${key}`, { title, body });
+      notify(`Konten CMS "${title}" berhasil diperbarui dan tayang di Website Publik.`, 'success');
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menyimpan konten CMS.', 'error');
+    } finally {
+      setCmsSavingKey(null);
+    }
+  };
+
+  const handleTogglePublicDutaCount = async (nextVal: string) => {
+    try {
+      setConfig((prev) => ({ ...prev, settings: { ...prev.settings, public_show_duta_count: nextVal } }));
+      await apiPatch('/api/system/settings', { settings: { public_show_duta_count: nextVal } });
+      notify(
+        nextVal === 'true'
+          ? 'Jumlah Duta aktif diizinkan tampil di ringkasan Website Publik.'
+          : 'Jumlah Duta aktif disembunyikan dari Website Publik.',
+        'success'
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengubah visibilitas jumlah Duta.', 'error');
+    }
+  };
+
+  const handleSaveArticle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingArticleId) {
+        await apiPatch(`/api/help-articles/${editingArticleId}`, articleForm);
+        notify('Artikel Pusat Bantuan diperbarui.', 'success');
+      } else {
+        await apiPost('/api/help-articles', articleForm);
+        notify('Artikel Pusat Bantuan baru diterbitkan.', 'success');
+      }
+      setArticleModalOpen(false);
+      setEditingArticleId(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menyimpan artikel bantuan.', 'error');
+    }
+  };
+
+  const handleDeleteArticle = async (id: string) => {
+    try {
+      await apiDelete(`/api/help-articles/${id}`);
+      notify('Artikel Pusat Bantuan dihapus.', 'info');
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menghapus artikel.', 'error');
+    }
+  };
+
   if (loading) return <LoadingSkeleton rows={5} />;
 
   const settingsTabs = [
     { key: 'profil', label: 'Profil & Notifikasi', icon: UserCheck },
-    { key: 'keamanan', label: 'Ubah Password', icon: KeyRound },
-    { key: 'sesi', label: `Perangkat & Sesi (${sessions.length})`, icon: Laptop },
+    { key: 'keamanan', label: 'Kata Sandi', icon: KeyRound },
+    { key: 'sesi', label: `Sesi Aktif (${sessions.length})`, icon: Laptop },
     { key: 'tampilan', label: 'Tampilan', icon: SlidersHorizontal },
     ...(can('pengaturan', 'manage') ? [{ key: 'pengguna', label: `Pengguna (${users.length})`, icon: Users }] : []),
-    { key: 'rbac', label: 'Peran & Hak Akses', icon: Shield },
-    { key: 'sistem', label: 'Organisasi, Penomoran & Sistem', icon: Building2 },
+    ...(canManageCms ? [{ key: 'cms', label: 'CMS Publik', icon: Globe }] : []),
+    { key: 'rbac', label: 'Hak Akses', icon: Shield },
+    { key: 'sistem', label: 'Organisasi & Sistem', icon: Building2 },
   ] as const;
 
   return (
@@ -647,7 +728,7 @@ export function SettingsPage({
       </div>
 
       {/* Tab Bar */}
-      <div className="flex flex-wrap p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
+      <div className="flex items-center overflow-x-auto p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
         {settingsTabs.map((t) => {
           const Icon = t.icon;
           return (
@@ -655,10 +736,10 @@ export function SettingsPage({
               key={t.key}
               type="button"
               onClick={() => setTab(t.key as typeof tab)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 ${
                 tab === t.key
                   ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white'
-                  : 'text-slate-600 dark:text-slate-400'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Icon className="w-3.5 h-3.5 text-[#0EA5E9]" /> {t.label}
@@ -1111,6 +1192,249 @@ export function SettingsPage({
         </div>
       )}
 
+      {tab === 'cms' && canManageCms && (
+        <div className="space-y-6">
+          <GlassCard className="p-5 space-y-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-[#0EA5E9]" /> Konten Website Publik SATU DPBI
+                </h2>
+                <p className="text-slate-500 mt-0.5">
+                  Perubahan pada bagian ini langsung tampil pada halaman depan (/), Tentang (/tentang), dan footer Website Publik.
+                </p>
+              </div>
+              <a
+                href="/tentang"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+              >
+                Lihat Website Publik
+              </a>
+            </div>
+
+            {can('sistem', 'configure') && (
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">Visibilitas Jumlah Duta Aktif di Portal Publik</p>
+                  <p className="text-slate-500">Secara default disembunyikan (nonaktif) untuk menjaga privasi dan memprioritaskan indikator cakupan wilayah.</p>
+                </div>
+                <select
+                  value={config.settings.public_show_duta_count || 'false'}
+                  onChange={(e) => handleTogglePublicDutaCount(e.target.value)}
+                  aria-label="Visibilitas jumlah Duta di website publik"
+                  className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 pl-3 pr-8 py-2 min-w-[235px] font-semibold"
+                >
+                  <option value="false">Disembunyikan (Privasi Ketat)</option>
+                  <option value="true">Tampilkan Jumlah Agregat Duta</option>
+                </select>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {cmsContents.map((sec) => (
+                <div
+                  key={sec.key}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 p-4 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] font-semibold text-[#0EA5E9]">{sec.key}</span>
+                    {sec.updated_by && (
+                      <span className="text-[11px] text-slate-400">Diperbarui: {sec.updated_by}</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Judul Bagian</label>
+                    <input
+                      value={sec.title}
+                      onChange={(e) =>
+                        setCmsContents((prev) =>
+                          prev.map((item) => (item.key === sec.key ? { ...item, title: e.target.value } : item))
+                        )
+                      }
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Isi Konten</label>
+                    <textarea
+                      rows={5}
+                      value={sec.body}
+                      onChange={(e) =>
+                        setCmsContents((prev) =>
+                          prev.map((item) => (item.key === sec.key ? { ...item, body: e.target.value } : item))
+                        )
+                      }
+                      className="w-full min-h-[116px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 leading-relaxed"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={cmsSavingKey === sec.key}
+                      onClick={() => handleSaveCmsSection(sec.key, sec.title, sec.body)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white font-semibold disabled:opacity-50"
+                    >
+                      <Save className="w-3.5 h-3.5" /> {cmsSavingKey === sec.key ? 'Menyimpan...' : 'Simpan Konten'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+
+          <GlassCard className="p-5 space-y-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Artikel Pusat Bantuan & Panduan (/bantuan) ({helpArticles.length})
+                </h2>
+                <p className="text-slate-500">Artikel bertanda terbit akan otomatis dapat dicari oleh publik maupun pengguna portal internal.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingArticleId(null);
+                  setArticleForm({
+                    title: '',
+                    category: 'Umum & Publik',
+                    roleTarget: 'umum',
+                    summary: '',
+                    content: '',
+                    sortOrder: (helpArticles.length + 1) * 10,
+                    isPublished: true,
+                  });
+                  setArticleModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold"
+              >
+                <Plus className="w-4 h-4" /> Tambah Artikel Bantuan
+              </button>
+            </div>
+
+            <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
+              {helpArticles.map((art) => (
+                <div key={String(art.id)} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 max-w-2xl">
+                    <p className="font-bold text-slate-900 dark:text-white">{String(art.title)}</p>
+                    <p className="text-slate-500 mt-0.5">
+                      {String(art.category)} · Sasaran: {String(art.role_target)} · {art.is_published ? 'Terbit' : 'Draft'}
+                    </p>
+                    <p className="text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1">{String(art.summary)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingArticleId(String(art.id));
+                        setArticleForm({
+                          title: String(art.title),
+                          category: String(art.category),
+                          roleTarget: String(art.role_target || 'umum'),
+                          summary: String(art.summary || ''),
+                          content: String(art.content || ''),
+                          sortOrder: Number(art.sort_order || 10),
+                          isPublished: Boolean(art.is_published),
+                        });
+                        setArticleModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Ubah
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteArticle(String(art.id))}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-semibold"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Hapus
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      <Modal open={articleModalOpen} onClose={() => setArticleModalOpen(false)} title={editingArticleId ? 'Ubah Artikel Pusat Bantuan' : 'Tambah Artikel Pusat Bantuan'}>
+        <form onSubmit={handleSaveArticle} className="space-y-3 text-xs">
+          <div>
+            <label className="block font-semibold mb-1">Judul Artikel *</label>
+            <input
+              required
+              value={articleForm.title}
+              onChange={(e) => setArticleForm({ ...articleForm, title: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Kategori</label>
+              <input
+                required
+                value={articleForm.category}
+                onChange={(e) => setArticleForm({ ...articleForm, category: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Sasaran Peran</label>
+              <select
+                value={articleForm.roleTarget}
+                onChange={(e) => setArticleForm({ ...articleForm, roleTarget: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="umum">Umum & Publik</option>
+                <option value="duta">Duta</option>
+                <option value="koordinator_wilayah">Koordinator Wilayah</option>
+                <option value="pengurus_nasional">Pengurus Nasional</option>
+                <option value="alumni">Alumni</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Urutan Tampil</label>
+              <input
+                type="number"
+                value={articleForm.sortOrder}
+                onChange={(e) => setArticleForm({ ...articleForm, sortOrder: Number(e.target.value) })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Ringkasan Singkat</label>
+            <input
+              value={articleForm.summary}
+              onChange={(e) => setArticleForm({ ...articleForm, summary: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Isi Panduan *</label>
+            <textarea
+              rows={5}
+              required
+              value={articleForm.content}
+              onChange={(e) => setArticleForm({ ...articleForm, content: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={articleForm.isPublished}
+              onChange={(e) => setArticleForm({ ...articleForm, isPublished: e.target.checked })}
+            />
+            <span>Publikasikan pada halaman Pusat Bantuan (/bantuan)</span>
+          </label>
+          <div className="flex justify-end pt-2">
+            <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">
+              Simpan Artikel
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal open={createUserOpen} onClose={() => setCreateUserOpen(false)} title="Buat Akun Pengguna Langsung (Super Admin)">
         <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
           <div>
@@ -1168,6 +1492,19 @@ export function SettingsPage({
                 ))}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Bidang Tugas (6 Bidang Resmi Nasional)</label>
+            <select
+              value={userForm.bidang}
+              onChange={(e) => setUserForm({ ...userForm, bidang: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            >
+              <option value="Umum">Umum / Lintas Bidang</option>
+              {OFFICIAL_BIDANGS.map((b) => (
+                <option key={b.code} value={b.id}>{b.number}. {b.id}</option>
+              ))}
+            </select>
           </div>
           <div className="flex justify-end pt-2">
             <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Buat Akun</button>

@@ -1,117 +1,112 @@
 # SATU DPBI — Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia
 
-> **Satu Sistem, Satu Data, Satu Koordinasi.**
+> **Satu Sistem, Satu Data, Satu Koordinasi.**  
+> Semangat Gerakan DPBI: **Berbudaya, Bergerak, dan Berdampak Untuk Negeri.**
 
-**SATU DPBI** adalah platform administrasi, koordinasi nasional, manajemen kegiatan, pengarsipan, dan tata kelola internal resmi bagi **Duta Pelajar Berbudaya Indonesia (DPBI)** di seluruh **38 provinsi Indonesia**.
+**SATU DPBI** adalah platform informasi publik, administrasi terpadu, koordinasi wilayah 38 provinsi dan kabupaten/kota, manajemen kegiatan, serta tata kelola internal resmi bagi **Duta Pelajar Berbudaya Indonesia (DPBI)**.
 
-> Catatan kelembagaan: DPBI adalah organisasi pelajar independen di Indonesia dan **bukan** lembaga pemerintah. Integrasi eksternal (seperti Kemendikdasmen) berada pada status **nonaktif** secara permanen sampai terdapat MoU resmi dan kredensial API yang sah.
+> **Catatan Kelembagaan**: DPBI adalah organisasi kepemimpinan dan literasi budaya pelajar yang beroperasi secara **independen** dan **bukan** lembaga pemerintah. Integrasi eksternal (seperti Kemendikdasmen) dikunci pada status **`nonaktif`** secara permanen hingga tersedia MoU resmi dan kredensial API yang sah.
 
 ---
 
-## Ringkasan Fitur Utama
+## Tiga Zona Aplikasi & Fitur Utama
 
-- **Portal Publik & Autentikasi Aman**: Halaman masuk minimalis, lupa/reset kata sandi berbasis token sekali pakai, aktivasi undangan, deteksi sesi berakhir (`419`), persetujuan akun tertunda, serta halaman error khusus (`400`, `401`, `403`, `404`, `419`, `422`, `429`, `500`, `502`, `503`).
-- **Dashboard & Aktivitas Pribadi**: Ringkasan statistik langsung dari basis data (dapat diklik ke modul terkait), panel perhatian tindakan, jadwal mendatang, serta halaman terdedikasi `/aktivitas-saya` dan `/tugas-saya`.
-- **Personalia & Profil Duta**: Direktori personel, verifikasi kelengkapan profil (`0–100%`), formulir tambah/ubah dengan penjaga perubahan belum tersimpan (*unsaved changes guard*), riwayat jabatan, serta pengelolaan dokumen identitas yang dibatasi hak akses.
-- **Wilayah 38 Provinsi & Angkatan**: Peta interaktif Indonesia + daftar tabel 38 provinsi, pelaporan koordinator wilayah, manajemen siklus angkatan, serta direktori & jendela akses **Alumni 30 hari** (`/alumni`).
-- **Operasional Proposal, LKL & Tugas**: Alur persetujuan proposal berbasis matriks risiko, Laporan Kegiatan Lapangan (LKL) dengan pratinjau PDF/foto aman dan verifikasi koordinat, daftar tugas/Kanban/kalender, serta penguncian anti-duplikasi kirim (*double-submit lock*).
-- **Pusat Dokumen, Kalender & Komunikasi**: Unggah PDF, generator sertifikat/dokumen massal dalam paket ZIP, pengumuman tersegmentasi (Nasional, Wilayah, Angkatan), notifikasi dapat diklik, dan kalender organisasi terpadu.
-- **Keamanan, Perlindungan & Kontrol Sistem**: Enam peran RBAC + delegasi tugas berbatas waktu, audit log (`/audit-log`), pemantauan kesehatan & error sistem (`/status-sistem`), kontrol kuota penyimpanan, serta pencadangan & pemulihan basis data.
+1. **Website Publik DPBI (`/`, `/tentang`, `/wilayah`, `/wilayah/:code`, `/bantuan`)**:
+   - Pengenalan organisasi, visi-misi, struktur 6 Bidang Pengurus Nasional (`OFFICIAL_BIDANGS`), serta pengumuman publik terpilih (`is_public = 1`).
+   - **Peta Nusantara GeoJSON Nyata**: 38 provinsi dengan *drilldown* batas poligon ~517 kabupaten/kota, pembedaan jujur Duta Domisili vs Penugasan, disertai daftar tabel & filter agar akses mudah di seluruh perangkat.
+   - **Zero PII Publik**: Data pribadi pelajar (NISN, alamat rumah, nomor telepon, kontak wali) tidak pernah diekspos pada endpoint publik.
+2. **Portal Autentikasi Aman (`/login`, `/lupa-password`, `/reset-password`, `/aktivasi`, `/verifikasi-undangan`)**:
+   - Cookie `HttpOnly` + `SameSite`, rotasi ID sesi saat ganti kata sandi, deteksi sesi kedaluwarsa (`HTTP 419`), *rate limiting* anti brute-force (`HTTP 429`), token sekali pakai, serta *Demo Switcher* khusus `DEMO_MODE=true`.
+3. **Portal Administrasi Internal (RBAC 8 Peran + 6 Bidang + Mesin Cetak A4)**:
+   - Dashboard berbasis peran & Fokus Bidang, Direktori & Verifikasi Personalia (lokasi bertingkat 4 level + deteksi duplikasi), Proposal + *Approval Matrix* + versi PDF, LKL (Daring/Luring) + foto/PDF + verifikasi koordinat *on-demand*, Laporan Bulanan & Akhir Koordinator, Task Management + lampiran + Kanban/Kalender, Pusat Dokumen + Generator Massal PDF/ZIP, Perlindungan Peserta (*Safeguarding* U18 & *Whistleblowing*), Evaluasi, Arsip & Jendela Alumni **30 Hari**, CMS Publik (`/pengaturan/cms`), Kontrol Storage, Backup ZIP + Validasi SHA-256, dan **Mesin Cetak A4** (`A4PrintEngine`).
 
 ---
 
 ## Tumpukan Teknologi
 
 | Lapisan | Teknologi |
-|---|---|
-| Frontend SPA | React 19, TypeScript, Vite 8, Tailwind CSS v4, Lucide React |
-| Backend API | Node.js (>= 22), Express 4, Multer, Cookie-Parser, jsPDF, JSZip |
-| Basis Data Lokal / Staging | SQLite (`node:sqlite` bawaan Node.js 22+, mode WAL & Foreign Keys aktif) |
-| Skema Produksi Relasional | `database/schema_mysql.sql` (MySQL / MariaDB InnoDB `utf8mb4_unicode_ci`) |
-| Pengujian Unit | `node:test` + `tsx` (`npm test`) |
+| :--- | :--- |
+| **Frontend SPA** | React 19, TypeScript, Vite 8, Tailwind CSS v4, Lucide React, Recharts |
+| **Peta & Cetak** | GeoJSON lokal 38 provinsi & 517 kab/kota (`public/maps/`), SVG Projector, HTML/CSS `@page A4` Print Engine |
+| **Backend API** | Node.js (>= 22), Express 4, Multer, Cookie-Parser, jsPDF, JSZip |
+| **Basis Data** | SQLite Mode WAL (`node:sqlite` bawaan Node.js 22+); disertai skema MySQL/MariaDB di `database/schema_mysql.sql` |
+| **Pengujian** | `node:test` + `tsx` (`npm test`), TypeScript (`npm run lint`), Chromium headless verification |
 
 ---
 
-## Cara Menjalankan di Lingkungan Lokal
-
-### Prasyarat
-- Node.js versi **22.x** atau lebih baru (diperlukan untuk modul `node:sqlite`).
-- npm versi 10+.
-
-### Langkah Instalasi
+## Menjalankan di Lingkungan Lokal
 
 ```bash
-# 1. Pasang dependensi
+# 1. Pasang dependensi (membutuhkan Node.js >= 22 dan npm 10+)
 npm install
 
-# 2. Salin templat konfigurasi lingkungan
+# 2. Salin konfigurasi lingkungan contoh
 cp .env.example .env
 
-# 3. Jalankan server pengembangan (port 3000)
+# 3. Jalankan server pengembangan di http://localhost:3000
 npm run dev
 ```
 
-Buka `http://localhost:3000` di peramban.
-
-### Perintah NPM Tersedia
+### Daftar Perintah NPM
 
 | Perintah | Fungsi |
-|---|---|
-| `npm run dev` | Menjalankan backend Express + middleware Vite dev server di port `3000` |
+| :--- | :--- |
+| `npm run dev` | Menjalankan server Express + middleware Vite dev server di port `3000` |
 | `npm run lint` | Memeriksa tipe TypeScript (`tsc --noEmit`) di seluruh proyek |
-| `npm test` | Menjalankan pengujian unit logika domain, RBAC, dan router (`tsx --test src/lib/domain.test.ts`) |
-| `npm run build` | Membangun frontend (`dist/`) dan bundel server (`server.js`) untuk produksi |
+| `npm test` | Menjalankan 12+ pengujian unit logika domain, RBAC, GeoJSON, & router (`tsx --test src/lib/domain.test.ts`) |
+| `npm run build` | Membangun frontend (`dist/`) dan bundel backend (`server.js`) siap produksi |
 | `npm start` | Menjalankan bundel produksi (`NODE_ENV=production node server.js`) |
-| `npm run package:zip` | Mengemas arsip rilis bersih `satu-dpbi-paket-final.zip` tanpa `node_modules`, `.db`, atau `.env` |
+| `npm run package:zip` | Mengemas arsip rilis bersih `satu-dpbi-paket-final.zip` |
 
 ---
 
-## Struktur Folder Proyek
+## Struktur Direktori Utama
 
 ```text
 .
 ├── .github/workflows/ci.yml        # Pipeline CI otomatis (lint, test, build)
-├── database/schema_mysql.sql       # Skema lengkap MySQL/MariaDB siap cPanel/VPS
-├── public/assets/aistudio/         # Aset statis publik (logo resmi DPBI)
-├── scripts/create-release-zip.mjs  # Skrip pembuat paket rilis ZIP bersih
-├── server/
-│   ├── db.ts                       # Inisialisasi SQLite WAL, migrasi ringan, dan direktori storage
-│   ├── routes.ts                   # Endpoint autentikasi, sesi, personalia, wilayah, proposal, LKL
-│   ├── routes_modules.ts           # Endpoint tugas, dokumen, komunikasi, sistem, pengaturan, ekspor
-│   ├── security.ts                 # Scrypt hash, rotasi sesi, rate limit, Origin/CORS check, audit log
-│   └── seed.ts                     # Data awal 38 provinsi & akun simulasi (khusus DEMO_MODE=true)
-├── server.ts                       # Entrypoint server Express + CORS + security headers + SPA fallback
-├── src/
-│   ├── components/
-│   │   ├── ui/                     # Design System terpusat (Button, FormControls, DataDisplay, Overlay, Feedback, DocumentPreview)
-│   │   ├── AppShell.tsx            # Kerangka layout utama (Sidebar dapat diciutkan, Header, Drawer Mobile)
-│   │   └── CommandPalette.tsx      # Pencarian global & navigasi cepat (Ctrl/Cmd + K)
-│   ├── context/AuthContext.tsx     # State autentikasi, tema terang/gelap, izin RBAC, & recent pages
-│   ├── hooks/useUnsavedChanges.ts  # Hook penjaga formulir belum tersimpan
-│   ├── lib/
-│   │   ├── api.ts                  # Klien HTTP terpadu (credentials: include, VITE_API_BASE_URL, 419 handling)
-│   │   ├── provinces.ts            # Daftar resmi 38 provinsi Indonesia
-│   │   ├── rbac.ts                 # Matriks RBAC, delegasi, matriks proposal, & kalkulator alumni 30 hari
-│   │   ├── routes.ts               # Router URL bersih & berparameter
-│   │   └── types.ts                # Definisi tipe TypeScript bersama
-│   ├── pages/                      # Seluruh halaman modul aplikasi
-│   └── App.tsx                     # Root router & ErrorBoundary
-├── vercel.json                     # Konfigurasi SPA rewrite & header keamanan Vercel
-└── .env.example                    # Daftar variabel lingkungan tanpa rahasia
+├── database/schema_mysql.sql       # Skema relasional MySQL/MariaDB (InnoDB)
+├── docs/                           # Dokumentasi arsitektur, RBAC, API, deployment, & panduan peran
+├── public/
+│   ├── assets/aistudio/            # Aset gambar & logo resmi DPBI
+│   └── maps/                       # GeoJSON 38 provinsi + 38 berkas kabupaten/kota + indeks BPS
+├── scripts/create-release-zip.mjs  # Pengemas rilis ZIP bersih
+├── server/                         # Backend SQLite, keamanan, seed, API inti & modul CMS
+├── server.ts                       # Entrypoint Express 4 + CORS + security headers + SPA
+└── src/
+    ├── components/
+    │   ├── print/A4PrintEngine.tsx # Mesin Pratinjau & Cetak Dokumen A4 (Potret/Lanskap)
+    │   ├── IndonesiaMap.tsx        # Peta GeoJSON Interaktif 38 Provinsi & Drilldown Kab/Kota
+    │   ├── AppShell.tsx            # Kerangka layout internal (Sidebar, Header, Mobile Drawer)
+    │   └── ui/                     # Design System terpusat (Button, FormControls, DataDisplay, Overlay, Feedback)
+    ├── lib/                        # api.ts, rbac.ts (6 Bidang), geojson.ts, provinces.ts, routes.ts, domain.test.ts
+    └── pages/                      # Seluruh halaman Website Publik, Auth, & Modul Internal
 ```
 
 ---
 
 ## Indeks Dokumentasi Lengkap
 
-1. [Panduan Pengguna (`PANDUAN_PENGGUNA.md`)](./PANDUAN_PENGGUNA.md)
-2. [Panduan Administrator & Super Admin (`PANDUAN_ADMIN.md`)](./PANDUAN_ADMIN.md)
-3. [Panduan Keamanan & Tata Kelola Sesi (`PANDUAN_KEAMANAN.md`)](./PANDUAN_KEAMANAN.md)
-4. [Panduan Backup & Restore (`PANDUAN_BACKUP_RESTORE.md`)](./PANDUAN_BACKUP_RESTORE.md)
-5. [Arsitektur Sistem (`ARSITEKTUR_SISTEM.md`)](./ARSITEKTUR_SISTEM.md)
-6. [Struktur Basis Data (`STRUKTUR_DATABASE.md`)](./STRUKTUR_DATABASE.md)
-7. [Panduan Pembaruan & Rilis (`PANDUAN_PEMBARUAN.md`)](./PANDUAN_PEMBARUAN.md)
-8. [Panduan Troubleshooting (`PANDUAN_TROUBLESHOOTING.md`)](./PANDUAN_TROUBLESHOOTING.md)
-9. [Panduan Deployment GitHub → Vercel → Domainesia → ArenHost (`PANDUAN_DEPLOYMENT_SATU_DPBI.md`)](./PANDUAN_DEPLOYMENT_SATU_DPBI.md)
-10. [Catatan Perubahan (`CHANGELOG.md`)](./CHANGELOG.md)
-11. [Laporan Pengujian (`LAPORAN_PENGUJIAN.md`)](./LAPORAN_PENGUJIAN.md)
+### Dokumentasi Teknis & Tata Kelola (`/docs/`)
+1. [Product Requirements Document (`docs/PRD.md`)](./docs/PRD.md)
+2. [Arsitektur Sistem (`docs/ARCHITECTURE.md`)](./docs/ARCHITECTURE.md)
+3. [Struktur Basis Data (`docs/DATABASE.md`)](./docs/DATABASE.md)
+4. [Matriks RBAC, 6 Bidang & Delegasi (`docs/RBAC.md`)](./docs/RBAC.md)
+5. [Referensi Endpoint API (`docs/API.md`)](./docs/API.md)
+6. [Alur Kerja Operasional (`docs/WORKFLOWS.md`)](./docs/WORKFLOWS.md)
+7. [Keamanan & Manajemen Sesi (`docs/SECURITY.md`)](./docs/SECURITY.md)
+8. [Perlindungan Data Pribadi & Safeguarding (`docs/DATA-PROTECTION.md`)](./docs/DATA-PROTECTION.md)
+9. [Sumber Data Peta & Lisensi (`docs/MAP-DATA-SOURCES.md`)](./docs/MAP-DATA-SOURCES.md)
+10. [Panduan Deployment Produksi (`docs/DEPLOYMENT.md`)](./docs/DEPLOYMENT.md)
+11. [Panduan Deployment ArenHost (`docs/DEPLOYMENT-ARENHOST.md`)](./docs/DEPLOYMENT-ARENHOST.md)
+12. [Panduan Backup & Restore (`docs/BACKUP-RESTORE.md`)](./docs/BACKUP-RESTORE.md)
+13. [Panduan Pengguna: Duta & Alumni (`docs/USER-GUIDE-DUTA.md`)](./docs/USER-GUIDE-DUTA.md)
+14. [Panduan Pengguna: Koordinator Wilayah (`docs/USER-GUIDE-KORWIL.md`)](./docs/USER-GUIDE-KORWIL.md)
+15. [Panduan Pengguna: Admin & Pengurus Nasional (`docs/USER-GUIDE-ADMIN.md`)](./docs/USER-GUIDE-ADMIN.md)
+16. [Laporan Audit & Perombakan UI/UX (`docs/UI-UX-AUDIT.md`)](./docs/UI-UX-AUDIT.md)
+17. [Panduan Serah Terima (`docs/HANDOVER_GUIDE.md`)](./docs/HANDOVER_GUIDE.md)
+
+### Dokumentasi Operasional Root
+- [Catatan Perubahan (`CHANGELOG.md`)](./CHANGELOG.md)
+- [Laporan Pengujian Terbaru (`LAPORAN_PENGUJIAN.md`)](./LAPORAN_PENGUJIAN.md)
+- Panduan Pendamping Bahasa Indonesia: `PANDUAN_PENGGUNA.md`, `PANDUAN_ADMIN.md`, `PANDUAN_KEAMANAN.md`, `PANDUAN_BACKUP_RESTORE.md`, `PANDUAN_DEPLOYMENT_SATU_DPBI.md`, `ARSITEKTUR_SISTEM.md`, `STRUKTUR_DATABASE.md`, `PANDUAN_PEMBARUAN.md`, `PANDUAN_TROUBLESHOOTING.md`.

@@ -45,6 +45,7 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/pengaturan/sesi': 'Perangkat & Sesi Aktif',
   '/pengaturan/pengguna': 'Manajemen Pengguna',
   '/pengaturan/hak-akses': 'Hak Akses & Peran (RBAC)',
+  '/pengaturan/cms': 'CMS Portal Publik & Bantuan',
   '/bantuan': 'Pusat Bantuan Internal',
 };
 

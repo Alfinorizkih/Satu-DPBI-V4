@@ -7,6 +7,7 @@ import {
   FileText,
   MapPin,
   Plus,
+  Printer,
   RotateCcw,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -21,6 +22,7 @@ import {
   StatusIndicator,
 } from '../components/ui/Primitives';
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
 interface CoordReport {
@@ -74,6 +76,7 @@ export function CoordinatorReportsPage() {
   const [reviewTarget, setReviewTarget] = useState<CoordReport | null>(null);
   const [reviewNote, setReviewNote] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const [form, setForm] = useState({
     reportType: 'bulanan' as 'bulanan' | 'akhir',
@@ -244,6 +247,41 @@ export function CoordinatorReportsPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusIndicator status={r.status} />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPrintConfig({
+                          template: 'laporan_koordinator',
+                          documentNumber: r.referenceNumber,
+                          title: `${r.reportType === 'akhir' ? 'Laporan Akhir Wilayah' : 'Laporan Bulanan Wilayah'} — ${r.provinceName}`,
+                          subtitle: `Periode ${r.periodLabel}`,
+                          issuedDate: r.createdAt,
+                          metadata: [
+                            { label: 'Provinsi', value: r.provinceName },
+                            { label: 'Koordinator Wilayah', value: r.coordinatorName },
+                            { label: 'Periode Laporan', value: r.periodLabel },
+                            { label: 'Rekap LKL Diterima', value: `${r.lklRecapCount} kegiatan` },
+                            { label: 'Kelengkapan', value: `${comp.completed}/${comp.total} (${comp.score}%)` },
+                            { label: 'Status', value: r.status.replace(/_/g, ' ') },
+                          ],
+                          sections: [
+                            { heading: 'Kondisi Personel Wilayah', body: r.personnelCondition },
+                            { heading: 'Ringkasan Kegiatan & Capaian', body: r.activitiesSummary },
+                            ...(r.obstacles || r.coachingNeeds
+                              ? [{ heading: 'Kendala & Kebutuhan Pembinaan', body: `${r.obstacles || '—'}\nPembinaan: ${r.coachingNeeds || '—'}` }]
+                              : []),
+                            ...(r.followUpPlan ? [{ heading: 'Rencana Tindak Lanjut', body: r.followUpPlan }] : []),
+                            ...(r.reviewNote ? [{ heading: 'Catatan Pemeriksaan Nasional', body: r.reviewNote }] : []),
+                          ],
+                          signatoryName: r.coordinatorName,
+                          signatoryRole: `Koordinator Wilayah ${r.provinceName}`,
+                          signatoryLocation: r.provinceName,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak A4
+                    </button>
                     {r.pdfFileId && (
                       <>
                         <button
@@ -504,6 +542,12 @@ export function CoordinatorReportsPage() {
           setLocVerified(true);
           setLocOpen(false);
         }}
+      />
+
+      <A4PrintModal
+        open={Boolean(printConfig)}
+        config={printConfig}
+        onClose={() => setPrintConfig(null)}
       />
     </div>
   );

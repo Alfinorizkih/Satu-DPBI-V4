@@ -3,18 +3,180 @@ import assert from 'node:assert/strict';
 import {
   calculateAlumniWindow,
   calculateProfileCompleteness,
+  classifyRegencyPresence,
   formatReferenceNumber,
   getProvinceCount,
   hasPermission,
+  isRecordRelevantToBidang,
+  OFFICIAL_BIDANGS,
+  resolveBidangDefinition,
   resolveEffectivePermissions,
   resolveProposalApprover,
+  sanitizePublicStatsPayload,
+  summarizeRegencyCoverage,
   verifyCoordinateInProvince,
 } from './rbac';
-import { matchPrivateRoute, normalizePathname, resolveBaseNavPath } from './routes';
-import type { DelegationRecord } from './types';
+import {
+  computeCollectionBBox,
+  computeFeatureSvgCenter,
+  geometryToSvgPath,
+  projectPoint,
+  type GeoJsonFeature,
+} from './geojson';
+import { isPublicWebsitePath, matchPrivateRoute, normalizePathname, resolveBaseNavPath } from './routes';
+import type { DelegationRecord, RegencyRecord } from './types';
 
 test('supports all 38 official Indonesian provinces', () => {
   assert.equal(getProvinceCount(), 38);
+});
+
+test('defines all 6 official national Bidang and matches proposals accurately', () => {
+  assert.equal(OFFICIAL_BIDANGS.length, 6);
+  assert.deepEqual(
+    OFFICIAL_BIDANGS.map((b) => b.number),
+    ['01', '02', '03', '04', '05', '06']
+  );
+
+  const edu = resolveBidangDefinition('Bidang Pendidikan & Kebudayaan');
+  assert.equal(edu?.code, 'pendidikan_kebudayaan');
+
+  const mediaAlias = resolveBidangDefinition('Media Publikasi');
+  assert.equal(mediaAlias?.code, 'media_publikasi_teknologi');
+
+  assert.equal(
+    isRecordRelevantToBidang('Bidang Pendidikan & Kebudayaan', 'Kebudayaan', 'Festival / Pameran Budaya'),
+    true
+  );
+  assert.equal(
+    isRecordRelevantToBidang('Bidang Pendidikan & Kebudayaan', 'Bidang Hubungan & Kemitraan', 'MoU Lembaga'),
+    false
+  );
+});
+
+test('distinguishes Duta domicile vs assignment vs coordinator/activity coverage in regencies', () => {
+  const domicileOnly = classifyRegencyPresence({
+    coordinatorName: null,
+    domicileDutaCount: 2,
+    assignmentDutaCount: 0,
+    lklCount: 0,
+    proposalCount: 0,
+  });
+  assert.equal(domicileOnly.derivedStatus, 'dalam_pembinaan');
+  assert.equal(domicileOnly.hasDomicileOnly, true);
+
+  const activeReg = classifyRegencyPresence({
+    coordinatorName: 'Siti Koordinator',
+    domicileDutaCount: 1,
+    assignmentDutaCount: 2,
+    lklCount: 1,
+    proposalCount: 1,
+  });
+  assert.equal(activeReg.derivedStatus, 'aktif');
+  assert.equal(activeReg.hasOfficialCoordinator, true);
+
+  const sampleRegencies: RegencyRecord[] = [
+    {
+      code: '3273',
+      provinceCode: '32',
+      name: 'Kota Bandung',
+      kind: 'kota',
+      status: 'aktif',
+      coordinatorName: 'Koordinator Bandung',
+      coachingNote: null,
+      domicileDutaCount: 2,
+      assignmentDutaCount: 2,
+      lklCount: 3,
+      proposalCount: 1,
+    },
+    {
+      code: '3204',
+      provinceCode: '32',
+      name: 'Kabupaten Bandung',
+      kind: 'kabupaten',
+      status: 'dalam_pembinaan',
+      coordinatorName: null,
+      coachingNote: null,
+      domicileDutaCount: 1,
+      assignmentDutaCount: 0,
+      lklCount: 0,
+      proposalCount: 0,
+    },
+  ];
+  const summary = summarizeRegencyCoverage(sampleRegencies);
+  assert.equal(summary.total, 2);
+  assert.equal(summary.active, 1);
+  assert.equal(summary.domicileCovered, 2);
+  assert.equal(summary.assignmentCovered, 1);
+  assert.equal(summary.withActivities, 1);
+});
+
+test('sanitizes public statistics payload based on privacy approval flag', () => {
+  const hidden = sanitizePublicStatsPayload(
+    {
+      activeProvinces: 12,
+      developingProvinces: 8,
+      totalProvinces: 38,
+      coveredRegencies: 45,
+      totalRegencies: 514,
+      activePersonnel: 240,
+      approvedActivities: 38,
+      activeBatches: 1,
+      showPublicDutaCount: false,
+    },
+    false
+  );
+  assert.equal(hidden.activePersonnel, null);
+  assert.equal(hidden.totalProvinces, 38);
+
+  const shown = sanitizePublicStatsPayload(
+    {
+      activeProvinces: 12,
+      totalProvinces: 38,
+      activePersonnel: 240,
+      approvedActivities: 38,
+      activeBatches: 1,
+    },
+    true
+  );
+  assert.equal(shown.activePersonnel, 240);
+});
+
+test('computes GeoJSON bounding boxes and SVG path projections faithfully', () => {
+  const polyFeature: GeoJsonFeature = {
+    type: 'Feature',
+    properties: { KODE_PROV: '31' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [106.7, -6.3],
+          [106.9, -6.3],
+          [106.9, -6.1],
+          [106.7, -6.1],
+          [106.7, -6.3],
+        ],
+      ],
+    },
+  };
+  const bbox = computeCollectionBBox([polyFeature]);
+  assert.ok(bbox.minLng < 106.7);
+  assert.ok(bbox.maxLng > 106.9);
+  assert.ok(bbox.minLat < -6.3);
+  assert.ok(bbox.maxLat > -6.1);
+
+  const bounds = { width: 400, height: 300, padding: 10 };
+  const [x1, y1] = projectPoint(106.7, -6.1, bbox, bounds);
+  const [x2, y2] = projectPoint(106.9, -6.3, bbox, bounds);
+  assert.ok(x2 > x1);
+  assert.ok(y2 > y1);
+
+  const path = geometryToSvgPath(polyFeature.geometry, bbox, bounds);
+  assert.ok(path.startsWith('M'));
+  assert.ok(path.endsWith('Z'));
+
+  const [cx, cy] = computeFeatureSvgCenter(polyFeature.geometry, bbox, bounds);
+  assert.ok(cx > x1 && cx < x2);
+  assert.ok(cy > y1 && cy < y2);
 });
 
 test('RBAC isolates Duta and Alumni from national system/command center actions', () => {
@@ -115,8 +277,25 @@ test('Profile completeness & reference number generator produce exact institutio
   assert.equal(formatReferenceNumber('PROP', 2026, 42), 'DPBI/PROP/2026/0042');
 });
 
-test('Clean parameterized router resolves deep links, sub-routes, and active nav bases safely', () => {
+test('Clean parameterized router resolves public paths, CMS route, deep links, and active nav bases safely', () => {
   assert.equal(normalizePathname('/proposal/baru/?ref=1#top'), '/proposal/baru');
+
+  assert.equal(isPublicWebsitePath('/'), true);
+  assert.equal(isPublicWebsitePath('/tentang'), true);
+  assert.equal(isPublicWebsitePath('/wilayah'), true);
+  assert.equal(isPublicWebsitePath('/wilayah/32'), true);
+  assert.equal(isPublicWebsitePath('/bantuan'), true);
+  assert.equal(isPublicWebsitePath('/login'), true);
+  assert.equal(isPublicWebsitePath('/dashboard'), false);
+
+  const cmsRoute = matchPrivateRoute('/pengaturan/cms');
+  assert.deepEqual(cmsRoute, {
+    kind: 'settings',
+    module: 'pengaturan',
+    title: 'CMS Portal Publik & Bantuan',
+    initialTab: 'cms',
+  });
+  assert.equal(matchPrivateRoute('/cms')?.kind, 'settings');
 
   const createProp = matchPrivateRoute('/proposal/baru');
   assert.deepEqual(createProp, {
@@ -164,4 +343,5 @@ test('Clean parameterized router resolves deep links, sub-routes, and active nav
   assert.equal(resolveBaseNavPath('/proposal/prop-12'), '/proposal');
   assert.equal(resolveBaseNavPath('/pengaturan/sesi'), '/pengaturan');
   assert.equal(resolveBaseNavPath('/pengaturan/hak-akses'), '/pengaturan/hak-akses');
+  assert.equal(resolveBaseNavPath('/pengaturan/cms'), '/pengaturan/cms');
 });

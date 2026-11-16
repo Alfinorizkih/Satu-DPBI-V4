@@ -27,8 +27,11 @@ import {
   calculateAlumniWindow,
   calculateProfileCompleteness,
   hasPermission,
+  isRecordRelevantToBidang,
+  resolveBidangDefinition,
   resolveProposalApprover,
   ROLE_LABELS,
+  sanitizePublicStatsPayload,
   verifyCoordinateInProvince,
 } from '../src/lib/rbac';
 import { PROVINCE_BY_CODE } from '../src/lib/provinces';
@@ -80,6 +83,9 @@ function maskPersonnelRow(row: Record<string, unknown>, viewer: AuthenticatedReq
     phone: canSeeSensitive ? String(row.phone || '') : 'Terlindungi',
     provinceCode: String(row.province_code),
     provinceName: PROVINCE_BY_CODE.get(String(row.province_code))?.name ?? String(row.province_code),
+    assignmentProvinceCode: row.assignment_province_code ? String(row.assignment_province_code) : String(row.province_code),
+    assignmentProvinceName: PROVINCE_BY_CODE.get(String(row.assignment_province_code || row.province_code))?.name ?? String(row.province_code),
+    regencyCode: row.regency_code ? String(row.regency_code) : null,
     regency: String(row.regency || ''),
     district: canSeeSensitive ? String(row.district || '') : '',
     village: canSeeSensitive ? String(row.village || '') : '',
@@ -123,46 +129,91 @@ function maskPersonnelRow(row: Record<string, unknown>, viewer: AuthenticatedReq
 }
 
 export function registerCoreRoutes(app: Express): void {
-  // ==================== PUBLIC PORTAL ====================
+  // ==================== PUBLIC PORTAL & CMS ====================
   app.get('/api/public/overview', (_req, res: Response) => {
     const db = getDb();
     const userCount = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
-    const statsApprovedRow = db
-      .prepare("SELECT value FROM system_settings WHERE key = 'public_stats_approved'")
-      .get() as { value: string } | undefined;
-    const statsApproved = statsApprovedRow?.value === 'true';
+    const settingsRows = db
+      .prepare("SELECT key, value FROM system_settings WHERE key IN ('public_stats_approved', 'public_show_duta_count')")
+      .all() as { key: string; value: string }[];
+    const settingsMap = new Map(settingsRows.map((r) => [r.key, r.value]));
+    const statsApproved = settingsMap.get('public_stats_approved') === 'true';
+    const showDutaCount = settingsMap.get('public_show_duta_count') !== 'false';
 
-    let publicStats: {
-      activeProvinces: number;
-      totalProvinces: number;
-      activePersonnel: number;
-      approvedActivities: number;
-      activeBatches: number;
-    } | null = null;
+    const activeProvinces = (db.prepare("SELECT COUNT(*) AS c FROM provinces WHERE status = 'aktif'").get() as { c: number }).c;
+    const developingProvinces = (db.prepare("SELECT COUNT(*) AS c FROM provinces WHERE status = 'dalam_pengembangan'").get() as { c: number }).c;
+    const totalRegencies = (db.prepare('SELECT COUNT(*) AS c FROM regencies').get() as { c: number }).c;
+    const coveredRegencies = (db.prepare("SELECT COUNT(*) AS c FROM regencies WHERE status IN ('aktif', 'dalam_pengembangan', 'dalam_pembinaan')").get() as { c: number }).c;
+    const activePersonnel = (db.prepare("SELECT COUNT(*) AS c FROM personnel WHERE personnel_status = 'aktif'").get() as { c: number }).c;
+    const approvedActivities = (db.prepare("SELECT COUNT(*) AS c FROM lkl_reports WHERE status = 'diterima'").get() as { c: number }).c;
+    const activeBatches = (db.prepare("SELECT COUNT(*) AS c FROM batches WHERE status = 'aktif'").get() as { c: number }).c;
 
-    if (statsApproved) {
-      const activeProvinces = (
-        db.prepare("SELECT COUNT(*) AS c FROM provinces WHERE status = 'aktif'").get() as {
-          c: number;
+    const publicStats = statsApproved
+      ? {
+          ...sanitizePublicStatsPayload(
+            {
+              activeProvinces,
+              totalProvinces: 38,
+              activePersonnel,
+              approvedActivities,
+              activeBatches,
+            },
+            showDutaCount
+          ),
+          developingProvinces,
+          coveredRegencies,
+          totalRegencies,
         }
-      ).c;
-      const activePersonnel = (
-        db.prepare("SELECT COUNT(*) AS c FROM personnel WHERE personnel_status = 'aktif'").get() as { c: number }
-      ).c;
-      const approvedActivities = (
-        db.prepare("SELECT COUNT(*) AS c FROM lkl_reports WHERE status = 'diterima'").get() as { c: number }
-      ).c;
-      const activeBatches = (
-        db.prepare("SELECT COUNT(*) AS c FROM batches WHERE status = 'aktif'").get() as { c: number }
-      ).c;
-      publicStats = {
-        activeProvinces,
-        totalProvinces: 38,
-        activePersonnel,
-        approvedActivities,
-        activeBatches,
-      };
+      : null;
+
+    // CMS Public Content (Sanitized)
+    const cmsRows = db.prepare('SELECT key, title, body, updated_at FROM cms_contents').all() as {
+      key: string;
+      title: string;
+      body: string;
+      updated_at: string;
+    }[];
+    const cms: Record<string, { title: string; body: string; updatedAt: string }> = {};
+    for (const row of cmsRows) {
+      cms[row.key] = { title: row.title, body: row.body, updatedAt: row.updated_at };
     }
+
+    // Approved Public Announcements Only (never leaks internal operational notices)
+    const publicAnnouncements = db
+      .prepare(
+        `SELECT id, title, body, scope, priority, published_at
+         FROM announcements
+         WHERE is_public = 1 AND status = 'terbit'
+         ORDER BY published_at DESC
+         LIMIT 6`
+      )
+      .all() as { id: string; title: string; body: string; scope: string; priority: string; published_at: string }[];
+
+    // Public-safe province aggregate summary (ZERO PII: no email, phone, home address, or personal ID)
+    const provRows = db
+      .prepare(
+        `SELECT pr.code, pr.name, pr.island, pr.status, pr.logo_file_id, pr.description,
+          (SELECT COUNT(*) FROM regencies rg WHERE rg.province_code = pr.code) AS regency_count,
+          (SELECT COUNT(*) FROM regencies rg WHERE rg.province_code = pr.code AND rg.status IN ('aktif', 'dalam_pengembangan')) AS active_regency_count,
+          (SELECT COUNT(*) FROM lkl_reports l WHERE l.province_code = pr.code AND l.status = 'diterima') AS approved_lkl_count,
+          (SELECT COUNT(*) FROM personnel p WHERE p.province_code = pr.code AND p.role_code = 'duta' AND p.personnel_status = 'aktif') AS active_duta_count
+         FROM provinces pr
+         ORDER BY pr.code ASC`
+      )
+      .all() as Record<string, unknown>[];
+
+    const publicProvinces = provRows.map((r) => ({
+      code: String(r.code),
+      name: String(r.name),
+      island: String(r.island),
+      status: String(r.status),
+      logoFileId: r.logo_file_id ? String(r.logo_file_id) : null,
+      description: r.description ? String(r.description) : null,
+      regencyCount: Number(r.regency_count || 0),
+      activeRegencyCount: Number(r.active_regency_count || 0),
+      approvedLklCount: Number(r.approved_lkl_count || 0),
+      activeDutaCount: showDutaCount ? Number(r.active_duta_count || 0) : null,
+    }));
 
     const demoAccounts = IS_DEMO_MODE
       ? (
@@ -177,6 +228,7 @@ export function registerCoreRoutes(app: Express): void {
           fullName: String(u.full_name),
           role: String(u.role) as RoleCode,
           roleLabel: ROLE_LABELS[u.role as RoleCode] ?? String(u.role),
+          bidang: u.bidang ? String(u.bidang) : null,
           provinceName: u.province_code ? PROVINCE_BY_CODE.get(String(u.province_code))?.name ?? null : null,
         }))
       : [];
@@ -185,9 +237,121 @@ export function registerCoreRoutes(app: Express): void {
       isDemoMode: IS_DEMO_MODE,
       bootstrapRequired: !IS_DEMO_MODE && userCount === 0,
       statsApproved,
+      showDutaCount,
       publicStats,
+      cms,
+      publicAnnouncements: publicAnnouncements.map((a) => ({
+        id: a.id,
+        title: a.title,
+        body: a.body,
+        scope: a.scope,
+        priority: a.priority,
+        publishedAt: a.published_at,
+      })),
+      provinces: publicProvinces,
       demoAccounts,
     });
+  });
+
+  app.get('/api/public/provinces/:code', (req, res: Response) => {
+    const code = String(req.params.code).replace(/[^0-9]/g, '');
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT pr.code, pr.name, pr.island, pr.status, pr.logo_file_id, pr.description,
+                (SELECT COUNT(*) FROM lkl_reports l WHERE l.province_code = pr.code AND l.status = 'diterima') AS approved_lkl_count
+         FROM provinces pr WHERE pr.code = ?`
+      )
+      .get(code) as Record<string, unknown> | undefined;
+    if (!row) {
+      res.status(404).json({ error: 'Provinsi tidak ditemukan.' });
+      return;
+    }
+    const regRows = db
+      .prepare('SELECT code, name, kind, status, coordinator_name FROM regencies WHERE province_code = ? ORDER BY kind DESC, name ASC')
+      .all(code) as Record<string, unknown>[];
+
+    res.json({
+      province: {
+        code: String(row.code),
+        name: String(row.name),
+        island: String(row.island),
+        status: String(row.status),
+        logoFileId: row.logo_file_id ? String(row.logo_file_id) : null,
+        description: row.description ? String(row.description) : null,
+        approvedLklCount: Number(row.approved_lkl_count || 0),
+        regencyCount: regRows.length,
+        activeRegencyCount: regRows.filter((r) => r.status === 'aktif' || r.status === 'dalam_pengembangan').length,
+      },
+      regencies: regRows.map((r) => ({
+        code: String(r.code),
+        provinceCode: code,
+        name: String(r.name),
+        kind: String(r.kind),
+        status: String(r.status),
+        hasCoordinator: Boolean(r.coordinator_name),
+      })),
+    });
+  });
+
+  app.get('/api/public/help', (_req, res: Response) => {
+    const db = getDb();
+    const articles = db
+      .prepare('SELECT id, slug, category, role_target, title, summary, content, sort_order, is_published, updated_at FROM help_articles WHERE is_published = 1 ORDER BY sort_order ASC, title ASC')
+      .all() as Record<string, unknown>[];
+    res.json({
+      articles: articles.map((a) => ({
+        id: String(a.id),
+        slug: String(a.slug),
+        category: String(a.category),
+        roleTarget: String(a.role_target),
+        title: String(a.title),
+        summary: String(a.summary),
+        content: String(a.content),
+        sortOrder: Number(a.sort_order),
+        isPublished: Boolean(a.is_published),
+        updatedAt: String(a.updated_at),
+      })),
+    });
+  });
+
+  app.get('/api/public/files/:id', (req, res: Response) => {
+    const db = getDb();
+    const fileId = String(req.params.id).replace(/[^a-zA-Z0-9-]/g, '');
+    const row = db
+      .prepare("SELECT stored_name, mime_type, original_name FROM stored_files WHERE id = ? AND module IN ('province_logo', 'public_media')")
+      .get(fileId) as { stored_name: string; mime_type: string; original_name: string } | undefined;
+    if (!row || !['image/jpeg', 'image/png', 'image/webp'].includes(row.mime_type)) {
+      res.status(404).json({ error: 'Aset media publik tidak ditemukan.' });
+      return;
+    }
+    const fullPath = path.join(PRIVATE_STORAGE_DIR, path.basename(row.stored_name));
+    if (!fullPath.startsWith(PRIVATE_STORAGE_DIR) || !fs.existsSync(fullPath)) {
+      res.status(404).json({ error: 'Berkas aset tidak ditemukan.' });
+      return;
+    }
+    res.setHeader('Content-Type', row.mime_type);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.sendFile(fullPath);
+  });
+
+  app.get('/api/locations/cascade', (req, res: Response) => {
+    const db = getDb();
+    const provinceCode = req.query.provinceCode ? String(req.query.provinceCode).replace(/[^0-9]/g, '') : '';
+    const regencyCode = req.query.regencyCode ? String(req.query.regencyCode).replace(/[^0-9.]/g, '') : '';
+    const districtCode = req.query.districtCode ? String(req.query.districtCode).replace(/[^0-9.]/g, '') : '';
+
+    const regencies = provinceCode
+      ? db.prepare('SELECT code, province_code, name, kind, status FROM regencies WHERE province_code = ? ORDER BY kind DESC, name ASC').all(provinceCode)
+      : [];
+    const districts = regencyCode
+      ? db.prepare('SELECT code, regency_code, name FROM districts WHERE regency_code = ? ORDER BY name ASC').all(regencyCode)
+      : [];
+    const villages = districtCode
+      ? db.prepare('SELECT code, district_code, name FROM villages WHERE district_code = ? ORDER BY name ASC').all(districtCode)
+      : [];
+
+    res.json({ regencies, districts, villages });
   });
 
   // ==================== AUTHENTICATION ====================
@@ -887,6 +1051,23 @@ export function registerCoreRoutes(app: Express): void {
       location: String(e.location),
     }));
 
+    const activeBidang = user.role === 'pengurus_nasional' ? resolveBidangDefinition(user.bidang) : null;
+    const bidangStats = activeBidang
+      ? (() => {
+          const allProps = db
+            .prepare("SELECT id, bidang, category, status FROM proposals WHERE status IN ('diajukan', 'pemeriksaan_administrasi', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')")
+            .all() as { id: string; bidang: string; category: string; status: string }[];
+          const scopedProps = allProps.filter((p) => isRecordRelevantToBidang(user.bidang, p.bidang, p.category));
+          return {
+            code: activeBidang.code,
+            label: activeBidang.label,
+            description: activeBidang.description,
+            primaryModules: activeBidang.primaryModules,
+            scopedPendingProposals: scopedProps.length,
+          };
+        })()
+      : null;
+
     res.json({
       summary: {
         totalPersonnel,
@@ -899,6 +1080,7 @@ export function registerCoreRoutes(app: Express): void {
         unreadNotifications,
         totalStorageBytes,
       },
+      bidangScope: bidangStats,
       attentionItems,
       charts: {
         personnelPerBatch,
@@ -975,16 +1157,19 @@ export function registerCoreRoutes(app: Express): void {
     res.json({ results });
   });
 
-  // ==================== PROVINCES, MAP, HANDOVER & LOCATION ====================
+  // ==================== PROVINCES, REGENCIES, HANDOVER & LOCATION ====================
   app.get('/api/provinces', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const rows = db
       .prepare(
         `SELECT pr.*,
           (SELECT COUNT(*) FROM personnel p WHERE p.province_code = pr.code AND p.role_code = 'duta' AND p.personnel_status = 'aktif') AS active_duta_count,
+          (SELECT COUNT(*) FROM personnel p WHERE COALESCE(NULLIF(p.assignment_province_code, ''), p.province_code) = pr.code AND p.role_code = 'duta' AND p.personnel_status = 'aktif') AS assignment_duta_count,
           (SELECT COUNT(*) FROM personnel p WHERE p.province_code = pr.code AND p.personnel_status = 'alumni') AS alumni_count,
           (SELECT COUNT(*) FROM proposals prop WHERE prop.province_code = pr.code) AS proposal_count,
-          (SELECT COUNT(*) FROM lkl_reports l WHERE l.province_code = pr.code) AS lkl_count
+          (SELECT COUNT(*) FROM lkl_reports l WHERE l.province_code = pr.code) AS lkl_count,
+          (SELECT COUNT(*) FROM regencies rg WHERE rg.province_code = pr.code) AS regency_count,
+          (SELECT COUNT(*) FROM regencies rg WHERE rg.province_code = pr.code AND rg.status IN ('aktif', 'dalam_pengembangan')) AS active_regency_count
          FROM provinces pr
          ORDER BY pr.code ASC`
       )
@@ -998,10 +1183,16 @@ export function registerCoreRoutes(app: Express): void {
         status: String(r.status),
         coordinatorId: r.coordinator_id ? String(r.coordinator_id) : null,
         coordinatorName: r.coordinator_name ? String(r.coordinator_name) : null,
+        logoFileId: r.logo_file_id ? String(r.logo_file_id) : null,
+        description: r.description ? String(r.description) : null,
         activeDutaCount: Number(r.active_duta_count),
+        domicileDutaCount: Number(r.active_duta_count),
+        assignmentDutaCount: Number(r.assignment_duta_count),
         alumniCount: Number(r.alumni_count),
         proposalCount: Number(r.proposal_count),
         lklCount: Number(r.lkl_count),
+        regencyCount: Number(r.regency_count || 0),
+        activeRegencyCount: Number(r.active_regency_count || 0),
         monthlyReportSubmitted: Number(r.lkl_count) > 0,
         finalReportSubmitted: false,
         coachingNote: r.coaching_note ? String(r.coaching_note) : null,
@@ -1022,16 +1213,135 @@ export function registerCoreRoutes(app: Express): void {
       res.status(403).json({ error: 'Koordinator Wilayah hanya dapat memperbarui provinsi penugasannya.' });
       return;
     }
-    const { status, coordinatorName, coachingNote } = req.body ?? {};
+    const { status, coordinatorName, coachingNote, logoFileId, description } = req.body ?? {};
     const db = getDb();
-    db.prepare('UPDATE provinces SET status = COALESCE(?, status), coordinator_name = COALESCE(?, coordinator_name), coaching_note = COALESCE(?, coaching_note) WHERE code = ?').run(
+    db.prepare(
+      `UPDATE provinces SET
+         status = COALESCE(?, status),
+         coordinator_name = COALESCE(?, coordinator_name),
+         coaching_note = COALESCE(?, coaching_note),
+         logo_file_id = COALESCE(?, logo_file_id),
+         description = COALESCE(?, description)
+       WHERE code = ?`
+    ).run(
       status ?? null,
       coordinatorName ?? null,
       coachingNote ?? null,
+      logoFileId ?? null,
+      description ?? null,
       code
     );
-    writeAuditLog(db, user, 'UPDATE_PROVINCE', 'province', code, 'berhasil', `Pembaruan status wilayah ${code}`);
+    db.prepare(
+      `INSERT INTO region_history (id, region_type, region_code, action, summary, actor_name, created_at)
+       VALUES (?, 'provinsi', ?, 'PEMBARUAN_DATA', ?, ?, ?)`
+    ).run(
+      crypto.randomUUID(),
+      code,
+      `Pembaruan provinsi ${PROVINCE_BY_CODE.get(code)?.name ?? code}${status ? ` (status: ${status})` : ''}${logoFileId ? ' + logo wilayah' : ''}`,
+      user.fullName,
+      new Date().toISOString()
+    );
+    writeAuditLog(db, user, 'UPDATE_PROVINCE', 'province', code, 'berhasil', `Pembaruan data wilayah ${code}`);
     res.json({ ok: true });
+  });
+
+  app.get('/api/provinces/:code/regencies', requireAuth, requirePermission('wilayah', 'view'), (req: AuthenticatedRequest, res: Response) => {
+    const code = String(req.params.code).replace(/[^0-9]/g, '');
+    const db = getDb();
+    const rows = db
+      .prepare('SELECT * FROM regencies WHERE province_code = ? ORDER BY kind DESC, name ASC')
+      .all(code) as Record<string, unknown>[];
+    res.json({
+      regencies: rows.map((r) => ({
+        code: String(r.code),
+        provinceCode: String(r.province_code),
+        name: String(r.name),
+        kind: String(r.kind),
+        status: String(r.status),
+        coordinatorName: r.coordinator_name ? String(r.coordinator_name) : null,
+        coachingNote: r.coaching_note ? String(r.coaching_note) : null,
+      })),
+    });
+  });
+
+  app.post('/api/regencies', requireAuth, requirePermission('wilayah', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const { code, provinceCode, name, kind, status, coordinatorName, coachingNote } = req.body ?? {};
+    if (!code || !provinceCode || !name) {
+      res.status(422).json({ error: 'Kode wilayah, kode provinsi, dan nama Kabupaten/Kota wajib diisi.' });
+      return;
+    }
+    const db = getDb();
+    const exists = db.prepare('SELECT code FROM regencies WHERE code = ?').get(String(code));
+    if (exists) {
+      res.status(422).json({ error: 'Kode Kabupaten/Kota sudah terdaftar.' });
+      return;
+    }
+    db.prepare(
+      `INSERT INTO regencies (code, province_code, name, kind, status, coordinator_name, coaching_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      String(code).trim(),
+      String(provinceCode).trim(),
+      String(name).trim(),
+      kind === 'kota' ? 'kota' : 'kabupaten',
+      String(status || 'dalam_pengembangan'),
+      coordinatorName ? String(coordinatorName) : null,
+      coachingNote ? String(coachingNote) : null
+    );
+    db.prepare(
+      `INSERT INTO region_history (id, region_type, region_code, action, summary, actor_name, created_at)
+       VALUES (?, 'kabupaten', ?, 'PEMEKARAN_TAMBAH', ?, ?, ?)`
+    ).run(
+      crypto.randomUUID(),
+      String(code).trim(),
+      `Penambahan daerah ${name} (${provinceCode})`,
+      req.authUser!.fullName,
+      new Date().toISOString()
+    );
+    writeAuditLog(db, req.authUser!, 'CREATE_REGENCY', 'regency', String(code), 'berhasil', String(name));
+    res.status(201).json({ ok: true, code: String(code).trim() });
+  });
+
+  app.patch('/api/regencies/:code', requireAuth, requirePermission('wilayah', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const code = String(req.params.code);
+    const { name, status, coordinatorName, coachingNote } = req.body ?? {};
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM regencies WHERE code = ?').get(code) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Kabupaten/Kota tidak ditemukan.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== existing.province_code) {
+      res.status(403).json({ error: 'Koordinator hanya dapat mengubah daerah di provinsinya.' });
+      return;
+    }
+    db.prepare(
+      `UPDATE regencies SET
+         name = COALESCE(?, name),
+         status = COALESCE(?, status),
+         coordinator_name = COALESCE(?, coordinator_name),
+         coaching_note = COALESCE(?, coaching_note)
+       WHERE code = ?`
+    ).run(name ?? null, status ?? null, coordinatorName ?? null, coachingNote ?? null, code);
+    db.prepare(
+      `INSERT INTO region_history (id, region_type, region_code, action, summary, actor_name, created_at)
+       VALUES (?, 'kabupaten', ?, 'PEMBARUAN_DAERAH', ?, ?, ?)`
+    ).run(
+      crypto.randomUUID(),
+      code,
+      `Pembaruan ${existing.name}${status ? ` -> status ${status}` : ''}${name && name !== existing.name ? ` (nama baru: ${name})` : ''}`,
+      user.fullName,
+      new Date().toISOString()
+    );
+    writeAuditLog(db, user, 'UPDATE_REGENCY', 'regency', code);
+    res.json({ ok: true });
+  });
+
+  app.get('/api/regions/history', requireAuth, requirePermission('wilayah', 'view'), (_req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const history = db.prepare('SELECT * FROM region_history ORDER BY created_at DESC LIMIT 40').all();
+    res.json({ history });
   });
 
   app.get('/api/handovers', requireAuth, requirePermission('wilayah', 'view'), (_req, res: Response) => {
@@ -1197,6 +1507,39 @@ export function registerCoreRoutes(app: Express): void {
     res.json({ personnel: rows.map((r) => maskPersonnelRow(r, user)) });
   });
 
+  app.get('/api/personnel/check-duplicate', requireAuth, requirePermission('personalia', 'view'), (req: AuthenticatedRequest, res: Response) => {
+    const email = String(req.query.email || '').trim().toLowerCase();
+    const nisn = String(req.query.nisn || '').trim();
+    const fullName = String(req.query.fullName || '').trim().toLowerCase();
+    const excludeId = String(req.query.excludeId || '');
+    const db = getDb();
+
+    const matches: { id: string; fullName: string; memberNumber: string; provinceName: string; reason: string }[] = [];
+    if (email) {
+      const rows = db.prepare('SELECT id, full_name, member_number, province_code FROM personnel WHERE LOWER(email) = ? AND id != ?').all(email, excludeId) as Record<string, unknown>[];
+      for (const r of rows) {
+        matches.push({ id: String(r.id), fullName: String(r.full_name), memberNumber: String(r.member_number), provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? '', reason: 'Email sama sudah terdaftar' });
+      }
+    }
+    if (nisn && nisn.length >= 6 && nisn !== '-') {
+      const rows = db.prepare('SELECT id, full_name, member_number, province_code FROM personnel WHERE nisn = ? AND id != ?').all(nisn, excludeId) as Record<string, unknown>[];
+      for (const r of rows) {
+        if (!matches.some((m) => m.id === String(r.id))) {
+          matches.push({ id: String(r.id), fullName: String(r.full_name), memberNumber: String(r.member_number), provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? '', reason: 'NISN sama sudah terdaftar' });
+        }
+      }
+    }
+    if (fullName && fullName.length >= 4) {
+      const rows = db.prepare('SELECT id, full_name, member_number, province_code FROM personnel WHERE LOWER(full_name) = ? AND id != ?').all(fullName, excludeId) as Record<string, unknown>[];
+      for (const r of rows) {
+        if (!matches.some((m) => m.id === String(r.id))) {
+          matches.push({ id: String(r.id), fullName: String(r.full_name), memberNumber: String(r.member_number), provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? '', reason: 'Nama lengkap identik tercatat (cek lintas angkatan)' });
+        }
+      }
+    }
+    res.json({ duplicates: matches });
+  });
+
   app.post('/api/personnel', requireAuth, requirePermission('personalia', 'create'), (req: AuthenticatedRequest, res: Response) => {
     const b = req.body ?? {};
     if (!b.fullName || !b.email || !b.provinceCode) {
@@ -1217,16 +1560,17 @@ export function registerCoreRoutes(app: Express): void {
     db.prepare(
       `INSERT INTO personnel (
         id, member_number, reference_number, full_name, nickname, birth_place, birth_date, gender,
-        email, phone, province_code, regency, district, village, postal_code, full_address,
+        email, phone, province_code, assignment_province_code, regency_code, regency, district, village, postal_code, full_address,
         school_name, education_level, grade_class, major, npsn, nisn,
         batch_id, position_title, bidang, role_code, personnel_status, verification_status,
         guardian_name, guardian_relation, guardian_phone, docs_checklist_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', 'menunggu_verifikasi', ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', 'menunggu_verifikasi', ?, ?, ?, ?, ?, ?)`
     ).run(
       id, memberNo, refNo, String(b.fullName), String(b.nickname || ''), String(b.birthPlace || ''), String(b.birthDate || ''), String(b.gender || ''),
-      String(b.email).toLowerCase(), String(b.phone || ''), String(b.provinceCode), String(b.regency || ''), String(b.district || ''), String(b.village || ''), String(b.postalCode || ''), String(b.fullAddress || ''),
+      String(b.email).toLowerCase(), String(b.phone || ''), String(b.provinceCode), String(b.assignmentProvinceCode || b.provinceCode),
+      b.regencyCode ? String(b.regencyCode) : null, String(b.regency || ''), String(b.district || ''), String(b.village || ''), String(b.postalCode || ''), String(b.fullAddress || ''),
       String(b.schoolName || ''), String(b.educationLevel || 'SMA/SMK/MA'), String(b.gradeClass || ''), String(b.major || ''), String(b.npsn || ''), String(b.nisn || ''),
-      String(b.batchId || 'batch-3'), String(b.positionTitle || 'Duta Pelajar Berbudaya'), String(b.bidang || 'Kebudayaan'), String(b.roleCode || 'duta'),
+      String(b.batchId || 'batch-3'), String(b.positionTitle || 'Duta Pelajar Berbudaya'), String(b.bidang || 'Bidang Pendidikan & Kebudayaan'), String(b.roleCode || 'duta'),
       String(b.guardianName || ''), String(b.guardianRelation || ''), String(b.guardianPhone || ''),
       JSON.stringify(b.docsChecklist || { pasFoto: false, kartuPelajar: false, suratSekolah: false, izinWali: false, suratKesediaan: false }),
       now, now
@@ -1286,6 +1630,8 @@ export function registerCoreRoutes(app: Express): void {
         birth_date = COALESCE(?, birth_date),
         gender = COALESCE(?, gender),
         phone = COALESCE(?, phone),
+        assignment_province_code = COALESCE(?, assignment_province_code),
+        regency_code = COALESCE(?, regency_code),
         regency = COALESCE(?, regency),
         district = COALESCE(?, district),
         village = COALESCE(?, village),
@@ -1315,6 +1661,8 @@ export function registerCoreRoutes(app: Express): void {
       b.birthDate ?? null,
       b.gender ?? null,
       b.phone ?? null,
+      b.assignmentProvinceCode ?? null,
+      b.regencyCode ?? null,
       b.regency ?? null,
       b.district ?? null,
       b.village ?? null,
@@ -1639,42 +1987,46 @@ export function registerCoreRoutes(app: Express): void {
 
     const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
     const matrixRules = db.prepare('SELECT * FROM approval_matrix_rules').all();
+    const mapped = rows.map((r) => ({
+      id: String(r.id),
+      referenceNumber: String(r.reference_number),
+      version: Number(r.version),
+      title: String(r.title),
+      applicantPersonnelId: String(r.applicant_personnel_id),
+      applicantName: String(r.applicant_name),
+      provinceCode: String(r.province_code),
+      provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? String(r.province_code),
+      batchId: String(r.batch_id),
+      batchName: String(r.batch_name || r.batch_id),
+      bidang: String(r.bidang),
+      category: String(r.category),
+      riskLevel: String(r.risk_level),
+      usesDpbiIdentity: Boolean(r.uses_dpbi_identity),
+      externalPermitNeeded: Boolean(r.external_permit_needed),
+      assignedApproverRole: String(r.assigned_approver_role),
+      bidangRelevant: user.role === 'pengurus_nasional' ? isRecordRelevantToBidang(user.bidang, String(r.bidang), String(r.category)) : true,
+      objective: String(r.objective),
+      targetAudience: String(r.target_audience),
+      eventDate: String(r.event_date),
+      eventTime: String(r.event_time),
+      location: String(r.location),
+      picName: String(r.pic_name),
+      estimatedParticipants: Number(r.estimated_participants),
+      activityMode: String(r.activity_mode),
+      pdfFileId: r.pdf_file_id ? String(r.pdf_file_id) : null,
+      pdfFileName: r.pdf_file_name ? String(r.pdf_file_name) : null,
+      status: String(r.status),
+      decisionNote: r.decision_note ? String(r.decision_note) : null,
+      decidedBy: r.decided_by ? String(r.decided_by) : null,
+      decidedAt: r.decided_at ? String(r.decided_at) : null,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    }));
 
+    const bidangOnly = req.query.bidangOnly === '1';
     res.json({
-      proposals: rows.map((r) => ({
-        id: String(r.id),
-        referenceNumber: String(r.reference_number),
-        version: Number(r.version),
-        title: String(r.title),
-        applicantPersonnelId: String(r.applicant_personnel_id),
-        applicantName: String(r.applicant_name),
-        provinceCode: String(r.province_code),
-        provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? String(r.province_code),
-        batchId: String(r.batch_id),
-        batchName: String(r.batch_name || r.batch_id),
-        bidang: String(r.bidang),
-        category: String(r.category),
-        riskLevel: String(r.risk_level),
-        usesDpbiIdentity: Boolean(r.uses_dpbi_identity),
-        externalPermitNeeded: Boolean(r.external_permit_needed),
-        assignedApproverRole: String(r.assigned_approver_role),
-        objective: String(r.objective),
-        targetAudience: String(r.target_audience),
-        eventDate: String(r.event_date),
-        eventTime: String(r.event_time),
-        location: String(r.location),
-        picName: String(r.pic_name),
-        estimatedParticipants: Number(r.estimated_participants),
-        activityMode: String(r.activity_mode),
-        pdfFileId: r.pdf_file_id ? String(r.pdf_file_id) : null,
-        pdfFileName: r.pdf_file_name ? String(r.pdf_file_name) : null,
-        status: String(r.status),
-        decisionNote: r.decision_note ? String(r.decision_note) : null,
-        decidedBy: r.decided_by ? String(r.decided_by) : null,
-        decidedAt: r.decided_at ? String(r.decided_at) : null,
-        createdAt: String(r.created_at),
-        updatedAt: String(r.updated_at),
-      })),
+      proposals: bidangOnly ? mapped.filter((p) => p.bidangRelevant) : mapped,
+      activeBidang: user.role === 'pengurus_nasional' ? resolveBidangDefinition(user.bidang) : null,
       matrixRules,
     });
   });

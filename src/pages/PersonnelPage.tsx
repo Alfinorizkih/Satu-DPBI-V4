@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckSquare, Download, Edit3, Eye, Plus, Upload, UserCheck } from 'lucide-react';
+import { AlertTriangle, CheckSquare, Download, Edit3, Eye, Plus, Printer, Upload, UserCheck } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import {
   ConfirmDialog,
   EmptyState,
@@ -16,6 +17,19 @@ import {
 } from '../components/ui';
 import { formatTanggalIndonesia } from '../lib/rbac';
 import type { PersonnelRecord } from '../lib/types';
+
+interface DuplicateMatch {
+  id: string;
+  fullName: string;
+  memberNumber: string;
+  provinceName: string;
+  reason: string;
+}
+
+interface CascadeOption {
+  code: string;
+  name: string;
+}
 
 interface AccountRequest {
   id: string;
@@ -74,6 +88,14 @@ export function PersonnelPage({
   const [reqOpen, setReqOpen] = useState(false);
   const [verifyNote, setVerifyNote] = useState('');
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
+
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  const [manualLocation, setManualLocation] = useState(false);
+  const [cascadeRegencies, setCascadeRegencies] = useState<CascadeOption[]>([]);
+  const [cascadeDistricts, setCascadeDistricts] = useState<CascadeOption[]>([]);
+  const [cascadeVillages, setCascadeVillages] = useState<CascadeOption[]>([]);
+  const [selectedDistrictCode, setSelectedDistrictCode] = useState('');
 
   const emptyPersonForm = {
     fullName: '',
@@ -84,6 +106,8 @@ export function PersonnelPage({
     email: '',
     phone: '',
     provinceCode: user?.provinceCode || '32',
+    assignmentProvinceCode: user?.provinceCode || '32',
+    regencyCode: '',
     regency: '',
     district: '',
     village: '',
@@ -157,6 +181,53 @@ export function PersonnelPage({
       .finally(() => setHistoryLoading(false));
   }, [selected, detailTab]);
 
+  // Cascading location fetch when form is open
+  useEffect(() => {
+    if (!formMode) return;
+    const params = new URLSearchParams({ provinceCode: personForm.provinceCode || '' });
+    if (personForm.regencyCode) params.set('regencyCode', personForm.regencyCode);
+    if (selectedDistrictCode) params.set('districtCode', selectedDistrictCode);
+    apiGet<{ regencies: CascadeOption[]; districts: CascadeOption[]; villages: CascadeOption[] }>(
+      `/api/locations/cascade?${params.toString()}`
+    )
+      .then((res) => {
+        setCascadeRegencies(res.regencies || []);
+        setCascadeDistricts(res.districts || []);
+        setCascadeVillages(res.villages || []);
+      })
+      .catch(() => {
+        setCascadeRegencies([]);
+        setCascadeDistricts([]);
+        setCascadeVillages([]);
+      });
+  }, [formMode, personForm.provinceCode, personForm.regencyCode, selectedDistrictCode]);
+
+  // Live duplicate personnel detection
+  useEffect(() => {
+    if (!formMode) {
+      setDuplicates([]);
+      return;
+    }
+    const cleanEmail = personForm.email.trim();
+    const cleanNisn = personForm.nisn.trim();
+    const cleanName = personForm.fullName.trim();
+    if (!cleanEmail && cleanNisn.length < 6 && cleanName.length < 4) {
+      setDuplicates([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const qs = new URLSearchParams();
+      if (cleanEmail) qs.set('email', cleanEmail);
+      if (cleanNisn.length >= 6) qs.set('nisn', cleanNisn);
+      if (cleanName.length >= 4) qs.set('fullName', cleanName);
+      if (editingId) qs.set('excludeId', editingId);
+      apiGet<{ duplicates: DuplicateMatch[] }>(`/api/personnel/check-duplicate?${qs.toString()}`)
+        .then((res) => setDuplicates(res.duplicates || []))
+        .catch(() => setDuplicates([]));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [formMode, personForm.email, personForm.nisn, personForm.fullName, editingId]);
+
   const filtered = personnel.filter((p) => {
     const matchText =
       !search.trim() ||
@@ -172,6 +243,9 @@ export function PersonnelPage({
   const openCreateForm = (updateUrl = true) => {
     setEditingId(null);
     setPersonForm(emptyPersonForm);
+    setManualLocation(false);
+    setSelectedDistrictCode('');
+    setDuplicates([]);
     setFormErrors([]);
     setFormDirty(false);
     setFormStep(1);
@@ -190,6 +264,8 @@ export function PersonnelPage({
       email: p.email,
       phone: p.restrictedFieldsMasked ? '' : p.phone,
       provinceCode: p.provinceCode,
+      assignmentProvinceCode: p.assignmentProvinceCode || p.provinceCode,
+      regencyCode: p.regencyCode || '',
       regency: p.regency || '',
       district: p.restrictedFieldsMasked ? '' : p.district,
       village: p.restrictedFieldsMasked ? '' : p.village,
@@ -212,6 +288,9 @@ export function PersonnelPage({
       avatarFileName: p.avatarFileId ? 'Foto Profil Terunggah' : null,
       docsChecklist: { ...p.docsChecklist },
     });
+    setManualLocation(!p.regencyCode && Boolean(p.regency));
+    setSelectedDistrictCode('');
+    setDuplicates([]);
     setFormErrors([]);
     setFormDirty(false);
     setFormStep(1);
@@ -680,15 +759,52 @@ export function PersonnelPage({
                   </div>
                 </div>
               </div>
-              {can('personalia', 'edit') && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => openEditForm(selected)}
+                  onClick={() =>
+                    setPrintConfig({
+                      template: 'arsip',
+                      documentNumber: selected.referenceNumber || selected.memberNumber,
+                      title: `Ringkasan Profil Personel — ${selected.fullName}`,
+                      subtitle: `${selected.positionTitle} · ${selected.batchName}`,
+                      issuedDate: new Date().toISOString().slice(0, 10),
+                      metadata: [
+                        { label: 'Nomor Anggota', value: selected.memberNumber },
+                        { label: 'Provinsi Domisili', value: selected.provinceName },
+                        { label: 'Provinsi Penugasan', value: selected.assignmentProvinceName || selected.provinceName },
+                        { label: 'Sekolah', value: selected.schoolName || '—' },
+                        { label: 'Status Verifikasi', value: selected.verificationStatus.replace(/_/g, ' ') },
+                        { label: 'Kelengkapan', value: `${selected.completenessScore}%` },
+                      ],
+                      sections: [
+                        {
+                          heading: 'Identitas & Bidang Tugas',
+                          body: `Jabatan: ${selected.positionTitle}\nBidang: ${selected.bidang || 'Umum'}\nAngkatan: ${selected.batchName}\nMinat Budaya: ${selected.culturalInterests || '—'}`,
+                        },
+                        {
+                          heading: 'Pendidikan & Pengalaman',
+                          body: `Sekolah: ${selected.schoolName || '—'} (${selected.educationLevel} Kelas ${selected.gradeClass})\nKabupaten/Kota: ${selected.regency || '—'}\nPengalaman Organisasi: ${selected.orgExperience || '—'}`,
+                        },
+                      ],
+                      signatoryName: user?.fullName || 'Sekretariat Nasional DPBI',
+                      signatoryRole: user?.roleLabel || 'Pengurus DPBI',
+                    })
+                  }
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
                 >
-                  <Edit3 className="w-3.5 h-3.5" /> Ubah Data Profil
+                  <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak Ringkasan A4
                 </button>
-              )}
+                {can('personalia', 'edit') && (
+                  <button
+                    type="button"
+                    onClick={() => openEditForm(selected)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" /> Ubah Data Profil
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Detail Section Tabs */}
@@ -907,6 +1023,22 @@ export function PersonnelPage({
 
           {formStep === 1 && (
             <div className="space-y-3">
+              {duplicates.length > 0 && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 p-3 space-y-1 text-amber-900 dark:text-amber-200"
+                >
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 shrink-0" /> Kemungkinan Duplikasi Personel Terdeteksi
+                  </p>
+                  {duplicates.map((d) => (
+                    <p key={d.id} className="text-[11px]">
+                      {d.fullName} ({d.memberNumber} · {d.provinceName}) — {d.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold mb-1">Nama Lengkap *</label>
@@ -929,8 +1061,16 @@ export function PersonnelPage({
                   <input value={personForm.phone} onChange={(e) => updateForm({ phone: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1">Provinsi Penugasan</label>
-                  <select disabled={formMode === 'edit'} value={personForm.provinceCode} onChange={(e) => updateForm({ provinceCode: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 disabled:opacity-60">
+                  <label className="block font-semibold mb-1">Provinsi Domisili</label>
+                  <select
+                    disabled={formMode === 'edit'}
+                    value={personForm.provinceCode}
+                    onChange={(e) => {
+                      updateForm({ provinceCode: e.target.value, regencyCode: '', regency: '', district: '', village: '' });
+                      setSelectedDistrictCode('');
+                    }}
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 disabled:opacity-60"
+                  >
                     {INDONESIA_PROVINCES.map((pr) => <option key={pr.code} value={pr.code}>{pr.name}</option>)}
                   </select>
                 </div>
@@ -946,29 +1086,121 @@ export function PersonnelPage({
           )}
 
           {formStep === 2 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold mb-1">Nama Sekolah *</label>
-                <input required value={personForm.schoolName} onChange={(e) => updateForm({ schoolName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Nama Sekolah *</label>
+                  <input required value={personForm.schoolName} onChange={(e) => updateForm({ schoolName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Jenjang &amp; Kelas</label>
+                  <input value={personForm.gradeClass} onChange={(e) => updateForm({ gradeClass: e.target.value })} placeholder="Misal: XI" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">NPSN</label>
+                  <input value={personForm.npsn} onChange={(e) => updateForm({ npsn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">NISN</label>
+                  <input value={personForm.nisn} onChange={(e) => updateForm({ nisn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Provinsi Penugasan DPBI</label>
+                  <select
+                    value={personForm.assignmentProvinceCode}
+                    onChange={(e) => updateForm({ assignmentProvinceCode: e.target.value })}
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  >
+                    {INDONESIA_PROVINCES.map((pr) => (
+                      <option key={pr.code} value={pr.code}>{pr.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end pb-1.5">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={manualLocation}
+                      onChange={(e) => setManualLocation(e.target.checked)}
+                    />
+                    <span>Ketik manual jika daerah belum ada di daftar</span>
+                  </label>
+                </div>
               </div>
+
+              {!manualLocation && cascadeRegencies.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1">Kabupaten / Kota (Domisili)</label>
+                    <select
+                      value={personForm.regencyCode}
+                      onChange={(e) => {
+                        const code = e.target.value;
+                        const found = cascadeRegencies.find((r) => r.code === code);
+                        setSelectedDistrictCode('');
+                        updateForm({ regencyCode: code, regency: found?.name || '', district: '', village: '' });
+                      }}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    >
+                      <option value="">Pilih Kab/Kota...</option>
+                      {cascadeRegencies.map((r) => (
+                        <option key={r.code} value={r.code}>{r.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Kecamatan</label>
+                    <select
+                      value={selectedDistrictCode}
+                      onChange={(e) => {
+                        const code = e.target.value;
+                        setSelectedDistrictCode(code);
+                        const found = cascadeDistricts.find((d) => d.code === code);
+                        updateForm({ district: found?.name || '', village: '' });
+                      }}
+                      disabled={cascadeDistricts.length === 0}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 disabled:opacity-60"
+                    >
+                      <option value="">{cascadeDistricts.length > 0 ? 'Pilih Kecamatan...' : 'Isi manual / belum tersedia'}</option>
+                      {cascadeDistricts.map((d) => (
+                        <option key={d.code} value={d.code}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Desa / Kelurahan</label>
+                    <select
+                      value={personForm.village}
+                      onChange={(e) => updateForm({ village: e.target.value })}
+                      disabled={cascadeVillages.length === 0}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 disabled:opacity-60"
+                    >
+                      <option value="">{cascadeVillages.length > 0 ? 'Pilih Kelurahan/Desa...' : 'Isi manual / belum tersedia'}</option>
+                      {cascadeVillages.map((v) => (
+                        <option key={v.code} value={v.name}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1">Kabupaten / Kota</label>
+                    <input value={personForm.regency} onChange={(e) => updateForm({ regency: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Kecamatan</label>
+                    <input value={personForm.district} onChange={(e) => updateForm({ district: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Desa / Kelurahan</label>
+                    <input value={personForm.village} onChange={(e) => updateForm({ village: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block font-semibold mb-1">Jenjang & Kelas</label>
-                <input value={personForm.gradeClass} onChange={(e) => updateForm({ gradeClass: e.target.value })} placeholder="Misal: XI" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">NPSN</label>
-                <input value={personForm.npsn} onChange={(e) => updateForm({ npsn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">NISN</label>
-                <input value={personForm.nisn} onChange={(e) => updateForm({ nisn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Kabupaten / Kota</label>
-                <input value={personForm.regency} onChange={(e) => updateForm({ regency: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Alamat Domisili</label>
+                <label className="block font-semibold mb-1">Alamat Domisili Lengkap</label>
                 <input value={personForm.fullAddress} onChange={(e) => updateForm({ fullAddress: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
             </div>
@@ -1092,6 +1324,8 @@ export function PersonnelPage({
           <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim ke Sekretariat Nasional</button>
         </form>
       </Modal>
+
+      <A4PrintModal open={Boolean(printConfig)} config={printConfig} onClose={() => setPrintConfig(null)} />
     </div>
   );
 }

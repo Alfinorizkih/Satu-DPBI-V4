@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Briefcase,
   Calendar,
   CheckCircle2,
   Clock,
@@ -26,7 +27,28 @@ import { useAuth } from '../context/AuthContext';
 import { GlassCard, LoadingSkeleton, StatusIndicator } from '../components/ui/Primitives';
 import { IndonesiaMap } from '../components/IndonesiaMap';
 import { formatTanggalIndonesia } from '../lib/rbac';
-import type { ProvinceRecord, TaskRecord } from '../lib/types';
+import type { ModuleCode, ProvinceRecord, TaskRecord } from '../lib/types';
+
+const MODULE_LINKS: Record<ModuleCode, { label: string; path: string }> = {
+  dashboard: { label: 'Dashboard', path: '/dashboard' },
+  command_center: { label: 'Command Center', path: '/dashboard' },
+  organisasi: { label: 'Struktur & Bidang', path: '/organisasi' },
+  personalia: { label: 'Personalia', path: '/personalia' },
+  wilayah: { label: 'Wilayah 38 Provinsi', path: '/wilayah' },
+  angkatan: { label: 'Angkatan', path: '/angkatan' },
+  proposal: { label: 'Proposal Kegiatan', path: '/proposal' },
+  lkl: { label: 'Laporan LKL', path: '/laporan-kegiatan' },
+  laporan_koordinator: { label: 'Laporan Koordinator', path: '/laporan-koordinator' },
+  tugas: { label: 'Tugas', path: '/tugas' },
+  dokumen: { label: 'Dokumen & SOP', path: '/dokumen' },
+  pengumuman: { label: 'Pengumuman', path: '/pengumuman' },
+  kalender: { label: 'Kalender Kerja', path: '/kalender' },
+  perlindungan: { label: 'Perlindungan', path: '/perlindungan' },
+  evaluasi: { label: 'Evaluasi', path: '/evaluasi' },
+  arsip: { label: 'Arsip & Alumni', path: '/arsip' },
+  sistem: { label: 'Sistem', path: '/sistem' },
+  pengaturan: { label: 'Pengaturan', path: '/pengaturan' },
+};
 
 interface DashboardData {
   summary: {
@@ -40,6 +62,13 @@ interface DashboardData {
     unreadNotifications: number;
     totalStorageBytes: number;
   };
+  bidangScope?: {
+    code: string;
+    label: string;
+    description: string;
+    primaryModules: ModuleCode[];
+    scopedPendingProposals: number;
+  } | null;
   attentionItems: { id: string; level: 'kritis' | 'perhatian' | 'info'; title: string; detail: string; path: string }[];
   charts: {
     personnelPerBatch: { name: string; jumlah: number }[];
@@ -281,6 +310,58 @@ export function DashboardPage() {
           </button>
         ))}
       </div>
+
+      {/* Fokus Bidang Saya (Pengurus Nasional) */}
+      {user.role === 'pengurus_nasional' && data.bidangScope && (
+        <GlassCard className="p-5 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1 max-w-2xl">
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#0EA5E9]">
+                <Briefcase className="w-4 h-4 shrink-0" />
+                <span>Fokus Bidang Saya · Pengurus Nasional</span>
+              </div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                {data.bidangScope.label}
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                {data.bidangScope.description}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/proposal')}
+              className="text-left rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 hover:border-[#0EA5E9] px-4 py-3 transition-colors shrink-0"
+            >
+              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                Proposal Relevan Menunggu
+              </p>
+              <p className="font-mono text-2xl font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">
+                {data.bidangScope.scopedPendingProposals}
+              </p>
+              <p className="text-[11px] font-semibold text-[#0EA5E9] mt-0.5">Buka daftar proposal</p>
+            </button>
+          </div>
+          <div className="pt-3 border-t border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mr-1">
+              Modul Prioritas Bidang:
+            </span>
+            {data.bidangScope.primaryModules.map((mod) => {
+              const target = MODULE_LINKS[mod];
+              if (!target) return null;
+              return (
+                <button
+                  key={mod}
+                  type="button"
+                  onClick={() => navigate(target.path)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:border-[#0EA5E9] hover:text-[#0EA5E9] transition-colors whitespace-nowrap shrink-0"
+                >
+                  {target.label}
+                </button>
+              );
+            })}
+          </div>
+        </GlassCard>
+      )}
 
       {/* Priority Attention Center + Tasks Due + Upcoming Agenda */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

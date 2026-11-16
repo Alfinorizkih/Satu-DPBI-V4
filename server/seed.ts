@@ -77,28 +77,200 @@ export function ensureSeeded(db: DatabaseSync): void {
     }
   }
 
+  // 1b. Always seed Regencies (~514 real kabupaten/kota) from public/maps/regencies-index.json if empty
+  const regCount = (db.prepare('SELECT COUNT(*) AS c FROM regencies').get() as { c: number }).c;
+  if (regCount === 0) {
+    const regIndexPath = path.resolve(process.cwd(), 'public', 'maps', 'regencies-index.json');
+    if (fs.existsSync(regIndexPath)) {
+      const regItems = JSON.parse(fs.readFileSync(regIndexPath, 'utf8')) as {
+        code: string;
+        provinceCode: string;
+        name: string;
+        kind: string;
+      }[];
+      const regStmt = db.prepare(
+        `INSERT OR IGNORE INTO regencies (code, province_code, name, kind, status, coordinator_name, coaching_note)
+         VALUES (?, ?, ?, ?, 'belum_terbentuk', NULL, NULL)`
+      );
+      for (const r of regItems) {
+        if (!r.code || r.code.includes('/') || r.code.length > 6) continue;
+        regStmt.run(r.code, r.provinceCode, r.name, r.kind || 'kabupaten');
+      }
+    }
+  }
+
+  // 1c. Seed cascading sample districts & villages for major operational regions if empty
+  const distCount = (db.prepare('SELECT COUNT(*) AS c FROM districts').get() as { c: number }).c;
+  if (distCount === 0) {
+    const distRows: [string, string, string][] = [
+      ['31.74.01', '31.74', 'Kebayoran Baru'],
+      ['31.74.02', '31.74', 'Tebet'],
+      ['31.71.01', '31.71', 'Menteng'],
+      ['31.75.01', '31.75', 'Pulo Gadung'],
+      ['32.73.01', '32.73', 'Coblong'],
+      ['32.73.02', '32.73', 'Bandung Wetan'],
+      ['32.71.01', '32.71', 'Bogor Tengah'],
+      ['32.71.02', '32.71', 'Tanah Sareal'],
+      ['32.76.01', '32.76', 'Beji'],
+      ['33.72.01', '33.72', 'Laweyan'],
+      ['33.74.01', '33.74', 'Semarang Tengah'],
+      ['34.71.01', '34.71', 'Gondokusuman'],
+      ['35.73.01', '35.73', 'Klojen'],
+      ['35.78.01', '35.78', 'Genteng'],
+      ['51.71.01', '51.71', 'Denpasar Timur'],
+      ['51.71.02', '51.71', 'Denpasar Barat'],
+      ['12.71.01', '12.71', 'Medan Baru'],
+      ['13.71.01', '13.71', 'Padang Barat'],
+      ['73.71.01', '73.71', 'Makassar'],
+      ['64.72.01', '64.72', 'Samarinda Ulu'],
+    ];
+    const dStmt = db.prepare('INSERT OR IGNORE INTO districts (code, regency_code, name) VALUES (?, ?, ?)');
+    for (const d of distRows) dStmt.run(...d);
+
+    const vilRows: [string, string, string][] = [
+      ['31.74.01.1001', '31.74.01', 'Senayan'],
+      ['31.74.01.1002', '31.74.01', 'Selong'],
+      ['31.74.02.1001', '31.74.02', 'Tebet Barat'],
+      ['31.71.01.1001', '31.71.01', 'Cikini'],
+      ['31.75.01.1001', '31.75.01', 'Jati'],
+      ['32.73.01.1001', '32.73.01', 'Dago'],
+      ['32.73.01.1002', '32.73.01', 'Lebak Siliwangi'],
+      ['32.73.02.1001', '32.73.02', 'Citarum'],
+      ['32.71.01.1001', '32.71.01', 'Paledang'],
+      ['32.71.01.1002', '32.71.01', 'Pabaton'],
+      ['33.72.01.1001', '33.72.01', 'Sriwedari'],
+      ['33.74.01.1001', '33.74.01', 'Sekayu'],
+      ['34.71.01.1001', '34.71.01', 'Terban'],
+      ['35.73.01.1001', '35.73.01', 'Oro-oro Dowo'],
+      ['35.78.01.1001', '35.78.01', 'Ketabang'],
+      ['51.71.01.1001', '51.71.01', 'Sumerta'],
+      ['51.71.02.1001', '51.71.02', 'Pemecutan'],
+      ['12.71.01.1001', '12.71.01', 'Babura'],
+      ['13.71.01.1001', '13.71.01', 'Belakang Tangsi'],
+      ['73.71.01.1001', '73.71.01', 'Maricaya'],
+    ];
+    const vStmt = db.prepare('INSERT OR IGNORE INTO villages (code, district_code, name) VALUES (?, ?, ?)');
+    for (const v of vilRows) vStmt.run(...v);
+  }
+
   // 2. Always seed default system settings & approval matrix rules
   const settingsCount = (db.prepare('SELECT COUNT(*) AS c FROM system_settings').get() as { c: number }).c;
+  const defaultSettings: [string, string][] = [
+    ['public_stats_approved', 'true'],
+    ['public_show_duta_count', 'true'],
+    ['default_batch_duration_months', '4'],
+    ['monthly_report_deadline_day', '5'],
+    ['final_report_deadline_hours', '168'],
+    ['alumni_access_window_days', '30'],
+    ['storage_quota_mb', process.env.STORAGE_QUOTA_MB || '10240'],
+    ['max_pdf_upload_mb', '15'],
+    ['max_photo_upload_mb', '5'],
+    ['kemendikdasmen_status', 'nonaktif'],
+    ['safeguarding_min_chaperones_u18', '2'],
+    ['eval_weight_task', '30'],
+    ['eval_weight_timeliness', '25'],
+    ['eval_weight_quality', '25'],
+    ['eval_weight_coordination', '20'],
+  ];
+  const sStmt = db.prepare('INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)');
   if (settingsCount === 0) {
-    const settings: [string, string][] = [
-      ['public_stats_approved', 'true'],
-      ['default_batch_duration_months', '4'],
-      ['monthly_report_deadline_day', '5'],
-      ['final_report_deadline_hours', '168'],
-      ['alumni_access_window_days', '30'],
-      ['storage_quota_mb', process.env.STORAGE_QUOTA_MB || '10240'],
-      ['max_pdf_upload_mb', '15'],
-      ['max_photo_upload_mb', '5'],
-      ['kemendikdasmen_status', 'nonaktif'],
-      ['safeguarding_min_chaperones_u18', '2'],
-      ['eval_weight_task', '30'],
-      ['eval_weight_timeliness', '25'],
-      ['eval_weight_quality', '25'],
-      ['eval_weight_coordination', '20'],
-    ];
-    const sStmt = db.prepare('INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)');
-    for (const [k, v] of settings) {
+    for (const [k, v] of defaultSettings) {
       sStmt.run(k, v, now);
+    }
+  } else {
+    sStmt.run('public_show_duta_count', 'true', now);
+  }
+
+  // 2b. Always seed CMS Public Contents & Help Center Articles if empty
+  const cmsCount = (db.prepare('SELECT COUNT(*) AS c FROM cms_contents').get() as { c: number }).c;
+  if (cmsCount === 0) {
+    const cmsItems: [string, string, string][] = [
+      [
+        'hero_subtitle',
+        'Duta Pelajar Berbudaya Indonesia',
+        'Program kepemimpinan pelajar independen berskala nasional yang menghubungkan generasi muda di 38 provinsi untuk berkarya melalui literasi budaya, pendidikan karakter, dan kolaborasi daerah.',
+      ],
+      [
+        'about_dpbi',
+        'Tentang Duta Pelajar Berbudaya Indonesia (DPBI)',
+        'Duta Pelajar Berbudaya Indonesia (DPBI) adalah organisasi kepemimpinan dan penggerak literasi budaya pelajar yang berdiri secara independen di Indonesia.\n\nDengan semangat "Berbudaya, Bergerak, dan Berdampak Untuk Negeri", DPBI membina pelajar SMA/SMK/MA/sederajat di 38 provinsi dan lebih dari 500 kabupaten/kota melalui masa tugas terstruktur per angkatan, pelaporan berbasis bukti, serta standar perlindungan peserta didik.',
+      ],
+      [
+        'vision_mission',
+        'Visi, Misi, dan Prinsip Tata Kelola',
+        'Visi: Mewujudkan generasi pelajar Indonesia yang berakar pada nilai budaya Nusantara, aktif bergerak di daerahnya, dan memberi dampak sosial yang terukur.\n\nMisi:\n1. Menghadirkan pembinaan terstruktur lintas 38 provinsi dan kabupaten/kota.\n2. Menyelenggarakan kegiatan literasi, edukasi, dan pelestarian budaya berbasis bukti lapangan.\n3. Menjaga integritas administrasi, keamanan data peserta didik, dan tata kelola organisasi yang akuntabel.',
+      ],
+      [
+        'official_contact',
+        'Sekretariat Nasional & Kontak Resmi',
+        'Sekretariat Nasional Duta Pelajar Berbudaya Indonesia\nEmail Resmi: sekretariat@dpbi.or.id\nPortal Administrasi: https://satu.dpbi.or.id\nJam Layanan Administrasi: Senin–Jumat, 09.00–17.00 WIB',
+      ],
+      [
+        'social_links',
+        'Kanal Informasi Resmi',
+        'Instagram: @dutapelajarberbudaya.id | YouTube: DPBI Official Nusantara | Portal Dokumentasi: SATU DPBI',
+      ],
+    ];
+    const cmsStmt = db.prepare(
+      'INSERT OR IGNORE INTO cms_contents (key, title, body, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (const [k, t, b] of cmsItems) {
+      cmsStmt.run(k, t, b, 'Sekretariat Nasional', now);
+    }
+  }
+
+  const helpCount = (db.prepare('SELECT COUNT(*) AS c FROM help_articles').get() as { c: number }).c;
+  if (helpCount === 0) {
+    const articles: [string, string, string, string, string, string, string, number][] = [
+      [
+        'hlp-1', 'pengenalan-satu-dpbi', 'Umum & Publik', 'umum',
+        'Apa itu SATU DPBI dan Perbedaannya dengan Website Informasi DPBI?',
+        'Penjelasan ringkas mengenai fungsi portal administrasi internal SATU DPBI serta keterbukaan informasi publik yang aman.',
+        'Website Informasi DPBI menyediakan pengenalan organisasi, visi-misi, serta peta persebaran wilayah 38 provinsi dan kabupaten/kota yang aman diakses masyarakat. Sementara itu, Portal Internal SATU DPBI digunakan khusus oleh personel terdaftar (Duta, Koordinator Wilayah, Pengurus Nasional, Sekretariat, dan Pengawas) untuk mengelola proposal, LKL, personalia, dokumen SK/Sertifikat, dan arsip.',
+        1,
+      ],
+      [
+        'hlp-2', 'cara-aktivasi-dan-login', 'Akun & Keamanan', 'umum',
+        'Cara Aktivasi Akun Undangan dan Pemulihan Kata Sandi',
+        'Langkah-langkah mengaktifkan akun baru dari undangan Sekretariat Nasional serta prosedur lupa kata sandi.',
+        'Setiap akun baru diterbitkan melalui pengajuan Koordinator Wilayah atau undangan resmi Sekretariat Nasional dengan token aktivasi sekali pakai berbatas waktu. Gunakan halaman Verifikasi Undangan/Aktivasi untuk mengatur kata sandi minimal 8 karakter. Bila lupa kata sandi, ajukan tautan pemulihan melalui menu Lupa Kata Sandi pada halaman Masuk SATU DPBI.',
+        2,
+      ],
+      [
+        'hlp-3', 'panduan-duta-proposal-lkl', 'Operasional Duta', 'duta',
+        'Panduan Pengajuan Proposal Kegiatan dan Laporan Kegiatan Lapangan (LKL)',
+        'Alur pengajuan proposal berdasarkan Approval Matrix hingga pelaporan LKL beserta foto dokumentasi dan cetak A4.',
+        '1. Lengkapi profil personalia (termasuk wilayah domisili bertingkat dan berkas wajib).\n2. Ajukan proposal pada menu Proposal dengan mencantumkan kategori, tingkat risiko, penggunaan identitas DPBI, dan estimasi peserta.\n3. Setelah disetujui (oleh Koordinator Wilayah untuk kegiatan lokal berisiko rendah atau Pengurus Nasional sesuai Bidang untuk kegiatan berdampak luas), laksanakan kegiatan dan kirim LKL beserta unggahan PDF serta foto dokumentasi.',
+        3,
+      ],
+      [
+        'hlp-4', 'panduan-koordinator-wilayah', 'Koordinasi Wilayah', 'koordinator_wilayah',
+        'Tugas Koordinator Wilayah, Verifikasi LKL, dan Laporan Bulanan',
+        'Tanggung jawab pemantauan kabupaten/kota, pemeriksaan LKL Duta, dan batas waktu laporan bulanan tanggal 5.',
+        'Koordinator Wilayah memantau keterwakilan kabupaten/kota di provinsinya, memeriksa kelengkapan berkas Duta baru, meninjau proposal lokal maupun LKL kegiatan wilayah, serta menyampaikan Laporan Bulanan Koordinator paling lambat tanggal 5 setiap bulan (serta Laporan Akhir maksimal 7 hari setelah penutupan angkatan).',
+        4,
+      ],
+      [
+        'hlp-5', 'struktur-6-bidang-pengurus', 'Kepengurusan Nasional', 'pengurus_nasional',
+        'Struktur 6 Bidang Resmi Pengurus Nasional DPBI',
+        'Pembagian ruang kerja 6 Bidang Pengurus Nasional dalam meninjau proposal, program wilayah, dan publikasi.',
+        'Pengurus Nasional terbagi menjadi 6 Bidang resmi: (1) Bidang Administrasi & Organisasi, (2) Bidang Program & Operasional, (3) Bidang Pengembangan Wilayah, (4) Bidang Pendidikan & Kebudayaan, (5) Bidang Hubungan & Kemitraan, serta (6) Bidang Media, Publikasi & Teknologi. Masing-masing bidang memiliki fokus antrean persetujuan dan pemantauan program yang relevan.',
+        5,
+      ],
+      [
+        'hlp-6', 'keamanan-data-perlindungan', 'Keamanan & Privasi', 'umum',
+        'Kebijakan Privasi, Perlindungan Pelajar, dan Masa Akses Alumni 30 Hari',
+        'Bagaimana SATU DPBI melindungi data pribadi siswa (NISN, alamat, kontak wali) serta masa transisi alumni.',
+        'Data pribadi seperti alamat lengkap, NISN, nomor telepon pribadi, dan kontak orang tua/wali dilindungi ketat dan tidak pernah ditampilkan di halaman publik maupun kepada pihak tanpa kewenangan. Setelah masa tugas 4 bulan berakhir, akun Alumni memperoleh jendela akses 30 hari untuk mengunduh sertifikat resmi dan arsip pribadinya.',
+        6,
+      ],
+    ];
+    const hStmt = db.prepare(
+      `INSERT OR IGNORE INTO help_articles (id, slug, category, role_target, title, summary, content, sort_order, is_published, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+    );
+    for (const a of articles) {
+      hStmt.run(...a, now);
     }
   }
 
@@ -138,8 +310,25 @@ export function ensureSeeded(db: DatabaseSync): void {
   // Stop here if NOT in Demo Mode — production starts clean with zero demo accounts!
   if (!IS_DEMO_MODE) return;
 
+  // Idempotent migration/alignment on existing demo DBs: align Pengurus Bidang to the 6 official Bidang & active sample regencies
   const userCount = (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c;
-  if (userCount > 0) return;
+  if (userCount > 0) {
+    db.prepare("UPDATE users SET bidang = 'Bidang Pendidikan & Kebudayaan' WHERE id = 'usr-pengurus' AND (bidang = 'Kebudayaan' OR bidang IS NULL)").run();
+    db.prepare("UPDATE personnel SET bidang = 'Bidang Pendidikan & Kebudayaan', position_title = 'Ketua Bidang Pendidikan & Kebudayaan' WHERE id = 'pers-4' AND bidang = 'Kebudayaan'").run();
+    db.prepare("UPDATE announcements SET is_public = 1 WHERE id IN ('ann-1', 'ann-2')").run();
+    const activeRegs: [string, string, string][] = [
+      ['31.74', 'aktif', 'Tim Koordinasi Jakarta Selatan'],
+      ['32.73', 'aktif', 'Koordinator Kota Bandung'],
+      ['32.71', 'aktif', 'Koordinator Kota Bogor'],
+      ['33.72', 'dalam_pengembangan', 'Tim Pelopor Kota Surakarta'],
+      ['34.71', 'aktif', 'Koordinator Kota Yogyakarta'],
+      ['35.73', 'dalam_pengembangan', 'Alumni & Pendamping Malang'],
+      ['51.71', 'aktif', 'Koordinator Kota Denpasar'],
+    ];
+    const rUpd = db.prepare("UPDATE regencies SET status = ?, coordinator_name = COALESCE(coordinator_name, ?) WHERE code = ? AND status = 'belum_terbentuk'");
+    for (const [rc, st, cn] of activeRegs) rUpd.run(st, cn, rc);
+    return;
+  }
 
   // 3. Seed Isolated Demo Simulation Data
   const demoPassHash = hashPassword('Simulasi2026!');
@@ -190,7 +379,12 @@ export function ensureSeeded(db: DatabaseSync): void {
     },
     {
       id: 'usr-pengurus', email: 'pengurus.budaya@simulasi.dpbi.or.id', fullName: 'Niken Larasati (Simulasi)',
-      role: 'pengurus_nasional', bidang: 'Kebudayaan', provinceCode: '34', batchId: 'batch-3', personnelId: 'pers-4',
+      role: 'pengurus_nasional', bidang: 'Bidang Pendidikan & Kebudayaan', provinceCode: '34', batchId: 'batch-3', personnelId: 'pers-4',
+      status: 'aktif', alumniExp: null,
+    },
+    {
+      id: 'usr-pengurus-wilayah', email: 'pengurus.wilayah@simulasi.dpbi.or.id', fullName: 'Bagas Prakoso (Simulasi)',
+      role: 'pengurus_nasional', bidang: 'Bidang Pengembangan Wilayah', provinceCode: '31', batchId: 'batch-3', personnelId: 'pers-4',
       status: 'aktif', alumniExp: null,
     },
     {
@@ -267,7 +461,7 @@ export function ensureSeeded(db: DatabaseSync): void {
       name: 'Niken Larasati (Simulasi)', nick: 'Niken', bp: 'Yogyakarta', bd: '2003-11-04', gender: 'Perempuan',
       email: 'pengurus.budaya@simulasi.dpbi.or.id', phone: '081100000004', prov: '34', reg: 'Kota Yogyakarta', dist: 'Gondokusuman', vil: 'Terban',
       addr: 'Jl. Suroto No. 19', school: 'Pengurus Nasional DPBI', lvl: 'Pengurus', cls: 'Nasional', major: 'Kebudayaan', npsn: '-', nisn: '-',
-      batch: 'batch-3', pos: 'Ketua Bidang Kebudayaan', bidang: 'Kebudayaan', role: 'pengurus_nasional',
+      batch: 'batch-3', pos: 'Ketua Bidang Pendidikan & Kebudayaan', bidang: 'Bidang Pendidikan & Kebudayaan', role: 'pengurus_nasional',
       pStatus: 'aktif', vStatus: 'terverifikasi', guardian: 'Sri Wahyuni', gRel: 'Ibu', gPhone: '081100009004',
       docs: { pasFoto: true, kartuPelajar: true, suratSekolah: true, izinWali: true, suratKesediaan: true },
     },
@@ -381,14 +575,37 @@ export function ensureSeeded(db: DatabaseSync): void {
     updProv.run(status, cid, cname, note, code);
   }
 
-  // Organization structure & delegations
+  // Update active demo regencies so Kabupaten/Kota drilldown shows realistic coverage
+  const activeRegenciesSeed: [string, string, string, string][] = [
+    ['31.74', 'aktif', 'Fajar Ramadhan (Simulasi)', 'Pusat koordinasi Jakarta Selatan aktif.'],
+    ['31.71', 'aktif', 'Ayu Lestari (Simulasi)', 'Koordinasi program pusat Jakarta Pusat.'],
+    ['32.73', 'aktif', 'Siti Nurhaliza Putri (Simulasi)', 'Program aktif di 5 sekolah Kota Bandung.'],
+    ['32.71', 'aktif', 'Raka Pratama (Simulasi)', 'Lokasi kegiatan Pekan Literasi Aksara Sunda.'],
+    ['32.76', 'dalam_pengembangan', 'Tim Pelopor Depok', 'Penjajakan pembina OSIS Kota Depok.'],
+    ['33.72', 'dalam_pengembangan', 'Sekar Arum Sari (Simulasi)', 'Persiapan simposium bahasa daerah Surakarta.'],
+    ['34.71', 'aktif', 'Niken Larasati (Simulasi)', 'Aktif literasi budaya Yogyakarta.'],
+    ['35.73', 'aktif', 'Bima Sakti Nugroho (Simulasi)', 'Pembinaan komunitas pelajar Kota Malang.'],
+    ['51.71', 'aktif', 'I Made Arya Putra (Simulasi)', 'Pusat persiapan Festival Tenun & Sastra Bali.'],
+    ['12.71', 'aktif', 'M. Rizky Siregar (Simulasi)', 'Program budaya pelajar Kota Medan.'],
+    ['73.71', 'aktif', 'Andi Fikri (Simulasi)', 'Literasi maritim pelajar Kota Makassar.'],
+  ];
+  const updReg = db.prepare('UPDATE regencies SET status = ?, coordinator_name = ?, coaching_note = ? WHERE code = ?');
+  for (const [rcode, rstat, rcoor, rnote] of activeRegenciesSeed) {
+    updReg.run(rstat, rcoor, rnote, rcode);
+  }
+
+  // Organization structure (all 6 Official Pengurus Nasional Bidang + Pengawas) & delegations
   const posStmt = db.prepare(
     `INSERT INTO organization_positions (id, title, bidang, level, holder_personnel_id, holder_name, sk_number, term_starts_at, term_ends_at, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, '2026-09-15', '2027-01-15', 'aktif', ?)`
   );
   posStmt.run('pos-1', 'Penanggung Jawab Organisasi', 'Pengawasan & Perlindungan', 'Nasional', 'pers-3', 'Dr. Hendra Wijaya (Simulasi)', 'DPBI/DOC/2026/0001', now);
-  posStmt.run('pos-2', 'Ketua Bidang Kebudayaan', 'Kebudayaan', 'Nasional', 'pers-4', 'Niken Larasati (Simulasi)', 'DPBI/DOC/2026/0002', now);
-  posStmt.run('pos-3', 'Kepala Sekretariat Nasional', 'Administrasi dan Pengembangan Organisasi', 'Nasional', 'pers-5', 'Fajar Ramadhan (Simulasi)', 'DPBI/DOC/2026/0003', now);
+  posStmt.run('pos-2', 'Ketua Bidang Administrasi & Organisasi', 'Bidang Administrasi & Organisasi', 'Nasional', 'pers-5', 'Fajar Ramadhan (Simulasi)', 'DPBI/DOC/2026/0002', now);
+  posStmt.run('pos-3', 'Ketua Bidang Program & Operasional', 'Bidang Program & Operasional', 'Nasional', 'pers-2', 'Ayu Lestari Kusuma (Simulasi)', 'DPBI/DOC/2026/0003', now);
+  posStmt.run('pos-4', 'Ketua Bidang Pengembangan Wilayah', 'Bidang Pengembangan Wilayah', 'Nasional', null, 'Bagas Prakoso (Simulasi)', 'DPBI/DOC/2026/0004', now);
+  posStmt.run('pos-5', 'Ketua Bidang Pendidikan & Kebudayaan', 'Bidang Pendidikan & Kebudayaan', 'Nasional', 'pers-4', 'Niken Larasati (Simulasi)', 'DPBI/DOC/2026/0005', now);
+  posStmt.run('pos-6', 'Ketua Bidang Hubungan & Kemitraan', 'Bidang Hubungan & Kemitraan', 'Nasional', null, 'Ratna Kusumawardani (Simulasi)', 'DPBI/DOC/2026/0006', now);
+  posStmt.run('pos-7', 'Ketua Bidang Media, Publikasi & Teknologi', 'Bidang Media, Publikasi & Teknologi', 'Nasional', 'pers-1', 'Raden Bagus Prasetyo (Simulasi)', 'DPBI/DOC/2026/0007', now);
 
   db.prepare(
     `INSERT INTO delegations (id, delegate_user_id, delegate_name, grantor_user_id, grantor_name, module, action, province_code, starts_at, ends_at, reason, status, created_at)
@@ -549,13 +766,14 @@ export function ensureSeeded(db: DatabaseSync): void {
   dStmt.run('doc-2', 'DPBI/DOC/2026/0002', 'SK Penetapan Pengurus, Koordinator, dan Duta Angkatan III', 'SK', 'Sekretariat Nasional', 'Ketua Yayasan & Super Admin', '2026-09-15', '1.0', 'internal_semua', skPdf.fileId, skPdf.fileName, skPdf.sizeBytes, 'Berlaku selama masa tugas 4 bulan hingga 15 Januari 2027.', '2027-01-15', now);
   dStmt.run('doc-3', 'DPBI/DOC/2026/0003', 'Modul Pembekalan: Tata Kelola & Pelaporan LKL Berbasis Bukti', 'Materi Pembekalan', 'Bidang Kebudayaan', 'Pengurus Nasional', '2026-09-10', '1.2', 'internal_semua', modPdf.fileId, modPdf.fileName, modPdf.sizeBytes, 'Panduan penyusunan proposal PDF dan LKL lapangan.', null, now);
 
-  // Announcements
+  // Announcements (2 public approved announcements + 1 internal notice)
   const annStmt = db.prepare(
-    `INSERT INTO announcements (id, title, body, scope, province_code, batch_id, priority, author_name, published_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'terbit')`
+    `INSERT INTO announcements (id, title, body, scope, province_code, batch_id, priority, author_name, published_at, status, is_public)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'terbit', ?)`
   );
-  annStmt.run('ann-1', 'Batas Waktu Pengiriman Laporan Bulanan Wilayah', 'Kepada seluruh Koordinator Wilayah Angkatan III, mohon mengirimkan Laporan Bulanan beserta rekap LKL paling lambat tanggal 5 setiap bulan pukul 23:59 WIB.', 'nasional', null, 'batch-3', 'penting', 'Fajar Ramadhan (Simulasi)', now);
-  annStmt.run('ann-2', 'Pembaruan Kebijakan Persetujuan Terpisah Publikasi Kegiatan', 'Mulai Angkatan III, persetujuan dokumentasi dan publikasi foto/video peserta di bawah 18 tahun wajib dicatat terpisah dari persetujuan keikutsertaan.', 'nasional', null, 'batch-3', 'normal', 'Dr. Hendra Wijaya (Simulasi)', now);
+  annStmt.run('ann-1', 'Pembukaan Pemutakhiran Data Wilayah 38 Provinsi & Kabupaten/Kota', 'Koordinator Wilayah di 38 provinsi telah memulai pendataan keterwakilan Kabupaten/Kota serta dokumentasi kegiatan literasi budaya Angkatan III.', 'nasional', null, 'batch-3', 'penting', 'Fajar Ramadhan (Simulasi)', now, 1);
+  annStmt.run('ann-2', 'Standar Perlindungan Peserta Pelajar & Pendampingan Kegiatan', 'Seluruh kegiatan luring resmi DPBI menerapkan rasio pendamping dewasa dan persetujuan orang tua/wali sebagai komitmen tata kelola pelajar berbudaya.', 'nasional', null, 'batch-3', 'normal', 'Dr. Hendra Wijaya (Simulasi)', now, 1);
+  annStmt.run('ann-3', 'Batas Waktu Pengiriman Laporan Bulanan Wilayah (Internal)', 'Mohon seluruh Koordinator Wilayah mengirimkan Laporan Bulanan beserta rekap LKL paling lambat tanggal 5 setiap bulan pukul 23:59 WIB.', 'nasional', null, 'batch-3', 'penting', 'Fajar Ramadhan (Simulasi)', now, 0);
 
   // Calendar events
   const calStmt = db.prepare(

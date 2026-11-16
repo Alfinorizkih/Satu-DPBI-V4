@@ -1,6 +1,6 @@
 {
   "name": "SATU DPBI",
-  "description": "Sistem Administrasi Terpadu Utama Duta Pelajar Berbudaya Indonesia — Pusat administrasi, koordinasi, informasi, dan pengelolaan DPBI.",
+  "description": "Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia — Pusat administrasi, koordinasi, informasi, dan pengelolaan DPBI.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

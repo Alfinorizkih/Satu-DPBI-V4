@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS `provinces` (
   `coordinator_id` VARCHAR(64) NULL,
   `coordinator_name` VARCHAR(191) NULL,
   `coaching_note` TEXT NULL,
+  `logo_file_id` VARCHAR(64) NULL,
+  `description` TEXT NULL,
   `min_lat` DOUBLE NOT NULL,
   `max_lat` DOUBLE NOT NULL,
   `min_lng` DOUBLE NOT NULL,
@@ -126,6 +128,8 @@ CREATE TABLE IF NOT EXISTS `personnel` (
   `phone` VARCHAR(48) NOT NULL DEFAULT '',
   `alt_contact` VARCHAR(120) NULL,
   `province_code` VARCHAR(16) NOT NULL,
+  `assignment_province_code` VARCHAR(16) NULL,
+  `regency_code` VARCHAR(16) NULL,
   `regency` VARCHAR(120) NOT NULL DEFAULT '',
   `district` VARCHAR(120) NOT NULL DEFAULT '',
   `village` VARCHAR(120) NOT NULL DEFAULT '',
@@ -391,6 +395,8 @@ CREATE TABLE IF NOT EXISTS `tasks` (
   `checklist_json` LONGTEXT NOT NULL,
   `is_template` TINYINT(1) NOT NULL DEFAULT 0,
   `recurrence` VARCHAR(32) NOT NULL DEFAULT 'tidak',
+  `attachment_file_id` VARCHAR(64) NULL,
+  `attachment_file_name` VARCHAR(191) NULL,
   `created_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_tasks_ref` (`reference_number`)
@@ -439,6 +445,7 @@ CREATE TABLE IF NOT EXISTS `announcements` (
   `author_name` VARCHAR(191) NOT NULL,
   `published_at` VARCHAR(40) NOT NULL,
   `status` VARCHAR(24) NOT NULL DEFAULT 'terbit',
+  `is_public` TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -675,6 +682,70 @@ CREATE TABLE IF NOT EXISTS `system_errors` (
   `created_at` VARCHAR(40) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_system_errors_ref` (`reference_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `regencies` (
+  `code` VARCHAR(16) NOT NULL,
+  `province_code` VARCHAR(16) NOT NULL,
+  `name` VARCHAR(160) NOT NULL,
+  `kind` VARCHAR(24) NOT NULL DEFAULT 'kabupaten',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'belum_terbentuk',
+  `coordinator_name` VARCHAR(191) NULL,
+  `coaching_note` TEXT NULL,
+  PRIMARY KEY (`code`),
+  KEY `idx_regencies_province` (`province_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `districts` (
+  `code` VARCHAR(24) NOT NULL,
+  `regency_code` VARCHAR(16) NOT NULL,
+  `name` VARCHAR(160) NOT NULL,
+  PRIMARY KEY (`code`),
+  KEY `idx_districts_regency` (`regency_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `villages` (
+  `code` VARCHAR(32) NOT NULL,
+  `district_code` VARCHAR(24) NOT NULL,
+  `name` VARCHAR(160) NOT NULL,
+  PRIMARY KEY (`code`),
+  KEY `idx_villages_district` (`district_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `region_history` (
+  `id` VARCHAR(64) NOT NULL,
+  `region_type` VARCHAR(24) NOT NULL,
+  `region_code` VARCHAR(24) NOT NULL,
+  `action` VARCHAR(48) NOT NULL,
+  `summary` TEXT NOT NULL,
+  `actor_name` VARCHAR(191) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_region_history_code` (`region_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `cms_contents` (
+  `key` VARCHAR(64) NOT NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `body` LONGTEXT NOT NULL,
+  `updated_by` VARCHAR(191) NULL,
+  `updated_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `help_articles` (
+  `id` VARCHAR(64) NOT NULL,
+  `slug` VARCHAR(120) NOT NULL,
+  `category` VARCHAR(64) NOT NULL,
+  `role_target` VARCHAR(48) NOT NULL DEFAULT 'umum',
+  `title` VARCHAR(255) NOT NULL,
+  `summary` TEXT NOT NULL,
+  `content` LONGTEXT NOT NULL,
+  `sort_order` INT NOT NULL DEFAULT 1,
+  `is_published` TINYINT(1) NOT NULL DEFAULT 1,
+  `updated_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_help_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

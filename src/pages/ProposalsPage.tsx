@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Edit3, Eye, FileText, History, Info, Plus, Send } from 'lucide-react';
+import { Download, Edit3, Eye, FileText, History, Info, Plus, Printer, Send } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -13,8 +13,9 @@ import {
   Pagination,
   StatusIndicator,
 } from '../components/ui';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { ProposalRecord } from '../lib/types';
-import { formatTanggalIndonesia } from '../lib/rbac';
+import { formatTanggalIndonesia, OFFICIAL_BIDANGS } from '../lib/rbac';
 
 const PAGE_SIZE = 10;
 
@@ -46,13 +47,14 @@ export function ProposalsPage({
   initialId?: string;
 }) {
   const { user, can, notify, navigate } = useAuth();
-  const [proposals, setProposals] = useState<ProposalRecord[]>([]);
+  const [proposals, setProposals] = useState<(ProposalRecord & { bidangRelevant?: boolean })[]>([]);
   const [matrixRules, setMatrixRules] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [formDirty, setFormDirty] = useState(false);
   const { showConfirmDialog, guardAction, confirmLeave, cancelLeave } = useUnsavedChanges(formDirty);
   const [statusFilter, setStatusFilter] = useState('');
+  const [bidangOnly, setBidangOnly] = useState(false);
   const [page, setPage] = useState(1);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -64,10 +66,11 @@ export function ProposalsPage({
   const [reviseFile, setReviseFile] = useState<{ fileId: string; fileName: string } | null>(null);
   const [showMatrix, setShowMatrix] = useState(false);
   const [previewPdfId, setPreviewPdfId] = useState<string | null>(null);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const defaultForm = {
     title: '',
-    bidang: 'Kebudayaan',
+    bidang: OFFICIAL_BIDANGS[3].id as string,
     category: 'Lokakarya / Literasi Pelajar',
     riskLevel: 'sedang' as 'rendah' | 'sedang' | 'tinggi',
     usesDpbiIdentity: true,
@@ -85,9 +88,11 @@ export function ProposalsPage({
 
   const [form, setForm] = useState(defaultForm);
 
-  const load = () => {
+  const load = (onlyMyBidang = bidangOnly) => {
     setLoading(true);
-    apiGet<{ proposals: ProposalRecord[]; matrixRules: Record<string, unknown>[] }>('/api/proposals')
+    apiGet<{ proposals: (ProposalRecord & { bidangRelevant?: boolean })[]; matrixRules: Record<string, unknown>[] }>(
+      `/api/proposals${onlyMyBidang ? '?bidangOnly=1' : ''}`
+    )
       .then((res) => {
         setProposals(res.proposals);
         setMatrixRules(res.matrixRules);
@@ -96,11 +101,11 @@ export function ProposalsPage({
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    load(bidangOnly);
+  }, [bidangOnly]);
   useEffect(() => {
     setPage(1);
-  }, [statusFilter]);
+  }, [statusFilter, bidangOnly]);
 
   useEffect(() => {
     if (initialMode === 'create' && can('proposal', 'create')) {
@@ -284,27 +289,52 @@ export function ProposalsPage({
       </div>
 
       {/* Filter Bar */}
-      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-200/70 dark:bg-slate-800/80 rounded-xl w-fit max-w-full overflow-x-auto">
-        {[
-          ['', 'Semua'],
-          ['draft', 'Draft'],
-          ['diajukan', 'Diajukan'],
-          ['menunggu_persetujuan_nasional', 'Menunggu Nasional'],
-          ['perlu_revisi', 'Perlu Revisi'],
-          ['disetujui', 'Disetujui'],
-          ['ditolak', 'Ditolak'],
-        ].map(([val, label]) => (
-          <button
-            key={val}
-            type="button"
-            onClick={() => setStatusFilter(val)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              statusFilter === val ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5 p-1 bg-slate-200/70 dark:bg-slate-800/80 rounded-xl w-fit max-w-full overflow-x-auto">
+          {[
+            ['', 'Semua'],
+            ['draft', 'Draft'],
+            ['diajukan', 'Diajukan'],
+            ['menunggu_persetujuan_nasional', 'Menunggu Nasional'],
+            ['perlu_revisi', 'Perlu Revisi'],
+            ['disetujui', 'Disetujui'],
+            ['ditolak', 'Ditolak'],
+          ].map(([val, label]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setStatusFilter(val)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                statusFilter === val ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {user?.role === 'pengurus_nasional' && user.bidang && (
+          <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
+            <button
+              type="button"
+              onClick={() => setBidangOnly(false)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                !bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              Semua Bidang
+            </button>
+            <button
+              type="button"
+              onClick={() => setBidangOnly(true)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-[#0EA5E9]' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              Hanya Bidang Saya ({user.bidang.replace(/^Bidang\s+/i, '')})
+            </button>
+          </div>
+        )}
       </div>
 
       <GlassCard className="p-5 space-y-4">
@@ -428,10 +458,14 @@ export function ProposalsPage({
             <div>
               <label className="block font-semibold mb-1">Bidang</label>
               <select value={form.bidang} onChange={(e) => updateProposalForm({ bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                <option value="Kebudayaan">Kebudayaan</option>
-                <option value="Pendidikan">Pendidikan</option>
-                <option value="Program dan Operasional">Program dan Operasional</option>
-                <option value="Hubungan dan Kemitraan">Hubungan dan Kemitraan</option>
+                {!OFFICIAL_BIDANGS.some((b) => b.id === form.bidang) && form.bidang && (
+                  <option value={form.bidang}>{form.bidang}</option>
+                )}
+                {OFFICIAL_BIDANGS.map((b) => (
+                  <option key={b.code} value={b.id}>
+                    {b.number}. {b.id}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -526,25 +560,60 @@ export function ProposalsPage({
           <div className="space-y-5 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
               <StatusIndicator status={selected.status} />
-              {selected.pdfFileId && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewPdfId((prev) => (prev ? null : selected.pdfFileId))}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Tutup Pratinjau' : 'Pratinjau PDF'}
-                  </button>
-                  <a
-                    href={apiUrl(`/api/files/${selected.pdfFileId}`)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
-                  >
-                    <Download className="w-3.5 h-3.5" /> Unduh ({selected.pdfFileName})
-                  </a>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPrintConfig({
+                      template: 'proposal',
+                      documentNumber: selected.referenceNumber,
+                      title: selected.title,
+                      subtitle: `${selected.bidang} · ${selected.category}`,
+                      issuedDate: selected.createdAt,
+                      metadata: [
+                        { label: 'Pengaju', value: selected.applicantName },
+                        { label: 'Wilayah', value: selected.provinceName },
+                        { label: 'Angkatan', value: selected.batchName },
+                        { label: 'Jadwal', value: `${formatTanggalIndonesia(selected.eventDate)} (${selected.eventTime})` },
+                        { label: 'Moda & Peserta', value: `${selected.activityMode} · ${selected.estimatedParticipants} orang` },
+                        { label: 'Status', value: selected.status.replace(/_/g, ' ') },
+                      ],
+                      sections: [
+                        { heading: 'Tujuan & Sasaran Kegiatan', body: selected.objective },
+                        { heading: 'Lokasi / Platform & Target Audiens', body: `${selected.location || '—'} · Target: ${selected.targetAudience}` },
+                        ...(selected.decisionNote
+                          ? [{ heading: `Catatan Keputusan (${selected.decidedBy || 'Peninjau'})`, body: selected.decisionNote }]
+                          : []),
+                      ],
+                      signatoryName: selected.decidedBy || selected.applicantName,
+                      signatoryRole: selected.decidedBy ? 'Pejabat Penyetuju Proposal DPBI' : 'Pengaju Proposal',
+                      signatoryLocation: selected.provinceName,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                >
+                  <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak Ringkasan A4
+                </button>
+                {selected.pdfFileId && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewPdfId((prev) => (prev ? null : selected.pdfFileId))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {previewPdfId ? 'Tutup Pratinjau' : 'Pratinjau PDF'}
+                    </button>
+                    <a
+                      href={apiUrl(`/api/files/${selected.pdfFileId}`)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Unduh ({selected.pdfFileName})
+                    </a>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Clear Next Action Guidance */}
@@ -686,6 +755,12 @@ export function ProposalsPage({
         danger
         onConfirm={confirmLeave}
         onCancel={cancelLeave}
+      />
+
+      <A4PrintModal
+        open={Boolean(printConfig)}
+        config={printConfig}
+        onClose={() => setPrintConfig(null)}
       />
     </div>
   );

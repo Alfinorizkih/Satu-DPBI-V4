@@ -1,0 +1,1763 @@
+
+
+# PROMPT FINAL — TOTAL REDESIGN, PENGEMBANGAN, DAN FINALISASI SATU DPBI
+## Production-Ready Organizational Management Platform
+
+Bertindaklah sebagai satu tim pengembangan produk digital profesional yang terdiri atas:
+
+- Principal Software Architect
+- Senior UI/UX Designer
+- Product Designer
+- Frontend Engineer
+- Backend Engineer
+- Database Architect
+- GIS / Geospatial Engineer
+- Cybersecurity Engineer
+- DevOps & Deployment Engineer
+- QA & Automation Engineer
+- Technical Writer
+
+Saya ingin Anda melakukan **perombakan menyeluruh dan finalisasi SATU DPBI dari sisi desain, pengalaman pengguna, fitur, struktur kode, database, keamanan, peta wilayah, sistem dokumen, hingga deployment**.
+
+Jangan hanya memperbaiki halaman tertentu. Jangan hanya membuat dashboard baru. Jangan hanya mengganti warna atau mempercantik komponen.
+
+Saya menginginkan sebuah aplikasi organisasi yang benar-benar matang, profesional, terintegrasi, mudah digunakan, mudah dipelihara, dan siap dioperasikan.
+
+**Jangan menganggap pekerjaan selesai hanya karena website dapat dibuka atau tampilannya terlihat bagus. Semua fitur, halaman, navigasi, database, dan alur kerja harus benar-benar diimplementasikan dan diuji.**
+
+---
+
+# BAGIAN I — IDENTITAS DAN ARAH PRODUK
+
+## 1. Identitas SATU DPBI
+
+**Nama:** SATU DPBI
+
+**Kepanjangan:** Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia.
+
+**Organisasi:** Duta Pelajar Berbudaya Indonesia (DPBI).
+
+**Deskripsi:** Pusat administrasi, koordinasi, informasi, dan pengelolaan Duta Pelajar Berbudaya Indonesia.
+
+**Tagline SATU DPBI:**
+
+Satu Sistem, Satu Data, Satu Koordinasi.
+
+**Tagline organisasi DPBI:**
+
+Berbudaya, Bergerak, dan Berdampak Untuk Negeri.
+
+SATU DPBI merupakan platform internal organisasi yang juga memiliki halaman publik untuk memperkenalkan organisasi dan menampilkan informasi persebaran wilayah DPBI.
+
+Jangan menggambarkan DPBI sebagai lembaga pemerintah atau program resmi pemerintah. Jangan menggunakan identitas, logo, maupun pernyataan yang memberikan kesan adanya afiliasi pemerintah tanpa dasar kerja sama resmi.
+
+## 2. Target hasil akhir
+
+Saya menginginkan website dengan karakteristik:
+
+1. Sangat bagus secara visual.
+2. Sederhana, tidak berlebihan, tetapi terlihat premium.
+3. Nyaman digunakan oleh pengurus dan Duta.
+4. Cepat dan responsif.
+5. Memiliki struktur navigasi yang jelas.
+6. Setiap halaman memiliki tujuan dan fungsi.
+7. Semua modul terhubung dalam satu sistem.
+8. Aman untuk mengelola data organisasi.
+9. Dapat dikembangkan tanpa harus membangun ulang semuanya.
+10. Mudah diperbarui ketika kebutuhan organisasi berkembang.
+
+Jangan membuat website terlalu kompleks hanya agar terlihat canggih. Utamakan fitur yang benar-benar memberikan manfaat.
+
+---
+
+# BAGIAN II — TOTAL REDESIGN UI/UX
+
+## 3. Arah desain utama
+
+Lakukan redesign dengan pendekatan:
+
+**Premium Minimalist Institutional Design.**
+
+Saya ingin desain yang terlihat seperti produk SaaS profesional, platform administrasi organisasi modern, dan sistem manajemen kelembagaan yang matang.
+
+Referensi visual dan komponen:
+
+- https://github.com/cruip/tailwind-dashboard-template
+- https://tailwindcss.com/
+
+Referensi tersebut hanya untuk mempelajari kualitas komponen, layout, dan pengalaman pengguna. Jangan menyalin secara mentah.
+
+### Karakter desain
+
+- Clean dan minimalis.
+- Modern dan profesional.
+- Elegan tetapi tidak berlebihan.
+- Banyak ruang kosong yang proporsional.
+- Hierarki informasi yang jelas.
+- Tipografi yang nyaman dibaca.
+- Ikon konsisten.
+- Animasi halus.
+- Kartu sederhana dan informatif.
+- Navigasi intuitif.
+- Tidak terlihat seperti template admin generik.
+
+### Palet warna
+
+| Elemen | Warna |
+|---|---|
+| Primary | `#0EA5E9` |
+| Deep Slate | `#1E293B` |
+| Background | `#F1F5F9` |
+| Highlight | `#38BDF8` |
+| Surface | `#FFFFFF` |
+| Border | Neutral gray |
+| Text utama | Deep slate |
+| Text sekunder | Slate gray |
+
+Boleh melakukan penyesuaian warna jika hasilnya lebih harmonis, tetapi identitas cyan, putih, dan slate harus tetap terasa.
+
+Gunakan glassmorphism hanya secara halus pada bagian yang tepat. Jangan membuat seluruh halaman transparan atau menggunakan blur berlebihan.
+
+### Tipografi
+
+Gunakan tipografi modern yang konsisten, misalnya Plus Jakarta Sans atau Inter.
+
+Tentukan:
+- Ukuran judul halaman.
+- Ukuran judul bagian.
+- Ukuran isi.
+- Ukuran label.
+- Ukuran angka statistik.
+- Ketebalan huruf.
+- Jarak antarbaris.
+
+Jangan menggunakan terlalu banyak ukuran dan jenis font.
+
+## 4. Sistem layout global
+
+Buat satu sistem desain yang dipakai seluruh aplikasi.
+
+### Sidebar
+
+Sidebar harus:
+- Memiliki logo SATU DPBI.
+- Memiliki identitas pengguna.
+- Menggunakan pengelompokan menu yang logis.
+- Dapat diciutkan.
+- Memiliki indikator halaman aktif.
+- Memiliki submenu yang nyaman.
+- Menampilkan menu sesuai hak akses.
+- Tidak terlalu lebar.
+- Tidak dipenuhi ikon tanpa keterangan.
+
+### Header
+
+Header minimal memiliki:
+- Breadcrumb.
+- Judul atau konteks halaman.
+- Global Search.
+- Notifikasi.
+- Profil pengguna.
+- Pengaturan tema.
+
+### Konten halaman
+
+Setiap halaman harus memiliki:
+- Judul yang jelas.
+- Deskripsi singkat jika dibutuhkan.
+- Tombol tindakan utama.
+- Informasi yang tersusun.
+- Jarak komponen yang konsisten.
+- Filter dan pencarian jika relevan.
+- Tampilan responsif.
+
+### Mobile
+
+Pada perangkat mobile:
+- Sidebar menjadi drawer.
+- Navigasi mudah dijangkau.
+- Formulir tidak terpotong.
+- Tabel berubah menjadi kartu atau layout alternatif.
+- Modal menyesuaikan ukuran layar.
+- Tombol nyaman disentuh.
+- Tidak ada horizontal overflow yang tidak diperlukan.
+
+Sediakan light mode dan dark mode. Preferensi tema disimpan dengan aman dan diterapkan secara konsisten.
+
+---
+
+# BAGIAN III — HALAMAN PUBLIK DPBI
+
+## 5. Redesign total website publik
+
+Halaman publik wajib mendapatkan perhatian khusus. Jangan mempertahankan desain lama jika kualitasnya belum sesuai.
+
+Buat halaman publik yang memiliki identitas visual kuat, profesional, menarik, dan dapat memperkenalkan DPBI kepada masyarakat.
+
+Website publik bukan dashboard internal yang dibuka tanpa login.
+
+### Struktur halaman publik
+
+#### A. Navigation bar
+
+Berisi:
+- Logo DPBI.
+- Beranda.
+- Tentang DPBI.
+- Persebaran Wilayah.
+- Informasi organisasi yang telah disetujui untuk publik.
+- Tombol Masuk ke SATU DPBI.
+
+Navigasi harus responsif dan nyaman digunakan.
+
+#### B. Hero section
+
+Buat tampilan utama yang kuat dan elegan.
+
+Tampilkan:
+- Identitas Duta Pelajar Berbudaya Indonesia.
+- Tagline organisasi.
+- Penjelasan singkat.
+- Tombol menuju informasi organisasi.
+- Tombol masuk portal.
+- Visual pendukung yang relevan dengan budaya dan pelajar Indonesia.
+
+Hindari hero yang terlalu penuh dengan tulisan atau elemen dekoratif.
+
+#### C. Tentang DPBI
+
+Jelaskan:
+- Identitas organisasi.
+- Tujuan.
+- Visi dan misi.
+- Fokus pendidikan dan kebudayaan.
+- Sistem pelaksanaan kegiatan.
+- Nilai dan prinsip organisasi.
+
+Seluruh konten harus dapat dikelola melalui CMS sederhana oleh pengguna yang berwenang.
+
+#### D. Statistik persebaran DPBI
+
+Tampilkan statistik agregat yang benar-benar diambil dari database, misalnya:
+- Jumlah provinsi yang telah memiliki cakupan DPBI.
+- Jumlah kabupaten/kota dengan cakupan DPBI.
+- Jumlah wilayah yang masih dalam tahap pengembangan.
+- Jumlah Duta aktif jika disetujui untuk publik.
+
+Jangan menampilkan angka palsu atau statistik yang tidak memiliki sumber data.
+
+Jika data belum tersedia, tampilkan kondisi belum tersedia secara jujur.
+
+#### E. Peta persebaran nasional
+
+Peta Indonesia harus menjadi salah satu bagian utama website publik.
+
+Peta harus dapat memperlihatkan perkembangan kehadiran DPBI di Indonesia hingga tingkat kabupaten/kota.
+
+Ketentuan peta dijelaskan secara lengkap pada Bagian VI.
+
+#### F. Informasi tambahan
+
+Sediakan bagian informasi organisasi, program, dan dokumentasi publik apabila kontennya telah disetujui.
+
+Jangan membuat berita atau pengumuman palsu.
+
+#### G. Footer
+
+Berisi:
+- Identitas DPBI.
+- Deskripsi singkat.
+- Navigasi.
+- Kontak resmi organisasi jika tersedia.
+- Tautan media sosial resmi.
+- Hak cipta.
+- Kebijakan privasi.
+- Ketentuan penggunaan.
+
+### Keamanan website publik
+
+Website publik hanya boleh menampilkan informasi yang telah ditandai dan disetujui untuk publikasi.
+
+Jangan pernah menampilkan:
+- Alamat lengkap Duta.
+- NISN.
+- Nomor telepon pribadi.
+- Email pribadi.
+- Dokumen identitas.
+- Kartu pelajar.
+- Dokumen internal.
+- Detail pengaduan.
+- Data akun.
+- Riwayat penilaian pribadi.
+- Informasi operasional rahasia.
+
+Peta publik hanya menampilkan agregasi cakupan wilayah, bukan lokasi rumah atau lokasi pribadi Duta.
+
+---
+
+# BAGIAN IV — STRUKTUR ORGANISASI DAN HAK AKSES
+
+## 6. Struktur Pengurus Nasional
+
+Gunakan struktur enam bidang berikut sebagai struktur resmi dalam sistem.
+
+### 01. Bidang Administrasi & Organisasi
+
+Ruang lingkup:
+- Data organisasi.
+- Data keanggotaan.
+- Administrasi personel.
+- Surat-menyurat.
+- SK.
+- Struktur organisasi.
+- Arsip kelembagaan.
+- Pengelolaan administrasi keanggotaan.
+
+### 02. Bidang Program & Operasional
+
+Ruang lingkup:
+- Program kerja.
+- Perencanaan kegiatan.
+- Pelaksanaan kegiatan.
+- Pengelolaan tugas.
+- Proposal kegiatan.
+- Laporan pelaksanaan.
+- Evaluasi operasional.
+
+### 03. Bidang Pengembangan Wilayah
+
+Ruang lingkup:
+- Koordinator wilayah.
+- Pengembangan provinsi.
+- Pengembangan kabupaten/kota.
+- Pembinaan Duta.
+- Monitoring perkembangan wilayah.
+- Evaluasi cakupan wilayah.
+- Koordinasi regional.
+
+### 04. Bidang Pendidikan & Kebudayaan
+
+Ruang lingkup:
+- Materi pendidikan.
+- Kurasi budaya.
+- Pembekalan Duta.
+- Pengembangan wawasan kebudayaan.
+- Program pendidikan.
+- Materi kegiatan.
+- Pengembangan substansi program.
+
+### 05. Bidang Hubungan & Kemitraan
+
+Ruang lingkup:
+- Relasi eksternal.
+- Kerja sama.
+- Komunikasi kelembagaan.
+- Pendataan mitra.
+- Dokumen kerja sama.
+- Koordinasi hubungan eksternal.
+
+### 06. Bidang Media, Publikasi & Teknologi
+
+Ruang lingkup:
+- Branding organisasi.
+- Konten.
+- Publikasi.
+- Dokumentasi.
+- Pengelolaan media digital.
+- Pengelolaan SATU DPBI.
+- Pengembangan teknologi.
+- Pemeliharaan sistem.
+
+Setiap bidang memiliki dashboard, daftar tugas, dan akses modul sesuai kewenangannya.
+
+Jangan memberikan akses seluruh sistem kepada semua Pengurus Nasional hanya karena mereka berada di tingkat nasional.
+
+## 7. Role dan permission
+
+Gunakan struktur peran:
+
+1. Super Admin.
+2. Wakil Super Admin.
+3. Penanggung Jawab Organisasi.
+4. Pengurus Nasional.
+5. Sekretariat Nasional.
+6. Koordinator Wilayah.
+7. Duta.
+8. Alumni.
+
+Hak akses harus menggunakan granular permission:
+
+- View.
+- Create.
+- Edit.
+- Delete.
+- Approve.
+- Reject.
+- Download.
+- Export.
+- Assign.
+- Manage.
+- Publish.
+- Archive.
+
+Terapkan seluruh pemeriksaan izin di backend.
+
+Duta hanya dapat mengakses data dan dokumen miliknya sendiri.
+
+Koordinator hanya dapat mengakses data wilayah yang ditugaskan kepadanya.
+
+Super Admin dapat melakukan tindakan darurat dengan alasan, pencatatan audit, dan pembatasan yang jelas.
+
+---
+
+# BAGIAN V — SISTEM WILAYAH HINGGA KABUPATEN/KOTA
+
+## 8. Struktur data wilayah Indonesia
+
+SATU DPBI harus memiliki struktur wilayah yang lengkap:
+
+Negara → Provinsi → Kabupaten/Kota → Kecamatan → Desa/Kelurahan.
+
+Data wilayah tidak boleh hanya berupa daftar teks yang diketik bebas.
+
+Gunakan database referensi administratif yang memiliki kode wilayah, nama resmi, relasi induk, dan riwayat pembaruan.
+
+Buat sistem yang dapat mengakomodasi perubahan administratif di masa depan.
+
+Jangan mengunci sistem hanya untuk 38 provinsi atau jumlah kabupaten/kota saat ini. Data harus dapat diperbarui ketika terjadi pemekaran, perubahan nama, atau perubahan kode wilayah.
+
+### Pengelolaan provinsi
+
+Setiap provinsi memiliki:
+- Nama provinsi.
+- Kode wilayah.
+- Logo atau identitas visual wilayah DPBI.
+- Deskripsi wilayah.
+- Koordinator.
+- Status cakupan.
+- Jumlah Duta.
+- Jumlah kabupaten/kota terjangkau.
+- Riwayat pengembangan.
+- Dokumentasi wilayah.
+
+Logo provinsi dapat diunggah dan dikelola oleh pengguna berwenang.
+
+Jika logo belum tersedia, gunakan placeholder visual yang konsisten. Jangan mengambil atau membuat logo resmi secara sembarangan.
+
+### Pengelolaan kabupaten/kota
+
+Setiap provinsi memiliki daftar kabupaten/kota di dalamnya.
+
+Kabupaten/kota tidak perlu memiliki logo.
+
+Tampilkan:
+- Nama kabupaten/kota.
+- Kode wilayah.
+- Status cakupan DPBI.
+- Jumlah Duta yang ditugaskan.
+- Status perkembangan.
+- Koordinator atau penanggung jawab jika ada.
+- Riwayat kegiatan.
+
+### Status wilayah
+
+Gunakan status yang jelas, misalnya:
+
+- Belum Terjangkau.
+- Dalam Pengembangan.
+- Memiliki Duta.
+- Aktif Berkegiatan.
+- Perlu Pembinaan.
+
+Status harus ditentukan berdasarkan aturan data yang dapat dikonfigurasi dan diverifikasi, bukan berdasarkan warna manual semata.
+
+Bedakan antara:
+- Duta berdomisili di kabupaten/kota tersebut.
+- Duta ditugaskan di wilayah tersebut.
+- Wilayah sudah memiliki kegiatan DPBI.
+- Wilayah memiliki koordinator resmi.
+
+Keempat informasi tersebut tidak boleh dianggap sama.
+
+### Formulir penambahan Duta
+
+Saat menambahkan atau memverifikasi Duta, formulir harus menyediakan:
+
+- Provinsi.
+- Kabupaten/kota.
+- Kecamatan.
+- Desa/kelurahan.
+- Alamat lengkap.
+- Kode pos jika tersedia.
+- Wilayah penugasan.
+- Informasi pendidikan.
+
+Pilihan kabupaten/kota harus otomatis menyesuaikan provinsi yang dipilih. Kecamatan menyesuaikan kabupaten/kota, dan seterusnya.
+
+Alamat pribadi harus disimpan secara privat dan tidak digunakan sebagai lokasi publik.
+
+---
+
+# BAGIAN VI — PETA INDONESIA YANG BENAR DAN INTERAKTIF
+
+## 9. Implementasi peta nasional
+
+Saya tidak ingin peta Indonesia dibuat dengan menggambar bentuk sendiri atau menggunakan ilustrasi yang menyerupai peta.
+
+**Gunakan dataset peta geografis Indonesia yang benar-benar tersedia dan dapat dipertanggungjawabkan.**
+
+Cari dan evaluasi sumber data geospasial yang kredibel, utamakan sumber resmi seperti Badan Informasi Geospasial atau sumber batas administrasi yang memiliki dokumentasi dan lisensi yang jelas.
+
+Alternatif sumber dapat dipertimbangkan apabila:
+- Geometri wilayah lengkap.
+- Mencakup seluruh provinsi dan kabupaten/kota yang diperlukan.
+- Memiliki kode wilayah yang dapat dicocokkan dengan database.
+- Memiliki lisensi penggunaan yang jelas.
+- Memiliki informasi sumber dan tanggal pembaruan.
+- Dapat digunakan dalam aplikasi web.
+- Memiliki tingkat akurasi yang memadai.
+
+Jangan menggunakan dataset hanya karena mudah ditemukan di GitHub.
+
+Contoh repositori yang boleh dievaluasi sebagai kandidat, bukan langsung dipercaya:
+
+`https://github.com/rezkyyayang/maps`
+
+Periksa lisensi, struktur GeoJSON, cakupan, ketepatan geometri, pembaruan, dan atribusinya sebelum digunakan.
+
+Jangan mengarang sumber atau mengklaim data berasal dari BIG jika sebenarnya bukan.
+
+### Peta pada website publik
+
+Peta harus:
+- Menampilkan wilayah Indonesia dengan benar.
+- Menampilkan batas provinsi.
+- Mendukung interaksi pemilihan provinsi.
+- Menampilkan status cakupan DPBI.
+- Menampilkan kabupaten/kota ketika provinsi dipilih.
+- Memiliki legenda.
+- Memiliki tooltip.
+- Memiliki panel detail wilayah.
+- Memiliki pencarian provinsi dan kabupaten/kota.
+- Memiliki tampilan responsif.
+
+Saat pengguna memilih provinsi, tampilkan:
+- Logo wilayah DPBI.
+- Nama provinsi.
+- Status cakupan.
+- Jumlah Duta jika boleh dipublikasikan.
+- Daftar kabupaten/kota.
+- Status masing-masing kabupaten/kota.
+
+Kabupaten/kota cukup ditampilkan menggunakan nama dan status, tidak perlu logo.
+
+Jangan menampilkan identitas atau alamat pribadi Duta.
+
+### Peta pada dashboard internal
+
+Dashboard juga wajib memiliki peta Indonesia.
+
+Peta internal memiliki informasi lebih lengkap sesuai hak akses:
+- Koordinator.
+- Jumlah Duta.
+- Cakupan kabupaten/kota.
+- Kegiatan.
+- Laporan.
+- Perkembangan wilayah.
+- Wilayah yang memerlukan pembinaan.
+
+Ketika provinsi diklik, tampilkan panel detail. Ketika kabupaten/kota diklik, tampilkan data kabupaten/kota tersebut.
+
+Koordinator hanya dapat melihat data yang memang menjadi kewenangannya.
+
+### Kualitas teknis peta
+
+- Jangan mengunduh dataset setiap kali halaman dibuka.
+- Simpan dataset yang telah diverifikasi secara lokal atau pada penyimpanan yang sesuai.
+- Optimalkan GeoJSON agar tidak terlalu berat.
+- Gunakan pemuatan bertahap jika diperlukan.
+- Jangan membuat peta memperlambat dashboard.
+- Gunakan legenda yang konsisten.
+- Sediakan tampilan daftar sebagai alternatif peta.
+- Berikan atribusi sumber data.
+- Dokumentasikan sumber, versi, lisensi, dan proses pembaruan.
+
+Jika dataset yang tersedia belum lengkap untuk tingkat kabupaten/kota, jangan mengarang batas wilayah. Gunakan sumber alternatif yang tervalidasi atau nyatakan bagian yang belum tersedia.
+
+---
+
+# BAGIAN VII — MODUL UTAMA SATU DPBI
+
+## 10. Dashboard
+
+Buat dashboard berdasarkan peran pengguna.
+
+Komponen yang dapat ditampilkan sesuai kebutuhan:
+- Jumlah Duta aktif.
+- Jumlah Koordinator.
+- Persebaran provinsi.
+- Persebaran kabupaten/kota.
+- Proposal menunggu persetujuan.
+- LKL menunggu pemeriksaan.
+- Tugas mendekati tenggat.
+- Laporan wilayah yang belum dikirim.
+- Notifikasi terbaru.
+- Agenda mendatang.
+- Aktivitas organisasi.
+- Peta Indonesia.
+
+Jangan memasukkan seluruh statistik ke semua dashboard.
+
+Dashboard harus menjawab tiga pertanyaan:
+1. Bagaimana kondisi pekerjaan saya?
+2. Apa yang membutuhkan perhatian saya?
+3. Apa tindakan berikutnya?
+
+## 11. Personalia
+
+Fitur:
+- Daftar personel.
+- Detail profil.
+- Tambah dan edit.
+- Verifikasi data.
+- Riwayat jabatan.
+- Riwayat angkatan.
+- Penempatan wilayah.
+- Dokumen personel.
+- Status keaktifan.
+- Pencarian dan filter.
+- Impor dan ekspor.
+- Deteksi data ganda.
+
+Setiap orang hanya memiliki satu identitas personel utama meskipun memiliki beberapa riwayat jabatan atau angkatan.
+
+## 12. Angkatan
+
+Fitur:
+- Buat angkatan.
+- Atur masa tugas.
+- Kelola daftar Duta.
+- Atur status angkatan.
+- Pantau progres.
+- Tutup angkatan.
+- Arsip angkatan.
+- Lihat riwayat angkatan sebelumnya.
+
+Data historis tidak boleh tertimpa ketika membuat angkatan baru.
+
+## 13. Proposal
+
+Alur:
+
+Duta mengajukan → Koordinator memeriksa kelengkapan dan kesesuaian wilayah → Pengurus Nasional sesuai bidang dan delegasi memberikan keputusan akhir.
+
+Fitur:
+- Formulir metadata.
+- Unggah PDF.
+- Draft.
+- Pengajuan.
+- Pemeriksaan.
+- Revisi.
+- Persetujuan.
+- Penolakan dengan alasan.
+- Riwayat versi.
+- Notifikasi status.
+
+Proposal yang membutuhkan persetujuan khusus harus memiliki alur yang dapat dikonfigurasi.
+
+## 14. Laporan Kegiatan Lapangan
+
+Fitur:
+- Formulir laporan terstruktur.
+- Nama kegiatan.
+- Kategori.
+- Waktu.
+- Lokasi.
+- Penanggung jawab.
+- Jumlah peserta.
+- Ringkasan kegiatan.
+- Hasil kegiatan.
+- Kendala.
+- Tindak lanjut.
+- Unggah PDF.
+- Unggah beberapa foto.
+- Pemeriksaan laporan.
+- Revisi.
+- Riwayat.
+
+Duta hanya dapat melihat dan mengelola laporan miliknya sendiri.
+
+## 15. Laporan Koordinator
+
+Sediakan:
+- Laporan bulanan.
+- Laporan akhir angkatan.
+- Ringkasan kegiatan.
+- Rekap personel.
+- Perkembangan wilayah.
+- Kendala.
+- Rencana tindak lanjut.
+- Status pemeriksaan.
+
+Deadline laporan dapat dikonfigurasi. Default kebijakan yang digunakan adalah laporan bulanan tanggal 5 dan laporan akhir paling lambat 7×24 jam setelah angkatan berakhir.
+
+## 16. Tugas dan program kerja
+
+Fitur:
+- Pembuatan tugas.
+- Penanggung jawab.
+- Subtugas.
+- Prioritas.
+- Tenggat.
+- Checklist.
+- Lampiran.
+- Komentar.
+- Status.
+- Riwayat.
+- Tampilan daftar.
+- Tampilan kanban.
+- Tampilan kalender.
+
+## 17. Dokumen organisasi
+
+Fitur:
+- Surat.
+- SK.
+- Sertifikat.
+- Pedoman.
+- SOP.
+- Arsip.
+- Nomor dokumen.
+- Kategori.
+- Versi.
+- Pratinjau.
+- Unduh.
+- Verifikasi dokumen jika diperlukan.
+
+Gunakan penomoran referensi unik dan tidak dapat digunakan ulang.
+
+## 18. Komunikasi dan notifikasi
+
+Sediakan:
+- Pengumuman nasional.
+- Pengumuman wilayah.
+- Pengumuman angkatan.
+- Notifikasi pribadi.
+- Notifikasi sistem.
+- Pengingat tenggat.
+- Riwayat notifikasi.
+- Penanda sudah dibaca.
+- Tautan langsung ke tindakan terkait.
+
+Buat pengaturan notifikasi agar pengguna dapat memilih preferensi yang wajar.
+
+Jangan mengirim notifikasi berulang tanpa alasan.
+
+## 19. Kalender organisasi
+
+Kalender memuat:
+- Rapat.
+- Pembekalan.
+- Agenda nasional.
+- Kegiatan wilayah.
+- Tenggat proposal.
+- Tenggat LKL.
+- Tenggat laporan.
+- Evaluasi.
+- Akhir masa tugas.
+
+Sediakan tampilan bulanan, mingguan, dan daftar agenda.
+
+## 20. Arsip dan alumni
+
+Sediakan:
+- Arsip personel.
+- Arsip angkatan.
+- Arsip dokumen.
+- Riwayat kegiatan.
+- Riwayat jabatan.
+- Akses alumni sesuai ketentuan 30 hari setelah masa tugas berakhir.
+
+Setelah masa akses alumni berakhir, cabut akses login tetapi jangan menghapus catatan organisasi yang wajib dipertahankan.
+
+## 21. Pusat Bantuan
+
+Tambahkan halaman bantuan sederhana berisi:
+- Panduan penggunaan.
+- FAQ.
+- Panduan pengajuan proposal.
+- Panduan pengumpulan LKL.
+- Panduan tugas.
+- Panduan dokumen.
+- Informasi hak akses.
+- Kontak administrasi resmi.
+
+Konten harus dapat diperbarui tanpa mengubah kode.
+
+---
+
+# BAGIAN VIII — SISTEM PDF DAN CETAK DOKUMEN
+
+## 22. Kualitas PDF adalah standar wajib
+
+Saya tidak ingin hasil cetak PDF berantakan, terpotong, berubah ukuran, terlalu kecil, atau berbeda jauh dari tampilan dokumen yang dirancang.
+
+Buat sistem template dokumen profesional untuk:
+
+- Surat resmi.
+- Surat keputusan.
+- Sertifikat.
+- Proposal.
+- Laporan kegiatan.
+- Laporan koordinator.
+- Rekap data.
+- Dokumen arsip.
+
+### Standar desain dokumen
+
+- Ukuran A4 sebagai default.
+- Margin konsisten.
+- Header dan footer profesional.
+- Logo tidak pecah.
+- Tipografi terbaca.
+- Nomor dokumen jelas.
+- Tanggal dan identitas tertata.
+- Tabel tidak terpotong sembarangan.
+- Halaman lanjutan memiliki header/footer yang sesuai.
+- Nomor halaman otomatis.
+- Area tanda tangan tertata.
+- Watermark jika diperlukan.
+- Font yang digunakan mendukung karakter bahasa Indonesia.
+
+### Print preview
+
+Sebelum mencetak, pengguna harus dapat melihat pratinjau.
+
+Sediakan:
+- Preview PDF.
+- Download PDF.
+- Print.
+- Pengaturan orientasi jika relevan.
+- Konfirmasi nama dan nomor dokumen.
+
+### Penanganan halaman panjang
+
+Pastikan:
+- Tabel dapat berlanjut ke halaman berikutnya.
+- Judul tabel dapat diulang.
+- Paragraf tidak terpotong secara buruk.
+- Gambar memiliki ukuran terkontrol.
+- Lampiran tidak menimpa footer.
+- Dokumen tetap rapi meskipun memiliki banyak halaman.
+
+Gunakan renderer PDF yang stabil dan kompatibel dengan lingkungan hosting. Evaluasi pendekatan HTML-to-PDF atau renderer server-side yang sesuai.
+
+Jangan mengandalkan screenshot halaman web sebagai metode utama membuat PDF resmi.
+
+Buat template HTML khusus untuk cetak dengan CSS print yang teruji.
+
+Lakukan pengujian PDF untuk dokumen satu halaman, banyak halaman, tabel panjang, dan dokumen dengan gambar.
+
+---
+
+# BAGIAN IX — FITUR KECIL YANG MENINGKATKAN PENGALAMAN
+
+## 23. Fitur pendukung
+
+Tambahkan fitur kecil yang benar-benar berguna:
+
+1. Draft otomatis untuk formulir panjang.
+2. Indikator progres pengisian profil.
+3. Recently Viewed.
+4. Global Search.
+5. Quick Actions.
+6. Breadcrumb.
+7. Filter tersimpan jika diperlukan.
+8. Pengingat tenggat.
+9. Konfirmasi tindakan penting.
+10. Toast notification.
+11. Riwayat perubahan data.
+12. Pusat aktivitas.
+13. Tampilan detail yang konsisten.
+14. Pencarian dengan kata kunci dan filter.
+15. Export Center.
+16. Import Center.
+17. Panduan penggunaan kontekstual.
+18. Deteksi data belum lengkap.
+19. Status dokumen belum diverifikasi.
+20. Notifikasi ketika suatu pengajuan membutuhkan tindakan pengguna.
+
+Tambahkan hanya fitur yang dapat diselesaikan dengan baik.
+
+Jangan memenuhi sidebar dengan fitur kecil yang jarang digunakan.
+
+---
+
+# BAGIAN X — URL DAN ROUTING
+
+## 24. Standar URL
+
+Buat URL pendek, konsisten, mudah diingat, dan memiliki struktur yang jelas.
+
+Contoh:
+
+- `/`
+- `/login`
+- `/tentang`
+- `/wilayah`
+- `/wilayah/lampung`
+- `/dashboard`
+- `/personalia`
+- `/personalia/daftar`
+- `/angkatan`
+- `/proposal`
+- `/laporan-kegiatan`
+- `/laporan-koordinator`
+- `/tugas`
+- `/dokumen`
+- `/pengumuman`
+- `/kalender`
+- `/notifikasi`
+- `/arsip`
+- `/bantuan`
+- `/pengaturan`
+- `/pengaturan/profil`
+- `/pengaturan/pengguna`
+- `/pengaturan/hak-akses`
+- `/pengaturan/keamanan`
+
+Gunakan identifier aman seperti UUID atau ULID untuk halaman detail.
+
+Jangan masukkan NISN, nomor identitas, alamat rumah, atau informasi pribadi ke URL.
+
+### Routing wajib
+
+- Direct URL harus berfungsi.
+- Refresh tidak boleh menghasilkan 404 palsu.
+- Browser back dan forward harus berfungsi.
+- Deep link harus berfungsi.
+- Halaman login dan logout harus benar.
+- Route publik dan privat harus dipisahkan.
+- Route lama dapat diarahkan dengan aman jika diperlukan.
+- URL tidak boleh membocorkan struktur direktori server.
+
+Pastikan konfigurasi routing Vercel benar-benar sesuai dengan jenis frontend yang dipilih.
+
+---
+
+# BAGIAN XI — ARSITEKTUR DAN STRUKTUR KODE
+
+## 25. Jangan membuat single-file application
+
+Saya secara khusus tidak menginginkan seluruh website dibuat dalam satu file besar.
+
+Jangan membuat satu file HTML yang berisi semua halaman, CSS, JavaScript, data, dan fungsi backend.
+
+Jangan menempatkan seluruh aplikasi ke satu komponen React.
+
+Gunakan struktur modular yang rapi dan dapat dipelihara.
+
+### Arsitektur deployment yang diinginkan
+
+Saya ingin menggunakan:
+
+1. GitHub untuk source code dan version control.
+2. Vercel untuk frontend.
+3. Domainesia untuk domain dan DNS.
+4. ArenHost untuk backend, database, dan penyimpanan berkas.
+
+Buat satu aplikasi yang terintegrasi, bukan empat sistem terpisah.
+
+### Rekomendasi arsitektur
+
+Evaluasi penggunaan:
+
+**Frontend:**
+- React.
+- TypeScript.
+- Vite.
+- Tailwind CSS.
+- Komponen UI reusable.
+- React Router.
+- TanStack Query atau pendekatan pengelolaan data yang setara.
+- Library validasi form yang terstruktur.
+- Library peta yang sesuai.
+
+Frontend dibangun dan di-deploy melalui GitHub ke Vercel.
+
+**Backend:**
+- Laravel.
+- PHP.
+- MySQL/MariaDB.
+- REST API terstruktur.
+- Validasi server-side.
+- Authentication dan authorization.
+- Dokumentasi API.
+
+Backend di-deploy pada ArenHost melalui cPanel.
+
+**Penyimpanan:**
+- Database MySQL/MariaDB di ArenHost.
+- File pribadi disimpan di luar public webroot.
+- File publik disimpan pada lokasi terpisah dengan izin akses yang tepat.
+- Backup database dan berkas.
+- Mekanisme pengelolaan kapasitas.
+
+Gunakan pendekatan tersebut apabila benar-benar kompatibel dengan paket hosting yang tersedia.
+
+Sebelum memutuskan implementasi final, verifikasi:
+- Versi PHP yang tersedia.
+- Ekstensi PHP.
+- Composer.
+- SSH/Terminal.
+- MySQL/MariaDB.
+- Cron Job.
+- Batas upload.
+- Batas ukuran request.
+- Pengaturan document root.
+- Dukungan HTTPS.
+- Kebijakan penyimpanan.
+- Kapasitas dan batas sumber daya hosting.
+- Kemampuan backend menjalankan seluruh kebutuhan aplikasi.
+
+Jika hosting tidak mendukung salah satu kebutuhan penting, jelaskan hambatannya dan tentukan solusi yang tetap mudah dipelihara.
+
+Jangan mengarang kemampuan paket hosting.
+
+### Integrasi frontend dan backend
+
+Buat pemisahan tanggung jawab yang jelas:
+
+- Frontend menangani tampilan dan interaksi.
+- Backend menangani proses bisnis, autentikasi, otorisasi, validasi, dan database.
+- Database menjadi sumber data utama.
+- File storage menangani berkas.
+- API menjadi penghubung frontend dan backend.
+
+Gunakan konfigurasi environment untuk URL API. Jangan menulis alamat server secara berulang di dalam source code.
+
+Atur CORS, cookie, CSRF, autentikasi, dan HTTPS dengan benar.
+
+Jika menggunakan autentikasi berbasis cookie, pastikan konfigurasi domain, SameSite, Secure, CSRF, dan credentials benar-benar sesuai dengan frontend Vercel dan backend ArenHost.
+
+Jangan menyimpan password, token rahasia, API key, atau kredensial database di repository GitHub.
+
+### Struktur folder
+
+Buat struktur modular. Contoh:
+
+```text
+satu-dpbi/
+│
+├── frontend/
+│   ├── public/
+│   ├── src/
+│   │   ├── assets/
+│   │   ├── components/
+│   │   │   ├── ui/
+│   │   │   ├── layout/
+│   │   │   ├── forms/
+│   │   │   ├── tables/
+│   │   │   └── maps/
+│   │   ├── pages/
+│   │   │   ├── public/
+│   │   │   ├── auth/
+│   │   │   ├── dashboard/
+│   │   │   ├── personnel/
+│   │   │   ├── regions/
+│   │   │   ├── proposals/
+│   │   │   ├── reports/
+│   │   │   ├── tasks/
+│   │   │   ├── documents/
+│   │   │   └── settings/
+│   │   ├── layouts/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── api/
+│   │   ├── routes/
+│   │   ├── stores/
+│   │   ├── utils/
+│   │   ├── types/
+│   │   └── styles/
+│   ├── tests/
+│   └── package.json
+│
+├── backend/
+│   ├── app/
+│   ├── bootstrap/
+│   ├── config/
+│   ├── database/
+│   │   ├── migrations/
+│   │   ├── seeders/
+│   │   └── factories/
+│   ├── routes/
+│   ├── resources/
+│   ├── storage/
+│   ├── tests/
+│   ├── public/
+│   └── composer.json
+│
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── DATABASE.md
+│   ├── API.md
+│   ├── DEPLOYMENT.md
+│   ├── DEPLOYMENT-VERCEL.md
+│   ├── DEPLOYMENT-DOMAINESIA.md
+│   ├── DEPLOYMENT-ARENHOST.md
+│   ├── USER-GUIDE.md
+│   ├── SECURITY.md
+│   ├── BACKUP-RESTORE.md
+│   ├── MAINTENANCE.md
+│   ├── TROUBLESHOOTING.md
+│   ├── PDF-TEMPLATES.md
+│   └── MAP-DATA-SOURCES.md
+│
+├── scripts/
+├── .gitignore
+├── README.md
+└── CHANGELOG.md
+```
+
+Struktur tersebut merupakan contoh. Sesuaikan dengan framework yang benar-benar dipilih.
+
+Jangan membuat folder kosong hanya agar terlihat lengkap. Setiap modul harus memiliki tanggung jawab yang jelas.
+
+Gunakan:
+- Reusable components.
+- Service layer.
+- Controller yang tidak terlalu besar.
+- Validasi terpisah.
+- Database migrations.
+- Repository atau abstraction hanya jika memang dibutuhkan.
+- Konfigurasi terpusat.
+- Type definitions.
+- Automated tests.
+
+Hindari duplikasi kode, file raksasa, ketergantungan yang tidak perlu, dan abstraksi berlebihan.
+
+---
+
+# BAGIAN XII — GITHUB, VERCEL, DOMAINESIA, DAN ARENHOST
+
+## 26. Alur deployment yang wajib dibuat
+
+Saya ingin seluruh dokumentasi deployment dibuat dari nol sampai website benar-benar dapat diakses.
+
+Alur:
+
+GitHub → Vercel untuk frontend.
+
+GitHub → ArenHost untuk backend.
+
+Domainesia → pengelolaan domain dan DNS.
+
+ArenHost → database MySQL/MariaDB dan penyimpanan dokumen.
+
+Frontend dan backend harus terhubung melalui konfigurasi API yang benar.
+
+### Pembagian domain
+
+Buat rancangan konfigurasi yang mudah disesuaikan, misalnya:
+
+- Domain utama untuk website publik dan frontend.
+- Subdomain API untuk backend.
+- Jika diperlukan, subdomain tambahan untuk layanan atau dokumentasi.
+
+Gunakan placeholder konfigurasi seperti `APP_URL`, `VITE_API_URL`, dan konfigurasi environment terkait.
+
+Jangan mengunci domain di banyak bagian source code.
+
+Jangan menganggap domain sudah dibeli atau DNS sudah aktif sebelum benar-benar dikonfigurasi.
+
+## 27. Dokumentasi GitHub
+
+Buat panduan lengkap:
+
+1. Membuat akun GitHub jika belum tersedia.
+2. Membuat repository.
+3. Mengatur struktur repository.
+4. Mengunggah source code.
+5. Membuat branch utama.
+6. Mengatur `.gitignore`.
+7. Memastikan `.env` dan rahasia tidak ikut terunggah.
+8. Membuat commit.
+9. Melakukan push.
+10. Mengatur branch deployment.
+11. Menggunakan Pull Request untuk perubahan penting jika diperlukan.
+12. Menyiapkan rollback ke versi sebelumnya.
+
+Jelaskan setiap langkah secara praktis.
+
+## 28. Dokumentasi Vercel
+
+Buat panduan lengkap:
+
+1. Menghubungkan repository GitHub ke Vercel.
+2. Memilih direktori frontend.
+3. Menentukan framework preset.
+4. Mengatur build command.
+5. Mengatur output directory.
+6. Mengatur environment variables.
+7. Menghubungkan API backend.
+8. Mengatur rewrite atau SPA fallback sesuai kebutuhan.
+9. Melakukan deployment pertama.
+10. Memeriksa build log.
+11. Menguji seluruh route.
+12. Menghubungkan domain.
+13. Mengatur deployment preview.
+14. Mengatur production branch.
+15. Melakukan rollback jika deployment gagal.
+
+Jangan mengandalkan konfigurasi rewrite yang tidak diuji.
+
+Pastikan halaman seperti `/dashboard`, `/personalia`, dan `/proposal` tetap dapat dibuka langsung dan di-refresh.
+
+## 29. Dokumentasi Domainesia
+
+Buat panduan lengkap:
+
+1. Memastikan domain aktif dan dimiliki secara sah.
+2. Membuka pengaturan DNS.
+3. Menyiapkan DNS record untuk Vercel.
+4. Menyiapkan DNS record untuk backend ArenHost.
+5. Mengatur subdomain API jika diperlukan.
+6. Memeriksa propagasi DNS.
+7. Mengatur nameserver apabila diperlukan.
+8. Mengatur SSL/HTTPS.
+9. Memeriksa konfigurasi domain utama.
+10. Memeriksa subdomain.
+11. Memastikan tidak ada konflik DNS.
+12. Menjelaskan proses pembaruan DNS jika terjadi perubahan hosting.
+
+Gunakan instruksi dan nilai DNS sesuai panduan resmi provider pada saat deployment. Jangan mengarang IP atau record DNS.
+
+## 30. Dokumentasi ArenHost
+
+Buat panduan dari awal:
+
+1. Login ke cPanel.
+2. Memeriksa versi PHP.
+3. Memeriksa ekstensi PHP.
+4. Memastikan Composer dan SSH tersedia jika dibutuhkan.
+5. Membuat database MySQL/MariaDB.
+6. Membuat database user.
+7. Memberikan hak akses yang sesuai.
+8. Menyiapkan direktori aplikasi.
+9. Mengunggah backend.
+10. Mengatur document root ke direktori `public`.
+11. Menempatkan `.env` di lokasi aman.
+12. Mengatur environment production.
+13. Menjalankan Composer install jika tersedia.
+14. Menjalankan migration.
+15. Menjalankan bootstrap Super Admin satu kali.
+16. Mengatur storage permissions.
+17. Mengatur symbolic link jika diperlukan dan didukung.
+18. Mengatur cron job.
+19. Mengatur SMTP jika digunakan.
+20. Mengatur SSL.
+21. Menguji API.
+22. Menguji database.
+23. Menguji upload dan download.
+24. Menguji autentikasi frontend-backend.
+25. Menguji backup dan restore.
+26. Menguji website dalam mode produksi.
+
+Jika Composer atau SSH tidak tersedia, berikan metode deployment alternatif yang aman dan dapat dipelihara. Jangan meminta pengguna menaruh seluruh aplikasi dalam public webroot.
+
+## 31. Dokumentasi konfigurasi environment
+
+Buat `.env.example` lengkap tanpa kredensial sungguhan.
+
+Pisahkan:
+- Environment frontend.
+- Environment backend.
+- Environment database.
+- Environment mail.
+- Environment storage.
+- Environment security.
+- Environment deployment.
+
+Jelaskan variabel mana yang diatur di Vercel dan mana yang diatur di ArenHost.
+
+Jangan pernah memasukkan secret backend ke variabel frontend yang dapat dibaca browser.
+
+---
+
+# BAGIAN XIII — HOSTING 10 GB DAN KAPASITAS PENGEMBANGAN
+
+## 32. Sistem penyimpanan yang dapat ditingkatkan
+
+Hosting yang digunakan saat ini memiliki kapasitas penyimpanan yang diiklankan sebesar 10 GB NVMe.
+
+Namun, saya ingin sistem dirancang agar kapasitas dapat ditingkatkan ketika kebutuhan organisasi berkembang.
+
+Jangan membuat aplikasi hanya dapat bekerja pada kapasitas 10 GB.
+
+Buat sistem penyimpanan yang fleksibel:
+- Kapasitas mengikuti storage yang tersedia.
+- Pemantauan penggunaan disk.
+- Pemantauan database.
+- Pemantauan ukuran berkas.
+- Pemantauan pertumbuhan data.
+- Peringatan penggunaan 70%, 85%, dan 95%.
+- Statistik penggunaan berdasarkan modul.
+- Daftar file berukuran besar untuk pengelola berwenang.
+- Kompresi gambar.
+- WebP atau format modern jika kompatibel.
+- Thumbnail.
+- Validasi ukuran unggahan.
+- Deteksi file duplikat melalui checksum jika sesuai.
+- Pemisahan file privat dan publik.
+
+Ketika hosting ditingkatkan dari 10 GB menjadi kapasitas yang lebih besar, sistem tidak perlu ditulis ulang.
+
+Kapasitas penyimpanan harus dibaca secara dinamis jika lingkungan hosting mendukungnya. Jika tidak, sediakan konfigurasi kapasitas yang dapat diperbarui oleh administrator dan tampilkan sebagai estimasi, bukan pengukuran pasti.
+
+Jangan menghapus dokumen organisasi secara otomatis hanya karena kapasitas hampir penuh.
+
+Buat panduan:
+- Peningkatan paket hosting.
+- Migrasi file.
+- Migrasi database.
+- Perubahan konfigurasi.
+- Verifikasi setelah upgrade.
+- Rollback jika terjadi kegagalan.
+
+Jelaskan juga batas sumber daya lain yang mungkin tidak bertambah otomatis hanya karena storage bertambah, seperti CPU, RAM, inode, database, dan batas proses.
+
+---
+
+# BAGIAN XIV — KEAMANAN DAN PRIVASI
+
+## 33. Standar keamanan
+
+Terapkan praktik keamanan yang baik dan relevan dengan OWASP.
+
+Wajib:
+- Password hashing yang kuat.
+- CSRF protection.
+- XSS protection.
+- SQL injection protection.
+- Rate limiting.
+- Secure session.
+- Validasi backend.
+- RBAC.
+- Region scoping.
+- IDOR protection.
+- Secure file upload.
+- Secure file download.
+- HTTPS.
+- Security headers.
+- Audit log.
+- Backup.
+- Restore testing.
+- Secret management.
+
+File pribadi harus disimpan di luar public webroot atau menggunakan mekanisme penyimpanan privat yang setara.
+
+Unduhan harus melewati pemeriksaan autentikasi dan izin.
+
+Data alamat lengkap, NISN, kartu pelajar, serta dokumen identitas tidak boleh ditampilkan kepada pengguna umum.
+
+Jangan mengumpulkan NIK/KTP, data kesehatan, atau informasi sensitif yang tidak benar-benar diperlukan.
+
+Untuk aktivitas yang melibatkan pelajar:
+- Terapkan persetujuan orang tua/wali apabila diperlukan.
+- Pisahkan persetujuan keikutsertaan dan persetujuan publikasi.
+- Batasi akses dokumen pribadi.
+- Sediakan pelaporan insiden yang rahasia.
+- Terapkan kebijakan pengawasan kegiatan.
+
+Jangan mengklaim sistem tidak bisa diretas. Dokumentasikan perlindungan dan keterbatasannya secara jujur.
+
+---
+
+# BAGIAN XV — BACKUP, PEMELIHARAAN, DAN KEBERLANJUTAN
+
+## 34. Backup dan restore
+
+Buat sistem backup yang mencakup:
+- Database.
+- Dokumen organisasi.
+- File Duta.
+- Konfigurasi yang diperlukan tanpa membocorkan secret.
+- Data penting sistem.
+
+Fitur:
+- Backup terjadwal jika cron tersedia.
+- Backup manual oleh pengguna berwenang.
+- Riwayat backup.
+- Status backup.
+- Notifikasi kegagalan.
+- Verifikasi integritas.
+- Panduan restore.
+- Pengujian restore secara berkala.
+
+Jangan menganggap backup berhasil hanya karena file ZIP terbentuk. Uji pemulihannya.
+
+Simpan salinan backup terpisah dari server utama jika tersedia sarana yang aman.
+
+## 35. Maintenance Center
+
+Buat halaman pengelolaan sistem khusus Super Admin yang berisi:
+
+- Status aplikasi.
+- Status database.
+- Status penyimpanan.
+- Status backup.
+- Versi aplikasi.
+- Informasi pembaruan.
+- Log kesalahan yang aman.
+- Riwayat aktivitas penting.
+- Status integrasi.
+- Informasi kapasitas.
+
+Jangan memperlihatkan detail teknis sensitif kepada pengguna biasa.
+
+## 36. Mudah diperbarui
+
+Rancang agar pembaruan tidak mengharuskan pembangunan ulang seluruh sistem.
+
+Sediakan:
+- Versioning aplikasi.
+- Changelog.
+- Database migrations.
+- Backup sebelum pembaruan.
+- Prosedur update.
+- Prosedur rollback.
+- Dokumentasi konfigurasi.
+- Automated tests.
+- Panduan troubleshooting.
+
+Hindari ketergantungan pada library yang tidak terawat atau tidak diperlukan.
+
+Pin versi dependency dan lakukan pembaruan terkontrol.
+
+Jangan menjanjikan sistem akan berjalan selamanya tanpa pemeliharaan. Rancang agar dapat dirawat dan ditingkatkan dalam jangka panjang.
+
+---
+
+# BAGIAN XVI — ERROR HANDLING DAN KUALITAS PENGGUNAAN
+
+## 37. Halaman error
+
+Buat halaman khusus untuk:
+- 400.
+- 401.
+- 403.
+- 404.
+- 419.
+- 422.
+- 429.
+- 500.
+- 502.
+- 503.
+
+Setiap halaman harus:
+- Memiliki desain konsisten.
+- Menggunakan bahasa Indonesia yang jelas.
+- Menjelaskan masalah secara singkat.
+- Memberikan tindakan yang relevan.
+- Tidak menampilkan stack trace.
+- Tidak membocorkan data server.
+- Memiliki kode referensi error jika tersedia.
+
+Tambahkan:
+- Empty state.
+- Loading state.
+- Error state.
+- Offline state.
+- Success state.
+- Session expired state.
+
+## 38. Formulir dan komponen
+
+Seluruh formulir harus:
+- Memiliki label.
+- Memiliki validasi.
+- Menampilkan pesan error.
+- Mencegah double submission.
+- Menampilkan status proses.
+- Memiliki konfirmasi tindakan penting.
+- Menjaga data draft jika sesuai.
+- Nyaman digunakan di mobile.
+
+Seluruh tombol harus melakukan fungsi yang jelas.
+
+Jangan meninggalkan tombol yang tidak berfungsi.
+
+---
+
+# BAGIAN XVII — PENGUJIAN MENYELURUH
+
+## 39. QA wajib dilakukan
+
+Sebelum finalisasi, lakukan pengujian:
+
+### Fungsional
+- Login.
+- Logout.
+- Reset password.
+- Sesi kedaluwarsa.
+- Pengelolaan pengguna.
+- Hak akses.
+- Personalia.
+- Wilayah.
+- Angkatan.
+- Proposal.
+- LKL.
+- Tugas.
+- Laporan koordinator.
+- Dokumen.
+- Notifikasi.
+- Kalender.
+- Pencarian.
+- Peta.
+- Ekspor.
+- PDF.
+- Arsip.
+
+### Keamanan
+- Akses antarperan.
+- Akses data Duta.
+- Akses data Koordinator.
+- IDOR.
+- Upload file.
+- Download file.
+- Session handling.
+- CSRF.
+- Rate limiting.
+- Audit log.
+
+### UI/UX
+- Desktop.
+- Laptop.
+- Tablet.
+- Mobile.
+- Dark mode.
+- Light mode.
+- Navigasi.
+- Modal.
+- Dropdown.
+- Formulir.
+- Tabel.
+- Peta.
+- PDF preview.
+
+### Deployment
+- GitHub push.
+- Vercel build.
+- DNS.
+- HTTPS.
+- API connection.
+- Database.
+- Storage.
+- Direct URL.
+- Refresh.
+- Deep link.
+- Backup.
+- Restore.
+
+Setiap pengujian harus memiliki hasil:
+- LULUS.
+- GAGAL.
+- BELUM DIUJI.
+
+Jangan mengarang hasil pengujian.
+
+---
+
+# BAGIAN XVIII — DOKUMENTASI WAJIB
+
+## 40. Buat dokumentasi lengkap
+
+Dokumentasi harus ditulis dalam bahasa Indonesia yang mudah diikuti.
+
+Buat setidaknya:
+
+1. `README.md` — pengenalan dan cara menjalankan proyek.
+2. `ARCHITECTURE.md` — arsitektur sistem.
+3. `DATABASE.md` — struktur database dan relasi.
+4. `API.md` — dokumentasi API.
+5. `DEPLOYMENT.md` — panduan deployment keseluruhan.
+6. `DEPLOYMENT-GITHUB.md` — GitHub dari awal.
+7. `DEPLOYMENT-VERCEL.md` — deployment frontend.
+8. `DEPLOYMENT-DOMAINESIA.md` — domain dan DNS.
+9. `DEPLOYMENT-ARENHOST.md` — backend, database, dan file storage.
+10. `ENVIRONMENT.md` — seluruh konfigurasi environment.
+11. `USER-GUIDE.md` — panduan penggunaan.
+12. `SECURITY.md` — keamanan dan privasi.
+13. `BACKUP-RESTORE.md` — backup dan restore.
+14. `MAINTENANCE.md` — pemeliharaan dan pembaruan.
+15. `TROUBLESHOOTING.md` — penyelesaian masalah.
+16. `PDF-TEMPLATES.md` — pengelolaan template dokumen.
+17. `MAP-DATA-SOURCES.md` — sumber, lisensi, dan pembaruan peta.
+18. `CHANGELOG.md` — riwayat versi.
+
+Panduan deployment harus menjelaskan seluruh proses dari kondisi belum ada repository hingga website dapat digunakan melalui domain dengan HTTPS.
+
+Jangan hanya menulis daftar perintah tanpa penjelasan. Berikan urutan langkah, tujuan, lokasi pengaturan, contoh konfigurasi tanpa secret, cara memeriksa keberhasilan, dan cara mengatasi kegagalan.
+
+---
+
+# BAGIAN XIX — TAHAP PENGERJAAN
+
+## 41. Urutan pekerjaan
+
+Kerjakan dengan tahapan berikut:
+
+### Tahap 1 — Audit
+
+- Periksa seluruh source code.
+- Periksa route.
+- Periksa komponen.
+- Periksa database.
+- Periksa API.
+- Periksa autentikasi.
+- Periksa deployment.
+- Identifikasi bug dan utang teknis.
+
+### Tahap 2 — Rancang ulang
+
+- Tetapkan design system.
+- Rancang ulang layout.
+- Rancang navigasi.
+- Rancang halaman publik.
+- Rancang dashboard berdasarkan peran.
+- Rancang peta nasional.
+- Rancang template PDF.
+
+### Tahap 3 — Implementasi
+
+- Bangun komponen reusable.
+- Perbaiki struktur frontend.
+- Perbaiki backend.
+- Hubungkan seluruh API.
+- Implementasikan fitur.
+- Perbaiki halaman error.
+- Implementasikan peta.
+- Implementasikan sistem cetak.
+
+### Tahap 4 — Integrasi
+
+- Hubungkan frontend Vercel.
+- Hubungkan backend ArenHost.
+- Hubungkan database.
+- Hubungkan storage.
+- Hubungkan autentikasi.
+- Hubungkan DNS dan domain.
+
+### Tahap 5 — Pengujian
+
+- Jalankan seluruh pengujian.
+- Perbaiki bug.
+- Uji mobile.
+- Uji keamanan.
+- Uji PDF.
+- Uji peta.
+- Uji backup dan restore.
+
+### Tahap 6 — Finalisasi
+
+- Rapikan source code.
+- Lengkapi dokumentasi.
+- Siapkan paket deployment.
+- Siapkan konfigurasi produksi.
+- Siapkan laporan QA.
+- Siapkan panduan pemeliharaan.
+
+Jangan berhenti setelah membuat rancangan. Lanjutkan sampai implementasi dan pengujian selesai sejauh lingkungan kerja memungkinkan.
+
+---
+
+# BAGIAN XX — KRITERIA FINAL
+
+## 42. Definisi siap digunakan
+
+SATU DPBI hanya boleh dinyatakan siap digunakan apabila:
+
+- Website publik selesai dan berfungsi.
+- Seluruh halaman internal wajib selesai.
+- Desain konsisten.
+- Semua navigasi bekerja.
+- Seluruh route penting bekerja.
+- Login dan sesi berfungsi.
+- Hak akses benar.
+- Data tersimpan di database.
+- Seluruh modul utama saling terhubung.
+- Peta Indonesia benar dan interaktif.
+- Cakupan kabupaten/kota berjalan.
+- Logo provinsi dapat dikelola.
+- PDF terlihat profesional saat dicetak.
+- Halaman error tersedia.
+- Upload dan download aman.
+- Backup dan restore telah diuji.
+- Frontend berhasil di-deploy.
+- Backend berhasil di-deploy.
+- Domain dan HTTPS terkonfigurasi.
+- Dokumentasi lengkap.
+- Tidak ada fitur utama yang hanya berupa tampilan.
+- Tidak ada tombol palsu.
+- Tidak ada data statistik palsu.
+- Tidak ada error kritis yang belum ditangani.
+
+## 43. Hasil akhir yang harus diserahkan
+
+Saya menginginkan:
+
+1. Source code frontend lengkap.
+2. Source code backend lengkap.
+3. Struktur database dan migrations.
+4. Dataset peta yang digunakan beserta dokumentasi lisensinya.
+5. Template PDF.
+6. File konfigurasi contoh.
+7. File konfigurasi Vercel yang diperlukan.
+8. Panduan GitHub.
+9. Panduan Vercel.
+10. Panduan Domainesia.
+11. Panduan ArenHost.
+12. Panduan deployment dari awal sampai akhir.
+13. Panduan pengguna.
+14. Panduan pemeliharaan.
+15. Panduan backup dan restore.
+16. Laporan QA.
+17. Changelog.
+18. Paket source code ZIP yang siap diunggah atau dikelola melalui GitHub.
+
+Pastikan tidak ada secret atau kredensial asli dalam ZIP maupun repository.
+
+Jika memungkinkan, sertakan juga diagram arsitektur, ERD database, dan diagram alur persetujuan.
+
+## 44. Instruksi terakhir
+
+Jangan mengambil jalan pintas dengan:
+- Membuat seluruh aplikasi dalam satu file.
+- Menggunakan data palsu.
+- Membuat tombol dekoratif.
+- Mengabaikan halaman publik.
+- Mengabaikan halaman error.
+- Mengabaikan peta kabupaten/kota.
+- Membuat PDF hanya dari screenshot.
+- Mengabaikan keamanan sesi.
+- Menganggap hosting 10 GB sebagai batas permanen.
+- Menganggap Vercel dan ArenHost otomatis terintegrasi.
+- Mengklaim deployment berhasil tanpa pengujian.
+- Menyembunyikan fitur yang gagal tanpa dokumentasi.
+- Membuat menu yang belum memiliki fungsi.
+- Mengubah database tanpa migrasi dan backup.
+
+Jika ada keputusan teknis yang belum ditentukan, pilih solusi paling stabil, aman, ekonomis, dan mudah dipelihara berdasarkan kemampuan hosting yang benar-benar tersedia. Dokumentasikan alasan pemilihannya.
+
+Jika terdapat keterbatasan provider, sampaikan secara transparan dan berikan solusi yang realistis. Jangan berpura-pura bahwa seluruh layanan sudah terhubung.
+
+**HASIL YANG SAYA INGINKAN:**
+
+SATU DPBI menjadi sebuah platform organisasi yang memiliki tampilan publik sangat profesional, dashboard internal yang modern dan nyaman, pengelolaan organisasi sampai tingkat kabupaten/kota, peta Indonesia yang benar, seluruh modul berfungsi, dokumen PDF berkualitas, sistem keamanan yang layak, struktur kode modular, serta dokumentasi deployment dan pemeliharaan yang lengkap.
+
+Buat desain yang benar-benar matang. Bukan ramai, bukan sekadar mewah, dan bukan template biasa.
+
+Buat sistem yang sederhana saat digunakan, tetapi kuat di belakangnya.
+
+**Jadikan kualitas, keandalan, kemudahan penggunaan, keamanan, dan kemudahan pemeliharaan sebagai standar utama.**
+

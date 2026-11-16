@@ -1,0 +1,15 @@
+{
+  "provinceDataset": {
+    "name": "Indonesia GeoJSON & TopoJSON Maps (38 Provinces)",
+    "repository": "https://github.com/denyherianto/indonesia-geojson-topojson-maps-with-38-provinces",
+    "license": "MIT / CC BY 4.0",
+    "featureCount": 38
+  },
+  "regencyDataset": {
+    "name": "GeoJson Indonesia 38 Provinsi (Kabupaten/Kota)",
+    "repository": "https://github.com/ardian28/GeoJson-Indonesia-38-Provinsi",
+    "license": "MIT (derived from Badan Informasi Geospasial / BIG)",
+    "featureCount": 517
+  },
+  "processedAt": "2026-11-16"
+}

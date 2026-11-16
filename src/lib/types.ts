@@ -8,6 +8,14 @@ export type RoleCode =
   | 'duta'
   | 'alumni';
 
+export type OfficialBidang =
+  | 'Bidang Administrasi & Organisasi'
+  | 'Bidang Program & Operasional'
+  | 'Bidang Pengembangan Wilayah'
+  | 'Bidang Pendidikan & Kebudayaan'
+  | 'Bidang Hubungan & Kemitraan'
+  | 'Bidang Media, Publikasi & Teknologi';
+
 export type PermissionAction =
   | 'view'
   | 'create'
@@ -118,6 +126,20 @@ export interface AuthUser {
 
 export type HttpErrorCode = 400 | 401 | 403 | 404 | 419 | 422 | 429 | 500 | 502 | 503;
 
+export interface RegencyRecord {
+  code: string;
+  provinceCode: string;
+  name: string;
+  kind: 'kabupaten' | 'kota';
+  status: ProvinceStatus;
+  coordinatorName: string | null;
+  coachingNote: string | null;
+  domicileDutaCount: number;
+  assignmentDutaCount: number;
+  lklCount: number;
+  proposalCount: number;
+}
+
 export interface ProvinceRecord {
   code: string;
   name: string;
@@ -125,10 +147,16 @@ export interface ProvinceRecord {
   status: ProvinceStatus;
   coordinatorId: string | null;
   coordinatorName: string | null;
+  logoFileId?: string | null;
+  description?: string | null;
   activeDutaCount: number;
+  domicileDutaCount?: number;
+  assignmentDutaCount?: number;
   alumniCount: number;
   proposalCount: number;
   lklCount: number;
+  regencyCount?: number;
+  activeRegencyCount?: number;
   monthlyReportSubmitted: boolean;
   finalReportSubmitted: boolean;
   coachingNote: string | null;
@@ -170,7 +198,10 @@ export interface PersonnelRecord {
   altContact?: string;
   provinceCode: string;
   provinceName: string;
+  assignmentProvinceCode?: string;
+  assignmentProvinceName?: string;
   regency: string;
+  regencyCode?: string;
   district: string;
   village: string;
   postalCode: string;
@@ -321,6 +352,8 @@ export interface TaskRecord {
   assigneeName: string;
   creatorName: string;
   checklist: { id: string; text: string; done: boolean }[];
+  attachmentFileId?: string | null;
+  attachmentFileName?: string | null;
   isTemplate: boolean;
   recurrence: 'tidak' | 'bulanan' | 'mingguan';
   commentCount: number;
@@ -366,4 +399,24 @@ export interface NotificationRecord {
   targetPath: string;
   isRead: boolean;
   createdAt: string;
+}
+
+export interface CmsSectionContent {
+  key: string;
+  title: string;
+  body: string;
+  updatedAt?: string;
+}
+
+export interface HelpArticleRecord {
+  id: string;
+  slug: string;
+  category: string;
+  roleTarget: string;
+  title: string;
+  summary: string;
+  content: string;
+  sortOrder: number;
+  isPublished: boolean;
+  updatedAt: string;
 }

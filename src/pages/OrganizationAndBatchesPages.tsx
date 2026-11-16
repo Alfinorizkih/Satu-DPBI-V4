@@ -4,7 +4,7 @@ import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
 import type { BatchRecord, BatchStatus, ModuleCode, PermissionAction } from '../lib/types';
-import { formatTanggalIndonesia } from '../lib/rbac';
+import { formatTanggalIndonesia, isRecordRelevantToBidang, OFFICIAL_BIDANGS } from '../lib/rbac';
 
 export function OrganizationPage() {
   const { can, notify } = useAuth();
@@ -15,7 +15,13 @@ export function OrganizationPage() {
   const [posOpen, setPosOpen] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
 
-  const [posForm, setPosForm] = useState({ title: '', bidang: 'Kebudayaan', level: 'Nasional', holderName: '', skNumber: '' });
+  const [posForm, setPosForm] = useState<{ title: string; bidang: string; level: string; holderName: string; skNumber: string }>({
+    title: '',
+    bidang: OFFICIAL_BIDANGS[0].id,
+    level: 'Nasional',
+    holderName: '',
+    skNumber: '',
+  });
   const [delForm, setDelForm] = useState({
     delegateUserId: '',
     module: 'wilayah' as ModuleCode,
@@ -106,6 +112,45 @@ export function OrganizationPage() {
       </div>
 
       <GlassCard className="p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              6 Bidang Pengurus Nasional Resmi
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Struktur enam bidang resmi tingkat nasional sesuai tata kelola DPBI.
+            </p>
+          </div>
+          <span className="font-mono text-xs text-slate-500 tabular-nums">
+            {OFFICIAL_BIDANGS.length} Bidang Resmi
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {OFFICIAL_BIDANGS.map((b) => {
+            const matchedPositions = positions.filter((p) =>
+              isRecordRelevantToBidang(b.id, String(p.bidang || ''), String(p.title || ''))
+            );
+            const activeHolders = matchedPositions.filter((p) => String(p.holder_name || '').trim()).length;
+            return (
+              <div
+                key={b.code}
+                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-4 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-mono font-bold text-[#0EA5E9] tabular-nums">{b.number}.</span>
+                  <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                    {activeHolders} pemegang aktif
+                  </span>
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">{b.id}</h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{b.summary}</p>
+              </div>
+            );
+          })}
+        </div>
+      </GlassCard>
+
+      <GlassCard className="p-5 space-y-4">
         <h2 className="text-sm font-bold flex items-center gap-2">
           <Building2 className="w-4 h-4 text-[#0EA5E9]" /> Struktur Kepengurusan Nasional
         </h2>
@@ -183,8 +228,20 @@ export function OrganizationPage() {
             <input required value={posForm.title} onChange={(e) => setPosForm({ ...posForm, title: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
           </div>
           <div>
-            <label className="block text-xs font-semibold mb-1">Bidang</label>
-            <input required value={posForm.bidang} onChange={(e) => setPosForm({ ...posForm, bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
+            <label className="block text-xs font-semibold mb-1">Bidang Resmi</label>
+            <select
+              required
+              value={posForm.bidang}
+              onChange={(e) => setPosForm({ ...posForm, bidang: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+            >
+              {OFFICIAL_BIDANGS.map((b) => (
+                <option key={b.code} value={b.id}>
+                  {b.number}. {b.id}
+                </option>
+              ))}
+              <option value="Pimpinan & Tata Kelola Nasional">Pimpinan &amp; Tata Kelola Nasional</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold mb-1">Pemegang Jabatan</label>

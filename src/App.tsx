@@ -6,6 +6,8 @@ import type { HttpErrorCode } from './lib/types';
 import { matchPrivateRoute, normalizePathname, VALID_ERROR_CODES, type MatchedPrivateRoute } from './lib/routes';
 
 import { PublicPortalPage } from './pages/PublicPortalPage';
+import { PublicAboutPage } from './pages/PublicAboutPage';
+import { PublicRegionsPage } from './pages/PublicRegionsPage';
 import { HelpPage } from './pages/HelpPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { OrganizationPage, BatchesPage } from './pages/OrganizationAndBatchesPages';
@@ -120,7 +122,7 @@ function AppRouter() {
   const normalizedPath = normalizePathname(currentPath);
 
   useEffect(() => {
-    if (!loading && user && (normalizedPath === '/' || normalizedPath === '/login')) {
+    if (!loading && user && normalizedPath === '/login') {
       if (pendingRedirectPath) {
         const dest = pendingRedirectPath;
         setPendingRedirectPath(null);
@@ -157,7 +159,7 @@ function AppRouter() {
       <AccountPendingView
         onBack={() => {
           setAccountPending(false);
-          navigate('/');
+          navigate('/login');
         }}
       />
     );
@@ -170,7 +172,7 @@ function AppRouter() {
         message={sessionExpiredReason}
         onLogin={() => {
           clearSessionExpired();
-          navigate('/');
+          navigate('/login');
         }}
         onBack={() => {
           clearSessionExpired();
@@ -188,7 +190,7 @@ function AppRouter() {
     const view = (
       <ErrorView
         code={errorCode}
-        onLogin={!user ? () => navigate('/') : undefined}
+        onLogin={!user ? () => navigate('/login') : undefined}
         onRetry={errorCode >= 500 ? () => window.location.reload() : undefined}
         onBack={() => navigate(user ? '/dashboard' : '/')}
       />
@@ -197,14 +199,27 @@ function AppRouter() {
   }
 
   if (!user) {
-    if (normalizedPath === '/' || normalizedPath === '/login') {
-      return <PublicPortalPage initialAuthTab="login" />;
+    if (normalizedPath === '/') {
+      return <PublicPortalPage mode="home" />;
+    }
+    if (normalizedPath === '/tentang') {
+      return <PublicAboutPage />;
+    }
+    if (normalizedPath === '/wilayah') {
+      return <PublicRegionsPage />;
+    }
+    if (normalizedPath.startsWith('/wilayah/')) {
+      const code = decodeURIComponent(normalizedPath.slice('/wilayah/'.length)).replace(/[^0-9]/g, '');
+      return <PublicRegionsPage initialCode={code || undefined} />;
+    }
+    if (normalizedPath === '/login') {
+      return <PublicPortalPage mode="auth" initialAuthTab="login" />;
     }
     if (normalizedPath === '/lupa-password' || normalizedPath === '/reset-password') {
-      return <PublicPortalPage initialAuthTab="reset" />;
+      return <PublicPortalPage mode="auth" initialAuthTab="reset" />;
     }
     if (normalizedPath === '/aktivasi' || normalizedPath === '/aktivasi-akun' || normalizedPath === '/verifikasi-undangan') {
-      return <PublicPortalPage initialAuthTab="invite" />;
+      return <PublicPortalPage mode="auth" initialAuthTab="invite" />;
     }
     if (normalizedPath === '/bantuan') {
       return <HelpPage />;
@@ -222,6 +237,10 @@ function AppRouter() {
       );
     }
     return <ErrorView code={404} onBack={() => navigate('/')} />;
+  }
+
+  if (normalizedPath === '/tentang') {
+    return <PublicAboutPage />;
   }
 
   const effectivePath =
@@ -252,6 +271,19 @@ function AppRouter() {
   }
 
   if (effectivePath === '/pengaturan/pengguna' && !can('pengaturan', 'manage')) {
+    return (
+      <AppShell>
+        <ErrorView code={403} onBack={() => navigate('/dashboard')} />
+      </AppShell>
+    );
+  }
+
+  const canCmsAccess =
+    can('pengaturan', 'manage') ||
+    user.role === 'sekretariat_nasional' ||
+    (user.role === 'pengurus_nasional' && (user.bidang || '').toLowerCase().includes('media'));
+
+  if ((effectivePath === '/pengaturan/cms' || effectivePath === '/cms') && !canCmsAccess) {
     return (
       <AppShell>
         <ErrorView code={403} onBack={() => navigate('/dashboard')} />

@@ -6,7 +6,9 @@ import {
   FileText,
   FolderOpen,
   MessageSquare,
+  Paperclip,
   Plus,
+  Printer,
   Search,
   Users,
 } from 'lucide-react';
@@ -22,6 +24,7 @@ import {
   Pagination,
   StatusIndicator,
 } from '../components/ui/Primitives';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { DocumentRecord, PersonnelRecord, TaskRecord, TaskStatus } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
@@ -62,6 +65,8 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
     deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
     provinceCode: '32',
     recurrence: 'tidak',
+    attachmentFileId: null as string | null,
+    attachmentFileName: null as string | null,
   });
   const [bulkForm, setBulkForm] = useState({
     title: '',
@@ -148,6 +153,8 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
         deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
         provinceCode: '32',
         recurrence: 'tidak',
+        attachmentFileId: null,
+        attachmentFileName: null,
       });
       load();
     } catch (err) {
@@ -484,6 +491,32 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
               </select>
             </div>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{activeTask.description || 'Tidak ada catatan tambahan.'}</p>
+            {activeTask.attachmentFileId && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Paperclip className="w-4 h-4 text-[#0EA5E9] shrink-0" />
+                  <span className="font-semibold truncate">{activeTask.attachmentFileName || 'Lampiran Tugas'}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={apiUrl(`/api/files/${activeTask.attachmentFileId}/preview`)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                  >
+                    Pratinjau
+                  </a>
+                  <a
+                    href={apiUrl(`/api/files/${activeTask.attachmentFileId}?download=1`)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0EA5E9] text-white font-semibold"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Unduh
+                  </a>
+                </div>
+              </div>
+            )}
             {activeTask.checklist.length > 0 && (
               <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <p className="font-bold flex items-center gap-1.5">
@@ -581,6 +614,13 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
               </select>
             </div>
           </div>
+          <FileDropzone
+            label="Lampiran Berkas Pendukung Tugas (PDF / Gambar, Opsional)"
+            accept=".pdf,image/jpeg,image/png,image/webp"
+            moduleName="tugas"
+            uploadedFileName={form.attachmentFileName}
+            onUploaded={(res) => setForm({ ...form, attachmentFileId: res.fileId, attachmentFileName: res.fileName })}
+          />
           <div className="flex justify-end pt-2">
             <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Simpan Tugas</button>
           </div>
@@ -644,6 +684,38 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
+
+  const openDocumentA4Print = (d: DocumentRecord) => {
+    const template =
+      d.category === 'Sertifikat'
+        ? 'sertifikat'
+        : d.category === 'SK' || d.category === 'Surat Tugas'
+        ? 'sk_tugas'
+        : 'surat_resmi';
+    setPrintConfig({
+      template,
+      documentNumber: d.documentNumber,
+      title: d.title,
+      subtitle: `${d.category} · Versi ${d.version}`,
+      issuedDate: d.issuedDate,
+      defaultOrientation: template === 'sertifikat' ? 'landscape' : 'portrait',
+      metadata: [
+        { label: 'Kategori Dokumen', value: d.category },
+        { label: 'Pemilik / Penerima', value: d.ownerName },
+        { label: 'Penerbit', value: d.issuerName },
+        { label: 'Versi & Status', value: `v${d.version} · ${d.status}` },
+      ],
+      sections: [
+        {
+          heading: 'Keterangan & Ketentuan Dokumen',
+          body: d.notes || `Dokumen resmi kategori ${d.category} diterbitkan oleh ${d.issuerName} untuk keperluan administrasi SATU DPBI.`,
+        },
+      ],
+      signatoryName: d.issuerName,
+      signatoryRole: 'Penerbit Dokumen Resmi DPBI',
+    });
+  };
 
   const [docForm, setDocForm] = useState({
     title: '',
@@ -878,6 +950,13 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                         <td className="py-3 pr-4 tabular-nums">{formatTanggalIndonesia(d.issuedDate)}</td>
                         <td className="py-3 pr-4"><StatusIndicator status={d.status} /></td>
                         <td className="py-3 text-right whitespace-nowrap space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openDocumentA4Print(d)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak A4
+                          </button>
                           {d.fileId ? (
                             <>
                               <button
@@ -1028,7 +1107,14 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                 className="w-full h-[60vh]"
               />
             </div>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => openDocumentA4Print(previewDoc)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-[#0EA5E9]"
+              >
+                <Printer className="w-4 h-4 text-[#0EA5E9]" /> Cetak Ringkasan A4
+              </button>
               <a
                 href={apiUrl(`/api/files/${previewDoc.fileId}?download=1`)}
                 target="_blank"
@@ -1106,6 +1192,12 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
           </div>
         </form>
       </Modal>
+
+      <A4PrintModal
+        open={Boolean(printConfig)}
+        config={printConfig}
+        onClose={() => setPrintConfig(null)}
+      />
     </div>
   );
 }

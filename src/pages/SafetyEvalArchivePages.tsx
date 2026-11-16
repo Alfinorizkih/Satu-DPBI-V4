@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Download, FileSpreadsheet, Lock, Plus } from 'lucide-react';
+import { Award, Download, FileSpreadsheet, Lock, Plus, Printer } from 'lucide-react';
 import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { EmptyState, GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
+import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import { formatTanggalIndonesia } from '../lib/rbac';
 import type { PersonnelRecord } from '../lib/types';
 
@@ -555,6 +556,7 @@ export function ArchivePage() {
     alumniUsers: Record<string, unknown>[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -593,12 +595,48 @@ export function ArchivePage() {
             Arsip permanen angkatan terdahulu, ekspor data teraudit, dan akses dokumen pribadi Alumni selama 30 hari pasca masa tugas.
           </p>
         </div>
-        <a
-          href={apiUrl('/api/archive/export-personal')}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
-        >
-          <Download className="w-4 h-4" /> Ekspor Arsip Pribadi (JSON)
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setPrintConfig({
+                template: 'arsip',
+                documentNumber: `DPBI/ARSIP/${new Date().getFullYear()}/REKAP`,
+                title: 'Rekapitulasi Arsip Angkatan & Dokumen Organisasi',
+                subtitle: 'Salinan ringkasan arsip resmi SATU DPBI sesuai kewenangan akun.',
+                issuedDate: new Date().toISOString().slice(0, 10),
+                defaultOrientation: 'landscape',
+                metadata: [
+                  { label: 'Pengakses', value: user?.fullName || 'Anggota DPBI' },
+                  { label: 'Peran', value: user?.roleLabel || '—' },
+                  { label: 'Angkatan Diarsipkan', value: `${data.archivedBatches.length} Angkatan` },
+                  { label: 'Dokumen Tercatat', value: `${data.personalDocs.length} Dokumen` },
+                ],
+                table: {
+                  headers: ['Nomor Dokumen', 'Judul Dokumen', 'Kategori', 'Tanggal Terbit', 'Status'],
+                  rows: data.personalDocs.map((d) => [
+                    String(d.document_number || '—'),
+                    String(d.title || '—'),
+                    String(d.category || '—'),
+                    formatTanggalIndonesia(String(d.issued_date || '')),
+                    String(d.status || '—'),
+                  ]),
+                },
+                signatoryName: user?.fullName || 'Sekretariat Nasional DPBI',
+                signatoryRole: user?.roleLabel || 'Pengelola Arsip DPBI',
+              })
+            }
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold hover:border-[#0EA5E9]"
+          >
+            <Printer className="w-4 h-4 text-[#0EA5E9]" /> Cetak Rekap Arsip A4
+          </button>
+          <a
+            href={apiUrl('/api/archive/export-personal')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
+          >
+            <Download className="w-4 h-4" /> Ekspor Arsip Pribadi (JSON)
+          </a>
+        </div>
       </div>
 
       {data.alumniWindow && (
@@ -718,6 +756,11 @@ export function ArchivePage() {
           </div>
         </GlassCard>
       )}
+      <A4PrintModal
+        open={Boolean(printConfig)}
+        config={printConfig}
+        onClose={() => setPrintConfig(null)}
+      />
     </div>
   );
 }
