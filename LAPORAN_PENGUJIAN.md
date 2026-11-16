@@ -10,9 +10,9 @@ Dokumen ini mencatat hasil verifikasi teknis dan pengujian fungsional yang dijal
 |---|---|---|---|
 | Pemeriksaan Tipe TypeScript (`npm run lint`) | `tsc --noEmit` | **LULUS** | 0 galat tipe di seluruh `src/` dan `server/`. |
 | Build Produksi (`npm run build`) | Vite 8 + esbuild (`compile_applet`) | **LULUS** | Berhasil mengompilasi bundel klien `dist/` dan server produksi `server.js`. |
-| Pengujian Unit Logika Domain & Router (`npm test`) | `npx --yes tsx --test src/lib/domain.test.ts` | **LULUS** | **12 dari 12** sub-tes lulus (38 provinsi, 6 Bidang resmi, pemisahan domisili vs penugasan Kab/Kota, sanitasi statistik publik, bounding box & proyeksi GeoJSON, RBAC, delegasi, approval matrix, verifikasi koordinat, kalkulator alumni 30 hari, kelengkapan profil + nomor surat, dan router URL bersih). |
+| Pengujian Unit Logika Domain & Router (`npm test`) | `npx --yes tsx --test src/lib/domain.test.ts` | **LULUS** | **12 dari 12** sub-tes lulus (38 provinsi, 6 Bidang resmi, pemisahan domisili vs penugasan Kab/Kota, sanitasi statistik publik, bounding box & proyeksi GeoJSON, RBAC, delegasi, approval matrix, verifikasi koordinat, kalkulator alumni 30 hari, kelengkapan profil + nomor surat, dan router URL bersih termasuk rute legal/error). |
 | Uji Kesehatan API (`/api/health`) | `curl http://localhost:3000/api/health` | **LULUS** | Mengembalikan HTTP 200 JSON `{"ok":true,"service":"SATU DPBI","mode":"DEMO_SIMULASI"}`. |
-| Uji UI/UX, Peta GeoJSON, CMS, RBAC & Responsivitas Browser Nyata (Putaran 1 & 2) | Chromium Headless (`playwright-cli`) | **LULUS** | **0 galat konsol** (`Errors: 0`), diuji pada desktop `1440x900` dan seluler `390x844` tanpa luapan horizontal (`scrollWidth <= innerWidth`). |
+| Uji UI/UX, Footer Hak Cipta, Peta GeoJSON, CMS, RBAC & Responsivitas Browser Nyata (Putaran 1–3) | Chromium Headless (`playwright-cli`) | **LULUS** | **0 galat konsol** (`Errors: 0`), diuji pada desktop `1440x900` dan seluler `390x844` tanpa luapan horizontal (`scrollWidth <= innerWidth`). |
 | Kelengkapan Dokumentasi (`/docs/` + Root) | Audit Direktori | **LULUS** | 17 dokumen teknis & panduan di `docs/` plus `README.md`, `CHANGELOG.md`, `LAPORAN_PENGUJIAN.md`, dan `PANDUAN_DEPLOYMENT_SATU_DPBI.md`. |
 | Pengemasan Arsip Rilis Bersih (`npm run package:zip`) | `scripts/create-release-zip.mjs` | **LULUS** | Menghasilkan `satu-dpbi-paket-final.zip` yang telah diverifikasi bebas `node_modules/`, `.db*`, `.env`, `dist/`, `storage/`, dan `.playwright-cli/`. |
 | Deployment Langsung Eksternal (GitHub, Vercel, Domainesia, ArenHost) | Infrastruktur Eksternal | **BELUM DIUJI** | Memerlukan kredensial akun produksi, domain, dan server hosting Node.js/MySQL milik organisasi DPBI. |
@@ -58,6 +58,12 @@ Seluruh **12 sub-tes** pada `npx --yes tsx --test src/lib/domain.test.ts` lulus 
 2. **Pratinjau Cetak A4 (`A4PrintModal` pada `/proposal/prop-1`)**: Tombol **A4 Potret** dan **A4 Lanskap** tampil berdampingan, mengaktifkan status `aria-pressed="true"` saat diklik dan mengubah lebar lembar A4 ke mode lanskap — **LULUS**
 3. **Formulir Personalia Bertingkat (`/personalia/tambah` Langkah `2. Pendidikan & Domisili`)**: Dropdown berjenjang Provinsi, Kabupaten/Kota, Kecamatan, Desa/Kelurahan beserta opsi input manual terender bersih — **LULUS**
 4. **Alur CMS Live & Tata Letak Tab Pengaturan (`/pengaturan/cms` -> `/`)**: Penyuntingan `hero_subtitle` disimpan via UI, langsung tayang di halaman depan `/`, lalu dipulihkan kembali ke teks institusional baku; seluruh 8 tab pengaturan muat dalam 1 baris tanpa overflow (`tabOverflow: false`) dan 0 galat konsol — **LULUS**
+
+### D. Putaran 3 — Penyempurnaan Footer Hak Cipta, Rute Hukum & Halaman Status
+1. **Footer Institusional 4 Kolom & Strip Hak Cipta (`PublicFooter`)**: Terverifikasi pada `/` (`1440x900` dan seluler `390x844` tanpa overflow horizontal) menampilkan identitas resmi DPBI, navigasi portal, tautan `/privasi`, `/ketentuan`, modal ringkasan perlindungan data, kontak `sekretariat@dpbi.or.id`, pemberitahuan hak cipta & kekayaan intelektual DPBI, serta atribusi geospasial BIG/BPS (`MIT / CC BY 4.0`) — **LULUS**
+2. **Rute Kebijakan Privasi & Hak Cipta (`/privasi`, `/ketentuan`, `/hak-cipta`)**: Terverifikasi transisi langsung dalam mode gelap (`Aktifkan mode gelap`) beserta muat ulang halaman langsung (*deep-link reload*) pada `/ketentuan` tetap merender utuh tanpa raw markdown maupun fallback 404 — **LULUS**
+3. **Rute Error & Pemeliharaan Langsung (`/403`, `/pemeliharaan`)**: Terverifikasi rute status langsung merender `ErrorView` 403 dan 503 pemeliharaan terjadwal dengan aksi kembali yang jelas — **LULUS**
+4. **Footer Hak Cipta Portal Internal (`AppShell`)**: Setelah masuk melalui `/login` ke `/dashboard`, footer internal ringkas di bagian bawah shell menampilkan pemberitahuan hak cipta serta tautan aktif `/privasi`, `/ketentuan`, dan `/bantuan` yang membuka halaman terkait di dalam `AppShell` dengan 0 galat konsol — **LULUS**
 
 ---
 

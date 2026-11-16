@@ -344,4 +344,24 @@ test('Clean parameterized router resolves public paths, CMS route, deep links, a
   assert.equal(resolveBaseNavPath('/pengaturan/sesi'), '/pengaturan');
   assert.equal(resolveBaseNavPath('/pengaturan/hak-akses'), '/pengaturan/hak-akses');
   assert.equal(resolveBaseNavPath('/pengaturan/cms'), '/pengaturan/cms');
+  assert.equal(resolveBaseNavPath('/pusat-bantuan'), '/bantuan');
+  assert.equal(resolveBaseNavPath('/hak-cipta'), '/ketentuan');
+
+  assert.equal(isPublicWebsitePath('/privasi'), true);
+  assert.equal(isPublicWebsitePath('/ketentuan'), true);
+  assert.equal(isPublicWebsitePath('/hak-cipta'), true);
+  assert.equal(isPublicWebsitePath('/pusat-bantuan'), true);
+  assert.equal(isPublicWebsitePath('/pemeliharaan'), true);
+
+  assert.deepEqual(matchPrivateRoute('/privasi'), {
+    kind: 'legal',
+    section: 'privasi',
+    title: 'Kebijakan Privasi & Data Pelajar',
+  });
+  assert.deepEqual(matchPrivateRoute('/hak-cipta'), {
+    kind: 'legal',
+    section: 'ketentuan',
+    title: 'Hak Cipta & Ketentuan Penggunaan',
+  });
+  assert.equal(matchPrivateRoute('/pusat-bantuan')?.kind, 'help');
 });

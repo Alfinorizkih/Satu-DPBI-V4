@@ -140,48 +140,139 @@ export function PublicNavbar() {
 export function PublicFooter() {
   const { navigate } = useAuth();
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const currentYear = new Date().getFullYear();
 
   return (
     <>
-      <footer className="border-t border-slate-200/80 dark:border-slate-800 bg-white/75 dark:bg-slate-950/75 py-8 px-4 sm:px-6 text-xs text-slate-500 dark:text-slate-400 no-print">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="space-y-1">
-            <p className="font-display font-bold text-slate-900 dark:text-white text-sm">
-              Duta Pelajar Berbudaya Indonesia (DPBI)
-            </p>
-            <p>
-              Organisasi Pelajar Independen di Bawah Naungan Yayasan · Satu Sistem, Satu Data, Satu Koordinasi.
-            </p>
-            <p className="text-[11px] text-slate-400">
-              © {new Date().getFullYear()} SATU DPBI — Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia.
-            </p>
+      <footer className="border-t border-slate-200/90 dark:border-slate-800 bg-white/85 dark:bg-slate-950/90 pt-10 pb-8 px-4 sm:px-6 text-xs text-slate-600 dark:text-slate-400 no-print">
+        <div className="max-w-7xl mx-auto space-y-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-8">
+            {/* Column 1: Institutional Identity */}
+            <div className="lg:col-span-5 space-y-3">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/assets/aistudio/logosd_69efa81d.jpg"
+                  alt="Logo Resmi DPBI"
+                  referrerPolicy="no-referrer"
+                  className="w-10 h-10 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                />
+                <div>
+                  <p className="font-display font-bold text-slate-900 dark:text-white text-sm">
+                    SATU <span className="text-[#0EA5E9]">DPBI</span>
+                  </p>
+                  <p className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                    Duta Pelajar Berbudaya Indonesia (DPBI)
+                  </p>
+                </div>
+              </div>
+              <p className="leading-relaxed max-w-md text-slate-600 dark:text-slate-400">
+                Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia — organisasi kepemimpinan pelajar independen di bawah naungan yayasan dengan fokus literasi budaya dan kolaborasi 38 provinsi.
+              </p>
+              <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                Satu Sistem, Satu Data, Satu Koordinasi · Berbudaya, Bergerak, dan Berdampak Untuk Negeri.
+              </p>
+            </div>
+
+            {/* Column 2: Portal Navigation */}
+            <div className="lg:col-span-2 space-y-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                Navigasi Portal
+              </p>
+              <ul className="space-y-2 font-medium">
+                {PUBLIC_LINKS.map((l) => (
+                  <li key={l.path}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(l.path)}
+                      className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
+                    >
+                      {l.label}
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/login')}
+                    className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap font-semibold text-slate-900 dark:text-slate-100"
+                  >
+                    Portal Masuk Internal
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 3: Legal, Copyright & Data Protection */}
+            <div className="lg:col-span-3 space-y-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                Hak Cipta &amp; Tata Kelola
+              </p>
+              <ul className="space-y-2 font-medium">
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/privasi')}
+                    className="hover:text-[#0EA5E9] transition-colors text-left"
+                  >
+                    Kebijakan Privasi &amp; Data Pelajar
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/ketentuan')}
+                    className="hover:text-[#0EA5E9] transition-colors text-left"
+                  >
+                    Hak Cipta &amp; Ketentuan Penggunaan
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setPrivacyOpen(true)}
+                    className="hover:text-[#0EA5E9] transition-colors text-left"
+                  >
+                    Ringkasan Perlindungan Data
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 4: Official Secretariat Contact */}
+            <div className="lg:col-span-2 space-y-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                Sekretariat Resmi
+              </p>
+              <div className="space-y-1.5 text-slate-600 dark:text-slate-400 leading-relaxed">
+                <p>Sekretariat Nasional DPBI</p>
+                <p>
+                  Email:{' '}
+                  <a
+                    href="mailto:sekretariat@dpbi.or.id"
+                    className="font-medium text-slate-800 dark:text-slate-200 hover:text-[#0EA5E9] transition-colors"
+                  >
+                    sekretariat@dpbi.or.id
+                  </a>
+                </p>
+                <p className="text-[11px]">Senin–Jumat · 09:00–17:00 WIB</p>
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-5 font-medium">
-            {PUBLIC_LINKS.map((l) => (
-              <button
-                key={l.path}
-                type="button"
-                onClick={() => navigate(l.path)}
-                className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
-              >
-                {l.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap font-semibold text-slate-800 dark:text-slate-200"
-            >
-              Portal Masuk
-            </button>
-            <button
-              type="button"
-              onClick={() => setPrivacyOpen(true)}
-              className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
-            >
-              Privasi &amp; Perlindungan Data
-            </button>
+          {/* Bottom Copyright, Intellectual Property & Geospatial Attribution Strip */}
+          <div className="pt-6 border-t border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+            <div className="space-y-1">
+              <p className="font-semibold text-slate-700 dark:text-slate-300">
+                Hak Cipta © {currentYear} Duta Pelajar Berbudaya Indonesia (DPBI). Seluruh hak cipta dilindungi undang-undang.
+              </p>
+              <p>
+                Nama, logo resmi DPBI, identitas SATU DPBI, serta materi dan dokumen resmi organisasi merupakan kekayaan intelektual DPBI (organisasi independen di bawah naungan yayasan).
+              </p>
+            </div>
+            <div className="lg:text-right shrink-0 space-y-0.5">
+              <p>Batas wilayah: GeoJSON 38 Provinsi &amp; Kab/Kota (BIG/BPS · MIT / CC BY 4.0)</p>
+              <p>Akses Portal Resmi Berbasis Undangan &amp; RBAC</p>
+            </div>
           </div>
         </div>
       </footer>
@@ -209,6 +300,18 @@ export function PublicFooter() {
               Alumni memperoleh akses arsip pribadi selama 30 hari setelah masa tugas berakhir dan dapat mengekspor salinan datanya secara mandiri.
             </li>
           </ul>
+          <div className="pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setPrivacyOpen(false);
+                navigate('/privasi');
+              }}
+              className="px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
+            >
+              Baca Kebijakan Lengkap
+            </button>
+          </div>
         </div>
       </Modal>
     </>

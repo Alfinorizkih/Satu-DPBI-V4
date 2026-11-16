@@ -21,7 +21,8 @@ export type MatchedPrivateRoute =
   | { kind: 'archive'; module: ModuleCode; title: string }
   | { kind: 'system'; module: ModuleCode; title: string; initialTab: 'storage' | 'audit' | 'kesehatan' }
   | { kind: 'settings'; module: ModuleCode; title: string; initialTab: 'profil' | 'keamanan' | 'sesi' | 'preferensi' | 'pengguna' | 'hak_akses' | 'organisasi' | 'cms' }
-  | { kind: 'help'; title: string };
+  | { kind: 'help'; title: string }
+  | { kind: 'legal'; section: 'privasi' | 'ketentuan'; title: string };
 
 export const VALID_ERROR_CODES: HttpErrorCode[] = [400, 401, 403, 404, 419, 422, 429, 500, 502, 503];
 
@@ -41,6 +42,11 @@ export function isPublicWebsitePath(pathname: string): boolean {
     p === '/wilayah' ||
     p.startsWith('/wilayah/') ||
     p === '/bantuan' ||
+    p === '/pusat-bantuan' ||
+    p === '/privasi' ||
+    p === '/ketentuan' ||
+    p === '/hak-cipta' ||
+    p === '/pemeliharaan' ||
     p === '/login' ||
     p === '/lupa-password' ||
     p === '/reset-password' ||
@@ -75,7 +81,9 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   if (p === '/perlindungan') return { kind: 'safeguarding', module: 'perlindungan', title: 'Perlindungan Peserta & Pengaduan' };
   if (p === '/evaluasi') return { kind: 'evaluations', module: 'evaluasi', title: 'Monitoring & Evaluasi Kinerja' };
   if (p === '/arsip') return { kind: 'archive', module: 'arsip', title: 'Arsip Organisasi' };
-  if (p === '/bantuan') return { kind: 'help', title: 'Pusat Bantuan & Panduan' };
+  if (p === '/bantuan' || p === '/pusat-bantuan') return { kind: 'help', title: 'Pusat Bantuan & Panduan' };
+  if (p === '/privasi') return { kind: 'legal', section: 'privasi', title: 'Kebijakan Privasi & Data Pelajar' };
+  if (p === '/ketentuan' || p === '/hak-cipta') return { kind: 'legal', section: 'ketentuan', title: 'Hak Cipta & Ketentuan Penggunaan' };
 
   // System & Governance sub-routes
   if (p === '/sistem') return { kind: 'system', module: 'sistem', title: 'Kontrol Sistem, Storage & Backup', initialTab: 'storage' };
@@ -176,6 +184,8 @@ export function resolveBaseNavPath(pathname: string): string {
   if (p.startsWith('/proposal')) return '/proposal';
   if (p.startsWith('/laporan-kegiatan')) return '/laporan-kegiatan';
   if (p.startsWith('/tugas')) return '/tugas';
+  if (p === '/pusat-bantuan') return '/bantuan';
+  if (p === '/hak-cipta') return '/ketentuan';
   if (p.startsWith('/dokumen')) return '/dokumen';
   return p;
 }

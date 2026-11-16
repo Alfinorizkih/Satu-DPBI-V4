@@ -601,6 +601,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 p-4 lg:p-6 max-w-[1440px] w-full mx-auto">
           {children}
         </main>
+
+        {/* Quiet Institutional Copyright Footer */}
+        <footer className="border-t border-slate-200/80 dark:border-slate-800/80 px-4 lg:px-6 py-3.5 text-[11px] text-slate-500 dark:text-slate-400 no-print">
+          <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <p>
+              Hak Cipta © {new Date().getFullYear()} Duta Pelajar Berbudaya Indonesia (DPBI) ·{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">SATU DPBI</span> — Satu Sistem, Satu Data, Satu Koordinasi.
+            </p>
+            <div className="flex flex-wrap items-center gap-4 font-medium shrink-0">
+              <button
+                type="button"
+                onClick={() => navigate('/privasi')}
+                className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
+              >
+                Kebijakan Privasi
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/ketentuan')}
+                className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
+              >
+                Hak Cipta &amp; Ketentuan
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/bantuan')}
+                className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
+              >
+                Pusat Bantuan
+              </button>
+            </div>
+          </div>
+        </footer>
       </div>
 
       {/* Idle Timeout Pre-Expiry Warning Dialog */}

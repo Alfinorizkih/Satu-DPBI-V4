@@ -8,6 +8,7 @@ import { matchPrivateRoute, normalizePathname, VALID_ERROR_CODES, type MatchedPr
 import { PublicPortalPage } from './pages/PublicPortalPage';
 import { PublicAboutPage } from './pages/PublicAboutPage';
 import { PublicRegionsPage } from './pages/PublicRegionsPage';
+import { PublicLegalPage } from './pages/PublicLegalPage';
 import { HelpPage } from './pages/HelpPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { OrganizationPage, BatchesPage } from './pages/OrganizationAndBatchesPages';
@@ -101,6 +102,8 @@ function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
       return <SettingsPage initialTab={route.initialTab} />;
     case 'help':
       return <HelpPage />;
+    case 'legal':
+      return <PublicLegalPage section={route.section} />;
   }
 }
 
@@ -182,8 +185,24 @@ function AppRouter() {
     );
   }
 
-  if (normalizedPath.startsWith('/error/')) {
-    const rawCode = Number(normalizedPath.replace('/error/', ''));
+  if (normalizedPath === '/pemeliharaan') {
+    const view = (
+      <ErrorView
+        code={503}
+        title="Portal Sedang Dalam Pemeliharaan Terjadwal (503)"
+        message="SATU DPBI sedang menjalani pemeliharaan sistem terjadwal untuk meningkatkan keandalan layanan nasional. Seluruh data tersimpan dengan aman."
+        onRetry={() => window.location.reload()}
+        onBack={() => navigate(user ? '/dashboard' : '/')}
+      />
+    );
+    return user ? <AppShell>{view}</AppShell> : view;
+  }
+
+  const directErrorCodeMatch = /^\/(400|401|403|404|419|422|429|500|502|503)$/.exec(normalizedPath);
+  if (normalizedPath.startsWith('/error/') || directErrorCodeMatch) {
+    const rawCode = directErrorCodeMatch
+      ? Number(directErrorCodeMatch[1])
+      : Number(normalizedPath.replace('/error/', ''));
     const errorCode: HttpErrorCode = VALID_ERROR_CODES.includes(rawCode as HttpErrorCode)
       ? (rawCode as HttpErrorCode)
       : 404;
@@ -205,6 +224,12 @@ function AppRouter() {
     if (normalizedPath === '/tentang') {
       return <PublicAboutPage />;
     }
+    if (normalizedPath === '/privasi') {
+      return <PublicLegalPage section="privasi" />;
+    }
+    if (normalizedPath === '/ketentuan' || normalizedPath === '/hak-cipta') {
+      return <PublicLegalPage section="ketentuan" />;
+    }
     if (normalizedPath === '/wilayah') {
       return <PublicRegionsPage />;
     }
@@ -221,7 +246,7 @@ function AppRouter() {
     if (normalizedPath === '/aktivasi' || normalizedPath === '/aktivasi-akun' || normalizedPath === '/verifikasi-undangan') {
       return <PublicPortalPage mode="auth" initialAuthTab="invite" />;
     }
-    if (normalizedPath === '/bantuan') {
+    if (normalizedPath === '/bantuan' || normalizedPath === '/pusat-bantuan') {
       return <HelpPage />;
     }
     if (matchPrivateRoute(normalizedPath)) {

@@ -96,7 +96,7 @@ export function HelpPage() {
           aria-label="Filter kategori bantuan"
           value={selectedCategory}
           onChange={(e) => setSelectedCategory(e.target.value)}
-          className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+          className="pl-3 pr-8 py-2.5 min-w-[165px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
         >
           <option value="">Semua Kategori</option>
           {categories.map((c) => (
@@ -109,7 +109,7 @@ export function HelpPage() {
           aria-label="Filter sasaran peran"
           value={selectedRole}
           onChange={(e) => setSelectedRole(e.target.value)}
-          className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+          className="pl-3 pr-8 py-2.5 min-w-[155px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
         >
           <option value="">Semua Peran</option>
           <option value="umum">Umum &amp; Publik</option>
