@@ -19,6 +19,8 @@ export type MatchedPrivateRoute =
   | { kind: 'safeguarding'; module: ModuleCode; title: string }
   | { kind: 'evaluations'; module: ModuleCode; title: string }
   | { kind: 'archive'; module: ModuleCode; title: string }
+  | { kind: 'approval_center'; module: ModuleCode; title: string }
+  | { kind: 'email'; module: ModuleCode; title: string }
   | { kind: 'system'; module: ModuleCode; title: string; initialTab: 'storage' | 'audit' | 'kesehatan' }
   | { kind: 'settings'; module: ModuleCode; title: string; initialTab: 'profil' | 'keamanan' | 'sesi' | 'preferensi' | 'pengguna' | 'hak_akses' | 'organisasi' | 'cms' }
   | { kind: 'help'; title: string }
@@ -81,6 +83,8 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   if (p === '/perlindungan') return { kind: 'safeguarding', module: 'perlindungan', title: 'Perlindungan Peserta & Pengaduan' };
   if (p === '/evaluasi') return { kind: 'evaluations', module: 'evaluasi', title: 'Monitoring & Evaluasi Kinerja' };
   if (p === '/arsip') return { kind: 'archive', module: 'arsip', title: 'Arsip Organisasi' };
+  if (p === '/persetujuan') return { kind: 'approval_center', module: 'persetujuan', title: 'Pusat Persetujuan Nasional' };
+  if (p === '/email') return { kind: 'email', module: 'email', title: 'Pusat Email & Pengiriman Massal' };
   if (p === '/bantuan' || p === '/pusat-bantuan') return { kind: 'help', title: 'Pusat Bantuan & Panduan' };
   if (p === '/privasi') return { kind: 'legal', section: 'privasi', title: 'Kebijakan Privasi & Data Pelajar' };
   if (p === '/ketentuan' || p === '/hak-cipta') return { kind: 'legal', section: 'ketentuan', title: 'Hak Cipta & Ketentuan Penggunaan' };

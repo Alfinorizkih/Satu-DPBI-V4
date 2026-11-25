@@ -7,6 +7,7 @@ import { jsPDF } from 'jspdf';
 import { BACKUP_STORAGE_DIR, DB_PATH, getDb, IS_DEMO_MODE, nextReferenceNumber, PRIVATE_STORAGE_DIR, resetDbConnection } from './db';
 import {
   type AuthenticatedRequest,
+  getSessionPolicy,
   hashPassword,
   requireAuth,
   requirePermission,
@@ -14,7 +15,7 @@ import {
   writeActivityTimeline,
   writeAuditLog,
 } from './security';
-import { calculateAlumniWindow, ROLE_LABELS } from '../src/lib/rbac';
+import { calculateAlumniWindow, csvSafeCell, ROLE_LABELS } from '../src/lib/rbac';
 import { PROVINCE_BY_CODE } from '../src/lib/provinces';
 import type { RoleCode } from '../src/lib/types';
 
@@ -127,6 +128,21 @@ export function registerModuleRoutes(app: Express): void {
   app.patch('/api/tasks/:id', requireAuth, requirePermission('tugas', 'edit'), (req: AuthenticatedRequest, res: Response) => {
     const { status, checklist, attachmentFileId, attachmentFileName } = req.body ?? {};
     const db = getDb();
+    const user = req.authUser!;
+    const taskId = String(req.params.id);
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown> | undefined;
+    if (!task) {
+      res.status(404).json({ error: 'Tugas tidak ditemukan.' });
+      return;
+    }
+    const isNationalMgr = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
+    const isKorwilSameProv = user.role === 'koordinator_wilayah' && user.provinceCode && task.province_code === user.provinceCode;
+    const isOwner = task.assignee_id === user.id || task.creator_id === user.id;
+    if (!isNationalMgr && !isKorwilSameProv && !isOwner) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'task', taskId, 'ditolak', 'Percobaan ubah tugas lintas pengguna/wilayah.');
+      res.status(403).json({ error: 'Akses ditolak: tugas ini berada di luar penugasan atau wilayah Anda.' });
+      return;
+    }
     db.prepare(
       `UPDATE tasks SET
          status = COALESCE(?, status),
@@ -139,14 +155,28 @@ export function registerModuleRoutes(app: Express): void {
       checklist ? JSON.stringify(checklist) : null,
       attachmentFileId ?? null,
       attachmentFileName ?? null,
-      String(req.params.id)
+      taskId
     );
+    writeAuditLog(db, user, 'UPDATE_TASK', 'task', String(task.reference_number), 'berhasil', status ? `Status: ${status}` : 'Checklist/lampiran');
     res.json({ ok: true });
   });
 
   app.get('/api/tasks/:id/comments', requireAuth, requirePermission('tugas', 'view'), (req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
-    const comments = db.prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at ASC').all(String(req.params.id));
+    const user = req.authUser!;
+    const taskId = String(req.params.id);
+    const task = db.prepare('SELECT id, assignee_id, creator_id, province_code FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown> | undefined;
+    if (!task) {
+      res.status(404).json({ error: 'Tugas tidak ditemukan.' });
+      return;
+    }
+    const isNationalMgr = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
+    const isKorwilSameProv = user.role === 'koordinator_wilayah' && user.provinceCode && task.province_code === user.provinceCode;
+    if (!isNationalMgr && !isKorwilSameProv && task.assignee_id !== user.id && task.creator_id !== user.id) {
+      res.status(403).json({ error: 'Akses ditolak untuk komentar tugas ini.' });
+      return;
+    }
+    const comments = db.prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at ASC').all(taskId);
     res.json({ comments });
   });
 
@@ -157,8 +187,21 @@ export function registerModuleRoutes(app: Express): void {
       return;
     }
     const db = getDb();
+    const user = req.authUser!;
+    const taskId = String(req.params.id);
+    const task = db.prepare('SELECT id, assignee_id, creator_id, province_code FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown> | undefined;
+    if (!task) {
+      res.status(404).json({ error: 'Tugas tidak ditemukan.' });
+      return;
+    }
+    const isNationalMgr = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
+    const isKorwilSameProv = user.role === 'koordinator_wilayah' && user.provinceCode && task.province_code === user.provinceCode;
+    if (!isNationalMgr && !isKorwilSameProv && task.assignee_id !== user.id && task.creator_id !== user.id) {
+      res.status(403).json({ error: 'Akses ditolak untuk mengomentari tugas ini.' });
+      return;
+    }
     db.prepare('INSERT INTO task_comments (id, task_id, author_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-      crypto.randomUUID(), String(req.params.id), req.authUser!.id, req.authUser!.fullName, body, new Date().toISOString()
+      crypto.randomUUID(), taskId, user.id, user.fullName, body, new Date().toISOString()
     );
     res.status(201).json({ ok: true });
   });
@@ -543,11 +586,26 @@ export function registerModuleRoutes(app: Express): void {
     const user = req.authUser!;
     const archivedBatches = db.prepare("SELECT * FROM batches WHERE status IN ('selesai', 'diarsipkan') ORDER BY batch_number DESC").all();
     const personalDocs = db
-      .prepare(`SELECT * FROM documents WHERE access_level = 'internal_semua' OR owner_name = ? ORDER BY issued_date DESC`)
-      .all(user.fullName);
-    const personalLkl = db
-      .prepare(`SELECT reference_number, activity_name, event_date, participant_count, status FROM lkl_reports ${user.personnelId ? 'WHERE submitter_personnel_id = ?' : 'LIMIT 10'}`)
-      .all(...(user.personnelId ? [user.personnelId] : []));
+      .prepare(
+        `SELECT * FROM documents
+         WHERE access_level = 'internal_semua' OR owner_user_id = ?
+         ORDER BY issued_date DESC`
+      )
+      .all(user.id);
+    const isNational = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
+    const personalLkl = user.personnelId
+      ? db
+          .prepare('SELECT reference_number, activity_name, event_date, participant_count, status FROM lkl_reports WHERE submitter_personnel_id = ? ORDER BY created_at DESC')
+          .all(user.personnelId)
+      : user.role === 'koordinator_wilayah' && user.provinceCode
+      ? db
+          .prepare('SELECT reference_number, activity_name, event_date, participant_count, status FROM lkl_reports WHERE province_code = ? ORDER BY created_at DESC LIMIT 20')
+          .all(user.provinceCode)
+      : isNational
+      ? db
+          .prepare('SELECT reference_number, activity_name, event_date, participant_count, status FROM lkl_reports ORDER BY created_at DESC LIMIT 20')
+          .all()
+      : [];
 
     let alumniWindow = null;
     if (user.alumniAccessExpiresAt) {
@@ -924,6 +982,52 @@ export function registerModuleRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
+  app.get('/api/settings/users/:id/sessions', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const targetId = String(req.params.id);
+    const targetUser = db.prepare('SELECT id, full_name, email FROM users WHERE id = ?').get(targetId) as
+      | { id: string; full_name: string; email: string }
+      | undefined;
+    if (!targetUser) {
+      res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
+      return;
+    }
+    const { idleMinutes } = getSessionPolicy(db);
+    const nowMs = Date.now();
+    const sessions = db
+      .prepare('SELECT id, device_label, ip_address, expires_at, created_at, last_seen_at FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC')
+      .all(targetId) as Record<string, unknown>[];
+    const active = sessions.filter((s) => {
+      const exp = Date.parse(String(s.expires_at));
+      const seen = Date.parse(String(s.last_seen_at || s.created_at));
+      return exp >= nowMs && (!Number.isFinite(seen) || nowMs - seen <= idleMinutes * 60_000);
+    });
+    res.json({ user: targetUser, sessions: active });
+  });
+
+  app.delete('/api/settings/users/:id/sessions', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const targetId = String(req.params.id);
+    const targetUser = db.prepare('SELECT id, full_name, email FROM users WHERE id = ?').get(targetId) as
+      | { id: string; full_name: string; email: string }
+      | undefined;
+    if (!targetUser) {
+      res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
+      return;
+    }
+    const result = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
+    writeAuditLog(
+      db,
+      req.authUser!,
+      'ADMIN_REVOKE_USER_SESSIONS',
+      'user',
+      targetId,
+      'berhasil',
+      `Putus paksa ${Number(result.changes ?? 0)} sesi aktif milik ${targetUser.email}`
+    );
+    res.json({ ok: true, revokedCount: Number(result.changes ?? 0) });
+  });
+
   app.get('/api/settings/config', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const rows = db.prepare('SELECT key, value FROM system_settings').all() as { key: string; value: string }[];
@@ -933,6 +1037,25 @@ export function registerModuleRoutes(app: Express): void {
     res.json({ settings, sequences: seqs });
   });
 
+  const ALLOWED_SYSTEM_SETTING_KEYS = new Set([
+    'public_stats_approved',
+    'public_show_duta_count',
+    'default_batch_duration_months',
+    'monthly_report_deadline_day',
+    'final_report_deadline_hours',
+    'alumni_access_window_days',
+    'storage_quota_mb',
+    'max_pdf_upload_mb',
+    'max_photo_upload_mb',
+    'safeguarding_min_chaperones_u18',
+    'eval_weight_task',
+    'eval_weight_timeliness',
+    'eval_weight_quality',
+    'eval_weight_coordination',
+    'session_ttl_hours',
+    'idle_timeout_minutes',
+  ]);
+
   app.patch('/api/system/settings', requireAuth, requirePermission('sistem', 'configure'), (req: AuthenticatedRequest, res: Response) => {
     const updates = req.body?.settings;
     if (!updates || typeof updates !== 'object') {
@@ -941,34 +1064,106 @@ export function registerModuleRoutes(app: Express): void {
     }
     const db = getDb();
     const now = new Date().toISOString();
-    const stmt = db.prepare('INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at');
-    for (const [k, v] of Object.entries(updates)) {
-      if (k === 'kemendikdasmen_integration_status') continue; // Locked nonaktif until official API/MoU
-      stmt.run(String(k), String(v), now);
+    const stmt = db.prepare(
+      'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
+    );
+    const updatedKeys: string[] = [];
+    for (const [k, rawVal] of Object.entries(updates)) {
+      if (k === 'kemendikdasmen_status' || k === 'kemendikdasmen_integration_status') continue; // Locked nonaktif
+      if (!ALLOWED_SYSTEM_SETTING_KEYS.has(k)) {
+        res.status(422).json({ error: `Kunci pengaturan '${k}' tidak diizinkan.` });
+        return;
+      }
+      let cleanVal = String(rawVal).trim();
+      if (k === 'session_ttl_hours') {
+        const num = Number(cleanVal);
+        if (!Number.isFinite(num) || num < 1 || num > 24) {
+          res.status(422).json({ error: 'Masa berlaku sesi maksimal (session_ttl_hours) wajib berada di rentang 1 sampai 24 jam.' });
+          return;
+        }
+        cleanVal = String(Math.round(num));
+      } else if (k === 'idle_timeout_minutes') {
+        const num = Number(cleanVal);
+        if (!Number.isFinite(num) || num < 5 || num > 480) {
+          res.status(422).json({ error: 'Batas idle otomatis wajib berada di rentang 5 sampai 480 menit.' });
+          return;
+        }
+        cleanVal = String(Math.round(num));
+      }
+      stmt.run(k, cleanVal, now);
+      updatedKeys.push(k);
     }
-    writeAuditLog(db, req.authUser!, 'UPDATE_SYSTEM_SETTINGS', 'system_settings', Object.keys(updates).join(','));
+    writeAuditLog(db, req.authUser!, 'UPDATE_SYSTEM_SETTINGS', 'system_settings', updatedKeys.join(','));
     res.json({ ok: true });
   });
 
-  // Data Export Center (permission-gated + audit logged)
+  // Data Export Center (permission-gated + scoped + CSV formula safe + audit logged)
   app.get('/api/export/bundle', requireAuth, requirePermission('arsip', 'export'), (req: AuthenticatedRequest, res: Response) => {
     const scope = String(req.query.scope || 'proposals');
     const db = getDb();
     const user = req.authUser!;
+    const isNational = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
+    const isKorwil = user.role === 'koordinator_wilayah' && Boolean(user.provinceCode);
     let csv = '';
 
     if (scope === 'personnel') {
-      const rows = db.prepare('SELECT member_number, reference_number, full_name, province_code, school_name, role_code, verification_status FROM personnel ORDER BY created_at DESC').all() as Record<string, unknown>[];
-      csv = 'Nomor Anggota,Nomor Referensi,Nama Lengkap,Kode Provinsi,Sekolah,Peran,Verifikasi\n' +
-        rows.map((r) => `"${r.member_number}","${r.reference_number}","${r.full_name}","${r.province_code}","${r.school_name}","${r.role_code}","${r.verification_status}"`).join('\n');
+      if (user.role === 'duta' || user.role === 'alumni') {
+        res.status(403).json({ error: 'Akses ditolak: ekspor direktori personalia hanya untuk Koordinator atau Admin Nasional.' });
+        return;
+      }
+      const rows = (isKorwil
+        ? db
+            .prepare('SELECT member_number, reference_number, full_name, province_code, school_name, role_code, verification_status FROM personnel WHERE province_code = ? ORDER BY created_at DESC')
+            .all(user.provinceCode!)
+        : db
+            .prepare('SELECT member_number, reference_number, full_name, province_code, school_name, role_code, verification_status FROM personnel ORDER BY created_at DESC')
+            .all()) as Record<string, unknown>[];
+      csv =
+        ['Nomor Anggota', 'Nomor Referensi', 'Nama Lengkap', 'Kode Provinsi', 'Sekolah', 'Peran', 'Verifikasi'].map(csvSafeCell).join(',') +
+        '\n' +
+        rows
+          .map((r) => [r.member_number, r.reference_number, r.full_name, r.province_code, r.school_name, r.role_code, r.verification_status].map(csvSafeCell).join(','))
+          .join('\n');
     } else if (scope === 'lkl') {
-      const rows = db.prepare('SELECT reference_number, activity_name, submitter_name, province_code, event_date, participant_count, status FROM lkl_reports ORDER BY created_at DESC').all() as Record<string, unknown>[];
-      csv = 'Nomor LKL,Kegiatan,Pelapor,Kode Provinsi,Tanggal,Peserta,Status\n' +
-        rows.map((r) => `"${r.reference_number}","${r.activity_name}","${r.submitter_name}","${r.province_code}","${r.event_date}",${r.participant_count},"${r.status}"`).join('\n');
+      const rows = (user.role === 'duta' || user.role === 'alumni'
+        ? db
+            .prepare('SELECT reference_number, activity_name, submitter_name, province_code, event_date, participant_count, status FROM lkl_reports WHERE submitter_personnel_id = ? ORDER BY created_at DESC')
+            .all(user.personnelId || '__none__')
+        : isKorwil
+        ? db
+            .prepare('SELECT reference_number, activity_name, submitter_name, province_code, event_date, participant_count, status FROM lkl_reports WHERE province_code = ? ORDER BY created_at DESC')
+            .all(user.provinceCode!)
+        : isNational
+        ? db
+            .prepare('SELECT reference_number, activity_name, submitter_name, province_code, event_date, participant_count, status FROM lkl_reports ORDER BY created_at DESC')
+            .all()
+        : []) as Record<string, unknown>[];
+      csv =
+        ['Nomor LKL', 'Kegiatan', 'Pelapor', 'Kode Provinsi', 'Tanggal', 'Peserta', 'Status'].map(csvSafeCell).join(',') +
+        '\n' +
+        rows
+          .map((r) => [r.reference_number, r.activity_name, r.submitter_name, r.province_code, r.event_date, r.participant_count, r.status].map(csvSafeCell).join(','))
+          .join('\n');
     } else {
-      const rows = db.prepare('SELECT reference_number, title, applicant_name, province_code, event_date, status FROM proposals ORDER BY created_at DESC').all() as Record<string, unknown>[];
-      csv = 'Nomor Proposal,Judul,Pengaju,Kode Provinsi,Tanggal,Status\n' +
-        rows.map((r) => `"${r.reference_number}","${r.title}","${r.applicant_name}","${r.province_code}","${r.event_date}","${r.status}"`).join('\n');
+      const rows = (user.role === 'duta' || user.role === 'alumni'
+        ? db
+            .prepare('SELECT reference_number, title, applicant_name, province_code, event_date, status FROM proposals WHERE applicant_personnel_id = ? ORDER BY created_at DESC')
+            .all(user.personnelId || '__none__')
+        : isKorwil
+        ? db
+            .prepare('SELECT reference_number, title, applicant_name, province_code, event_date, status FROM proposals WHERE province_code = ? ORDER BY created_at DESC')
+            .all(user.provinceCode!)
+        : isNational
+        ? db
+            .prepare('SELECT reference_number, title, applicant_name, province_code, event_date, status FROM proposals ORDER BY created_at DESC')
+            .all()
+        : []) as Record<string, unknown>[];
+      csv =
+        ['Nomor Proposal', 'Judul', 'Pengaju', 'Kode Provinsi', 'Tanggal', 'Status'].map(csvSafeCell).join(',') +
+        '\n' +
+        rows
+          .map((r) => [r.reference_number, r.title, r.applicant_name, r.province_code, r.event_date, r.status].map(csvSafeCell).join(','))
+          .join('\n');
     }
 
     writeAuditLog(db, user, 'EXPORT_DATA_CENTER', 'export', scope, 'berhasil', `Ekspor CSV ${scope}`);

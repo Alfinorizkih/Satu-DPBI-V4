@@ -6,6 +6,7 @@ import {
   Bell,
   Building2,
   Calendar,
+  CheckCircle2,
   CheckSquare,
   ChevronDown,
   ChevronLeft,
@@ -22,6 +23,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  Mail,
   Map as MapIcon,
   Megaphone,
   Menu,
@@ -87,6 +89,7 @@ const NAV_GROUPS: NavGroup[] = [
     group: 'Operasional',
     collapsible: true,
     items: [
+      { label: 'Pusat Persetujuan', path: '/persetujuan', module: 'persetujuan', icon: CheckCircle2 },
       { label: 'Proposal', path: '/proposal', module: 'proposal', icon: FileCheck2 },
       { label: 'Laporan Kegiatan', path: '/laporan-kegiatan', module: 'lkl', icon: ClipboardCheck },
       { label: 'Laporan Koordinator', path: '/laporan-koordinator', module: 'laporan_koordinator', icon: FileSpreadsheet },
@@ -99,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
     group: 'Informasi',
     collapsible: true,
     items: [
+      { label: 'Pusat Email', path: '/email', module: 'email', icon: Mail },
       { label: 'Pengumuman', path: '/pengumuman', module: 'pengumuman', icon: Megaphone },
       { label: 'Notifikasi', path: '/notifikasi', icon: Bell },
       { label: 'Dokumen', path: '/dokumen', module: 'dokumen', icon: FolderOpen },

@@ -2,13 +2,13 @@ import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { DatabaseSync } from 'node:sqlite';
 import { getDb, IS_DEMO_MODE } from './db';
-import { hasPermission, resolveEffectivePermissions } from '../src/lib/rbac';
+import { hasPermission, hasScopedPermission, resolveEffectivePermissions, ROLE_LABELS } from '../src/lib/rbac';
 import type { AuthUser, DelegationRecord, ModuleCode, PermissionAction, RoleCode } from '../src/lib/types';
 import { PROVINCE_BY_CODE } from '../src/lib/provinces';
-import { ROLE_LABELS } from '../src/lib/rbac';
 
 const SESSION_COOKIE_NAME = IS_DEMO_MODE ? 'satu_dpbi_demo_sid' : 'satu_dpbi_sid';
-const LOGIN_ATTEMPTS = new Map<string, { count: number; lockedUntil: number }>();
+const LOGIN_ATTEMPTS = new Map<string, { count: number; lockedUntil: number; lastAttemptAt: number }>();
+const GENERIC_THROTTLES = new Map<string, number[]>();
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -36,17 +36,19 @@ export function checkLoginThrottle(key: string): { allowed: boolean; retryAfterS
   if (rec.lockedUntil > now) {
     return { allowed: false, retryAfterSec: Math.ceil((rec.lockedUntil - now) / 1000) };
   }
-  if (now - rec.lockedUntil > 5 * 60 * 1000) {
+  if ((rec.lockedUntil > 0 && now - rec.lockedUntil > 5 * 60 * 1000) || now - rec.lastAttemptAt > 15 * 60 * 1000) {
     LOGIN_ATTEMPTS.delete(key);
   }
   return { allowed: true, retryAfterSec: 0 };
 }
 
 export function recordLoginFailure(key: string): void {
-  const rec = LOGIN_ATTEMPTS.get(key) ?? { count: 0, lockedUntil: 0 };
+  const now = Date.now();
+  const rec = LOGIN_ATTEMPTS.get(key) ?? { count: 0, lockedUntil: 0, lastAttemptAt: now };
   rec.count += 1;
+  rec.lastAttemptAt = now;
   if (rec.count >= 5) {
-    rec.lockedUntil = Date.now() + Math.min(15 * 60 * 1000, rec.count * 30 * 1000);
+    rec.lockedUntil = now + Math.min(15 * 60 * 1000, rec.count * 30 * 1000);
   }
   LOGIN_ATTEMPTS.set(key, rec);
 }
@@ -55,12 +57,32 @@ export function clearLoginFailures(key: string): void {
   LOGIN_ATTEMPTS.delete(key);
 }
 
+export function checkGenericThrottle(
+  bucketKey: string,
+  maxHits: number,
+  windowMs: number
+): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const prev = GENERIC_THROTTLES.get(bucketKey) ?? [];
+  const active = prev.filter((ts) => now - ts < windowMs);
+  if (active.length >= maxHits) {
+    const oldest = active[0] ?? now;
+    const retryAfterSec = Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000));
+    GENERIC_THROTTLES.set(bucketKey, active);
+    return { allowed: false, retryAfterSec };
+  }
+  active.push(now);
+  GENERIC_THROTTLES.set(bucketKey, active);
+  return { allowed: true, retryAfterSec: 0 };
+}
+
 export function getSessionPolicy(db: DatabaseSync): { ttlHours: number; idleMinutes: number } {
   const rows = db
     .prepare("SELECT key, value FROM system_settings WHERE key IN ('session_ttl_hours', 'idle_timeout_minutes')")
     .all() as { key: string; value: string }[];
   const map = new Map(rows.map((r) => [r.key, r.value]));
-  const ttlHours = Math.max(1, Math.min(168, Number(map.get('session_ttl_hours') ?? 24) || 24));
+  // Hard maximum 24 hours per institutional security policy
+  const ttlHours = Math.max(1, Math.min(24, Number(map.get('session_ttl_hours') ?? 24) || 24));
   const idleMinutes = Math.max(5, Math.min(480, Number(map.get('idle_timeout_minutes') ?? 45) || 45));
   return { ttlHours, idleMinutes };
 }
@@ -409,6 +431,103 @@ export function requirePermission(module: ModuleCode, action: PermissionAction) 
   };
 }
 
+export function hasScopedUserPermission(
+  user: AuthUser,
+  module: ModuleCode,
+  action: PermissionAction,
+  targetProvinceCode?: string | null
+): boolean {
+  return hasScopedPermission(
+    user.role,
+    user.activeDelegations,
+    module,
+    action,
+    targetProvinceCode,
+    user.provinceCode
+  );
+}
+
+export function canAccessStoredFile(
+  db: DatabaseSync,
+  user: AuthUser,
+  fileId: string
+): { exists: boolean; allowed: boolean; file?: Record<string, unknown> } {
+  const file = db
+    .prepare('SELECT id, original_name, stored_name, mime_type, size_bytes, module, uploaded_by FROM stored_files WHERE id = ?')
+    .get(fileId) as Record<string, unknown> | undefined;
+
+  if (!file) {
+    return { exists: false, allowed: false };
+  }
+
+  if (String(file.uploaded_by) === user.id) {
+    return { exists: true, allowed: true, file };
+  }
+
+  const mod = String(file.module || '');
+  if (mod === 'province_logo' || mod === 'public_media') {
+    return { exists: true, allowed: true, file };
+  }
+
+  if (['super_admin', 'wakil_super_admin', 'penanggung_jawab'].includes(user.role)) {
+    return { exists: true, allowed: true, file };
+  }
+
+  if (['pengurus_nasional', 'sekretariat_nasional'].includes(user.role) && mod !== 'perlindungan_rahasia') {
+    return { exists: true, allowed: true, file };
+  }
+
+  const directGrant = db
+    .prepare('SELECT 1 FROM file_access_grants WHERE file_id = ? AND user_id = ?')
+    .get(fileId, user.id);
+  if (directGrant) {
+    return { exists: true, allowed: true, file };
+  }
+
+  const doc = db
+    .prepare('SELECT access_level FROM documents WHERE file_id = ? LIMIT 1')
+    .get(fileId) as { access_level: string } | undefined;
+  if (doc) {
+    if (doc.access_level === 'internal_semua') {
+      return { exists: true, allowed: true, file };
+    }
+    if (doc.access_level === 'koordinator_ke_atas' && user.role !== 'duta' && user.role !== 'alumni') {
+      return { exists: true, allowed: true, file };
+    }
+  }
+
+  if (user.role === 'koordinator_wilayah' && user.provinceCode) {
+    const prov = user.provinceCode;
+    const inGrant = db
+      .prepare('SELECT 1 FROM file_access_grants WHERE file_id = ? AND province_code = ?')
+      .get(fileId, prov);
+    const inProp = db
+      .prepare('SELECT 1 FROM proposals WHERE pdf_file_id = ? AND province_code = ?')
+      .get(fileId, prov);
+    const inLkl = db
+      .prepare('SELECT 1 FROM lkl_reports WHERE (pdf_file_id = ? OR photo_file_ids_json LIKE ?) AND province_code = ?')
+      .get(fileId, `%${fileId}%`, prov);
+    const inCoord = db
+      .prepare('SELECT 1 FROM coordinator_reports WHERE pdf_file_id = ? AND province_code = ?')
+      .get(fileId, prov);
+    const inTask = db
+      .prepare('SELECT 1 FROM tasks WHERE attachment_file_id = ? AND province_code = ?')
+      .get(fileId, prov);
+    const inPers = db
+      .prepare('SELECT 1 FROM personnel WHERE avatar_file_id = ? AND (province_code = ? OR assignment_province_code = ?)')
+      .get(fileId, prov, prov);
+    const inReq = db
+      .prepare('SELECT 1 FROM account_requests WHERE supporting_file_id = ? AND province_code = ?')
+      .get(fileId, prov);
+
+    if (inGrant || inProp || inLkl || inCoord || inTask || inPers || inReq) {
+      return { exists: true, allowed: true, file };
+    }
+  }
+
+  return { exists: true, allowed: false, file };
+}
+
 export function inspectFileMagicBytes(
   buffer: Buffer,
   declaredMime: string,
@@ -537,3 +656,30 @@ export function recordSystemError(
   }
   return ref;
 }
+
+export function createNotificationIdempotent(
+  db: DatabaseSync,
+  params: {
+    userId: string;
+    title: string;
+    message: string;
+    category: string;
+    targetPath: string;
+    eventKey?: string | null;
+  }
+): void {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  if (params.eventKey) {
+    db.prepare(
+      `INSERT OR IGNORE INTO notifications (id, user_id, title, message, category, target_path, is_read, created_at, event_key)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    ).run(id, params.userId, params.title, params.message, params.category, params.targetPath, now, params.eventKey);
+  } else {
+    db.prepare(
+      `INSERT INTO notifications (id, user_id, title, message, category, target_path, is_read, created_at, event_key)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL)`
+    ).run(id, params.userId, params.title, params.message, params.category, params.targetPath, now);
+  }
+}
+

@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Award,
   Briefcase,
   Calendar,
   CheckCircle2,
   Clock,
   FileCheck2,
+  Inbox,
   ListTodo,
   MapPin,
   Printer,
@@ -37,6 +39,7 @@ const MODULE_LINKS: Record<ModuleCode, { label: string; path: string }> = {
   wilayah: { label: 'Wilayah 38 Provinsi', path: '/wilayah' },
   angkatan: { label: 'Angkatan', path: '/angkatan' },
   proposal: { label: 'Proposal Kegiatan', path: '/proposal' },
+  persetujuan: { label: 'Pusat Persetujuan', path: '/persetujuan' },
   lkl: { label: 'Laporan LKL', path: '/laporan-kegiatan' },
   laporan_koordinator: { label: 'Laporan Koordinator', path: '/laporan-koordinator' },
   tugas: { label: 'Tugas', path: '/tugas' },
@@ -45,6 +48,7 @@ const MODULE_LINKS: Record<ModuleCode, { label: string; path: string }> = {
   kalender: { label: 'Kalender Kerja', path: '/kalender' },
   perlindungan: { label: 'Perlindungan', path: '/perlindungan' },
   evaluasi: { label: 'Evaluasi', path: '/evaluasi' },
+  email: { label: 'Pusat Email', path: '/email' },
   arsip: { label: 'Arsip & Alumni', path: '/arsip' },
   sistem: { label: 'Sistem', path: '/sistem' },
   pengaturan: { label: 'Pengaturan', path: '/pengaturan' },
@@ -92,6 +96,17 @@ interface DashboardData {
     startAt: string;
     location: string;
   }[];
+  analytics?: {
+    daysWindow: 7 | 30 | 90;
+    proposalsInWindow: number;
+    approvedProposalsInWindow: number;
+    lklInWindow: number;
+    approvedLklInWindow: number;
+    approvalPassRatePct: number;
+    avgDecisionHours: number | null;
+    overdueSlaCount: number;
+    contributionBadges: { code: string; label: string; metric: string; detail: string }[];
+  };
 }
 
 export function DashboardPage() {
@@ -100,11 +115,12 @@ export function DashboardPage() {
   const [provinces, setProvinces] = useState<ProvinceRecord[]>([]);
   const [tasksDue, setTasksDue] = useState<TaskRecord[]>([]);
   const [selectedProv, setSelectedProv] = useState<ProvinceRecord | null>(null);
+  const [daysWindow, setDaysWindow] = useState<7 | 30 | 90>(30);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const reqs: Promise<unknown>[] = [
-      apiGet<DashboardData>('/api/dashboard'),
+      apiGet<DashboardData>(`/api/dashboard?days=${daysWindow}`),
       apiGet<{ provinces: ProvinceRecord[] }>('/api/provinces'),
     ];
     if (can('tugas', 'view')) {
@@ -125,7 +141,7 @@ export function DashboardPage() {
         }
       })
       .finally(() => setLoading(false));
-  }, [can]);
+  }, [can, daysWindow]);
 
   if (loading || !data || !user) {
     return <LoadingSkeleton rows={6} />;
@@ -175,6 +191,15 @@ export function DashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 no-print">
+          {can('persetujuan', 'view') && (
+            <button
+              type="button"
+              onClick={() => navigate('/persetujuan')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 text-xs font-semibold hover:border-[#0EA5E9] transition-colors whitespace-nowrap"
+            >
+              <Inbox className="w-3.5 h-3.5" /> Pusat Persetujuan
+            </button>
+          )}
           {can('proposal', 'create') && (
             <button
               type="button"
@@ -310,6 +335,97 @@ export function DashboardPage() {
           </button>
         ))}
       </div>
+
+      {/* Analitik Kinerja & Jejak Kontribusi Terverifikasi */}
+      {data.analytics && (
+        <GlassCard className="p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Award className="w-4 h-4 text-[#0EA5E9]" /> Analitik Kecepatan Layanan &amp; Jejak Kontribusi Terverifikasi
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Indikator kinerja operasional dalam rentang {data.analytics.daysWindow} hari terakhir berdasarkan rekam data sah.
+              </p>
+            </div>
+            <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
+              {([7, 30, 90] as const).map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setDaysWindow(w)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold tabular-nums transition-colors ${
+                    daysWindow === w
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {w} Hari
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <p className="text-slate-500 dark:text-slate-400">Rasio Persetujuan &amp; Penerimaan</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
+                {data.analytics.approvalPassRatePct}%
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
+                {data.analytics.approvedProposalsInWindow}/{data.analytics.proposalsInWindow} proposal · {data.analytics.approvedLklInWindow}/{data.analytics.lklInWindow} LKL
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <p className="text-slate-500 dark:text-slate-400">Rata-rata Waktu Keputusan</p>
+              <p className="font-mono text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
+                {data.analytics.avgDecisionHours === null
+                  ? 'Belum ada'
+                  : data.analytics.avgDecisionHours < 0.1
+                    ? '< 0.1 jam'
+                    : `${data.analytics.avgDecisionHours} jam`}
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Target SLA persetujuan standar ≤ 72 jam</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <p className="text-slate-500 dark:text-slate-400">Antrean Lewat Tenggat SLA</p>
+              <p
+                className={`font-mono text-2xl font-bold mt-1 tabular-nums ${
+                  data.analytics.overdueSlaCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
+                }`}
+              >
+                {data.analytics.overdueSlaCount} item
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                {can('persetujuan', 'view') ? (
+                  <button type="button" onClick={() => navigate('/persetujuan')} className="text-[#0EA5E9] font-semibold hover:underline">
+                    Pantau di Pusat Persetujuan
+                  </button>
+                ) : (
+                  'Pemantauan ketepatan waktu layanan'
+                )}
+              </p>
+            </div>
+          </div>
+
+          {data.analytics.contributionBadges.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+              {data.analytics.contributionBadges.map((b) => (
+                <div
+                  key={b.code}
+                  className="rounded-xl border border-sky-200/80 dark:border-sky-800/70 bg-sky-50/50 dark:bg-sky-950/30 p-3.5 space-y-1 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-900 dark:text-white">{b.label}</span>
+                    <span className="font-mono text-[11px] font-bold text-[#0EA5E9] tabular-nums">{b.metric}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">{b.detail}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </GlassCard>
+      )}
 
       {/* Fokus Bidang Saya (Pengurus Nasional) */}
       {user.role === 'pengurus_nasional' && data.bidangScope && (

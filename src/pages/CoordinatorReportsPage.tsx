@@ -10,8 +10,9 @@ import {
   Printer,
   RotateCcw,
 } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { ConfirmDialog } from '../components/ui';
 import {
   EmptyState,
   FileDropzone,
@@ -76,6 +77,18 @@ export function CoordinatorReportsPage() {
   const [reviewTarget, setReviewTarget] = useState<CoordReport | null>(null);
   const [reviewNote, setReviewNote] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [confirmDecision, setConfirmDecision] = useState<'diterima' | 'perlu_revisi' | null>(null);
+  const [reviseTarget, setReviseTarget] = useState<CoordReport | null>(null);
+  const [reviseForm, setReviseForm] = useState({
+    periodLabel: '',
+    personnelCondition: '',
+    activitiesSummary: '',
+    obstacles: '',
+    coachingNeeds: '',
+    followUpPlan: '',
+    pdfFileId: null as string | null,
+    pdfFileName: null as string | null,
+  });
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const [form, setForm] = useState({
@@ -150,6 +163,33 @@ export function CoordinatorReportsPage() {
       notify(err instanceof Error ? err.message : 'Gagal memproses pemeriksaan.', 'error');
     } finally {
       setSubmittingReview(false);
+    }
+  };
+
+  const openReviseModal = (r: CoordReport) => {
+    setReviseTarget(r);
+    setReviseForm({
+      periodLabel: r.periodLabel,
+      personnelCondition: r.personnelCondition,
+      activitiesSummary: r.activitiesSummary,
+      obstacles: r.obstacles,
+      coachingNeeds: r.coachingNeeds,
+      followUpPlan: r.followUpPlan,
+      pdfFileId: r.pdfFileId,
+      pdfFileName: r.pdfFileName,
+    });
+  };
+
+  const handleReviseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviseTarget) return;
+    try {
+      const res = await apiPost<{ version: number }>(`/api/coordinator-reports/${reviseTarget.id}/revise`, reviseForm);
+      notify(`Revisi laporan ${reviseTarget.referenceNumber} (v${res.version}) berhasil dikirim ulang.`, 'success');
+      setReviseTarget(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengirim revisi laporan.', 'error');
     }
   };
 
@@ -292,7 +332,7 @@ export function CoordinatorReportsPage() {
                           <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {isPreviewOpen ? 'Tutup PDF' : 'Pratinjau PDF'}
                         </button>
                         <a
-                          href={`/api/files/${r.pdfFileId}?download=1`}
+                          href={apiUrl(`/api/files/${r.pdfFileId}?download=1`)}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
@@ -300,6 +340,15 @@ export function CoordinatorReportsPage() {
                           <Download className="w-3.5 h-3.5" /> Unduh
                         </a>
                       </>
+                    )}
+                    {r.status === 'perlu_revisi' && can('laporan_koordinator', 'edit') && (
+                      <button
+                        type="button"
+                        onClick={() => openReviseModal(r)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Perbaiki &amp; Kirim Revisi
+                      </button>
                     )}
                     {canReviewNational && (
                       <button
@@ -371,7 +420,7 @@ export function CoordinatorReportsPage() {
                   <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
                     <iframe
                       title={`Pratinjau PDF ${r.referenceNumber}`}
-                      src={`/api/files/${r.pdfFileId}/preview`}
+                      src={apiUrl(`/api/files/${r.pdfFileId}/preview`)}
                       className="w-full h-[50vh] sm:h-[60vh]"
                     />
                   </div>
@@ -514,7 +563,7 @@ export function CoordinatorReportsPage() {
               <button
                 type="button"
                 disabled={submittingReview}
-                onClick={() => handleReview('perlu_revisi')}
+                onClick={() => setConfirmDecision('perlu_revisi')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Minta Revisi
@@ -522,7 +571,7 @@ export function CoordinatorReportsPage() {
               <button
                 type="button"
                 disabled={submittingReview}
-                onClick={() => handleReview('diterima')}
+                onClick={() => setConfirmDecision('diterima')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" /> Terima Laporan
@@ -531,6 +580,100 @@ export function CoordinatorReportsPage() {
           </div>
         )}
       </Modal>
+
+      {/* Korwil Revise Modal */}
+      <Modal
+        open={Boolean(reviseTarget)}
+        onClose={() => setReviseTarget(null)}
+        title={`Perbaiki & Kirim Revisi ${reviseTarget?.referenceNumber || ''}`}
+      >
+        <form onSubmit={handleReviseSubmit} className="space-y-3 text-xs">
+          {reviseTarget?.reviewNote && (
+            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 text-amber-900 dark:text-amber-200">
+              <strong>Arahan Revisi Nasional:</strong> {reviseTarget.reviewNote}
+            </div>
+          )}
+          <div>
+            <label className="block font-semibold mb-1">Periode Laporan *</label>
+            <input
+              required
+              value={reviseForm.periodLabel}
+              onChange={(e) => setReviseForm({ ...reviseForm, periodLabel: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Kondisi Personel Wilayah *</label>
+            <textarea
+              rows={2}
+              required
+              value={reviseForm.personnelCondition}
+              onChange={(e) => setReviseForm({ ...reviseForm, personnelCondition: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Ringkasan Kegiatan &amp; Capaian *</label>
+            <textarea
+              rows={2}
+              required
+              value={reviseForm.activitiesSummary}
+              onChange={(e) => setReviseForm({ ...reviseForm, activitiesSummary: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Kendala Lapangan</label>
+              <input
+                value={reviseForm.obstacles}
+                onChange={(e) => setReviseForm({ ...reviseForm, obstacles: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Kebutuhan Pembinaan</label>
+              <input
+                value={reviseForm.coachingNeeds}
+                onChange={(e) => setReviseForm({ ...reviseForm, coachingNeeds: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+          </div>
+          <FileDropzone
+            label="Unggah PDF Revisi (Opsional)"
+            accept=".pdf,application/pdf"
+            moduleName="laporan_koordinator"
+            uploadedFileName={reviseForm.pdfFileName}
+            onUploaded={(res) => setReviseForm({ ...reviseForm, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setReviseTarget(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">
+              Batal
+            </button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white font-semibold">
+              Kirim Revisi Laporan
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmDecision)}
+        title={confirmDecision === 'diterima' ? 'Terima Laporan Koordinator?' : 'Kembalikan Laporan untuk Revisi?'}
+        message={
+          confirmDecision === 'diterima'
+            ? 'Status laporan wilayah akan ditandai Diterima dan kepatuhan pelaporan provinsi diperbarui otomatis.'
+            : 'Laporan akan dikembalikan kepada Koordinator Wilayah terkait untuk diperbaiki sesuai catatan Anda.'
+        }
+        confirmLabel={confirmDecision === 'diterima' ? 'Ya, Terima Laporan' : 'Ya, Minta Revisi'}
+        onConfirm={() => {
+          const d = confirmDecision;
+          setConfirmDecision(null);
+          if (d) handleReview(d);
+        }}
+        onCancel={() => setConfirmDecision(null)}
+      />
 
       <LocationVerifyModal
         open={locOpen}

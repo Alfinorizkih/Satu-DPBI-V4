@@ -1,19 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  BASE_ROLE_PERMISSIONS,
   calculateAlumniWindow,
   calculateProfileCompleteness,
   classifyRegencyPresence,
+  csvSafeCell,
   formatReferenceNumber,
   getProvinceCount,
   hasPermission,
+  hasScopedPermission,
   isRecordRelevantToBidang,
   OFFICIAL_BIDANGS,
+  renderEmailTemplate,
   resolveBidangDefinition,
   resolveEffectivePermissions,
   resolveProposalApprover,
   sanitizePublicStatsPayload,
   summarizeRegencyCoverage,
+  validateEmailTemplatePlaceholders,
   verifyCoordinateInProvince,
 } from './rbac';
 import {
@@ -365,3 +370,107 @@ test('Clean parameterized router resolves public paths, CMS route, deep links, a
   });
   assert.equal(matchPrivateRoute('/pusat-bantuan')?.kind, 'help');
 });
+
+test('hasScopedPermission blocks cross-province Korwil actions and enforces province-scoped delegation windows', () => {
+  const provDelegation: DelegationRecord = {
+    id: 'del-prov-32',
+    delegateUserId: 'usr-duta-jabar',
+    delegateName: 'Raka Pratama',
+    grantorUserId: 'usr-korwil-jabar',
+    grantorName: 'Siti Nurhaliza',
+    module: 'proposal',
+    action: 'approve',
+    provinceCode: '32',
+    startsAt: '2026-11-01T00:00:00Z',
+    endsAt: '2026-11-30T23:59:59Z',
+    reason: 'Pendampingan administratif Jawa Barat',
+    status: 'aktif',
+  };
+
+  // Korwil Jabar ('32') base permission cannot cross into Jawa Tengah ('33')
+  assert.equal(
+    hasScopedPermission('koordinator_wilayah', [], 'proposal', 'review', '32', '32', '2026-11-15T10:00:00Z'),
+    true
+  );
+  assert.equal(
+    hasScopedPermission('koordinator_wilayah', [], 'proposal', 'review', '33', '32', '2026-11-15T10:00:00Z'),
+    false
+  );
+  // Even with a delegation scoped to province '32', Korwil cannot act on province '33'
+  assert.equal(
+    hasScopedPermission('koordinator_wilayah', [provDelegation], 'proposal', 'approve', '33', '32', '2026-11-15T10:00:00Z'),
+    false
+  );
+
+  // Active province-scoped delegation works only within target province & active dates
+  assert.equal(
+    hasScopedPermission('duta', [provDelegation], 'proposal', 'approve', '32', '32', '2026-11-15T10:00:00Z'),
+    true
+  );
+  assert.equal(
+    hasScopedPermission('duta', [provDelegation], 'proposal', 'approve', '33', '32', '2026-11-15T10:00:00Z'),
+    false
+  );
+  assert.equal(
+    hasScopedPermission('duta', [provDelegation], 'proposal', 'approve', '32', '32', '2026-12-05T10:00:00Z'),
+    false
+  );
+});
+
+test('csvSafeCell escapes spreadsheet formula prefixes and embedded quotes safely', () => {
+  assert.equal(csvSafeCell('=cmd|"/C calc"!A0'), `"'=cmd|""/C calc""!A0"`);
+  assert.equal(csvSafeCell('+1+1'), `"'${'+1+1'}"`);
+  assert.equal(csvSafeCell('-2+3'), `"'${'-2+3'}"`);
+  assert.equal(csvSafeCell('@SUM(A1:A2)'), `"'${'@SUM(A1:A2)'}"`);
+  assert.equal(csvSafeCell('\twhoami'), `"'${'\twhoami'}"`);
+  assert.equal(csvSafeCell('Nama "Pelajar"'), `"Nama ""Pelajar"""`);
+  assert.equal(csvSafeCell(null), '""');
+});
+
+test('Email template placeholder validation & rendering accept only allowlisted variables', () => {
+  const valid = validateEmailTemplatePlaceholders(
+    'Halo {{nama}}, undangan untuk {{jabatan}} wilayah {{provinsi}} ({{angkatan}}) pada {{tanggal}} ref {{referensi}} ke {{email}}.'
+  );
+  assert.equal(valid.valid, true);
+  assert.deepEqual(valid.invalidVariables, []);
+  assert.equal(valid.unclosedBraces, false);
+
+  const invalidVar = validateEmailTemplatePlaceholders('Halo {{nama}}, token {{password_hash}}');
+  assert.equal(invalidVar.valid, false);
+  assert.deepEqual(invalidVar.invalidVariables, ['password_hash']);
+
+  const unclosed = validateEmailTemplatePlaceholders('Halo {{nama}, cek lagi');
+  assert.equal(unclosed.valid, false);
+  assert.equal(unclosed.unclosedBraces, true);
+
+  const rendered = renderEmailTemplate('Yth. {{nama}} ({{provinsi}})', {
+    nama: 'Raka Pratama',
+    provinsi: 'Jawa Barat',
+  });
+  assert.equal(rendered, 'Yth. Raka Pratama (Jawa Barat)');
+});
+
+test('Approval Center and Email Center routes and BASE_ROLE_PERMISSIONS enforce role boundaries', () => {
+  assert.deepEqual(matchPrivateRoute('/persetujuan'), {
+    kind: 'approval_center',
+    module: 'persetujuan',
+    title: 'Pusat Persetujuan Nasional',
+  });
+  assert.deepEqual(matchPrivateRoute('/email'), {
+    kind: 'email',
+    module: 'email',
+    title: 'Pusat Email & Pengiriman Massal',
+  });
+  assert.equal(resolveBaseNavPath('/persetujuan'), '/persetujuan');
+  assert.equal(resolveBaseNavPath('/email'), '/email');
+
+  assert.ok(BASE_ROLE_PERMISSIONS.super_admin.persetujuan?.includes('approve'));
+  assert.ok(BASE_ROLE_PERMISSIONS.super_admin.email?.includes('publish'));
+  assert.ok(BASE_ROLE_PERMISSIONS.koordinator_wilayah.persetujuan?.includes('approve'));
+  assert.equal(BASE_ROLE_PERMISSIONS.koordinator_wilayah.email, undefined);
+  assert.equal(BASE_ROLE_PERMISSIONS.duta.persetujuan, undefined);
+  assert.equal(BASE_ROLE_PERMISSIONS.duta.email, undefined);
+  assert.equal(BASE_ROLE_PERMISSIONS.alumni.persetujuan, undefined);
+  assert.equal(BASE_ROLE_PERMISSIONS.alumni.email, undefined);
+});
+

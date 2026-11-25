@@ -88,6 +88,7 @@ export function PersonnelPage({
   const [reqOpen, setReqOpen] = useState(false);
   const [verifyNote, setVerifyNote] = useState('');
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [confirmRejectReq, setConfirmRejectReq] = useState<{ id: string; fullName: string } | null>(null);
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
@@ -674,7 +675,11 @@ export function PersonnelPage({
                         <button type="button" onClick={() => handleDecideReq(r.id, 'disetujui')} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold">
                           Setujui & Buat Undangan
                         </button>
-                        <button type="button" onClick={() => handleDecideReq(r.id, 'ditolak')} className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRejectReq({ id: r.id, fullName: r.fullName })}
+                          className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-semibold"
+                        >
                           Tolak
                         </button>
                       </>
@@ -1324,6 +1329,24 @@ export function PersonnelPage({
           <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim ke Sekretariat Nasional</button>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmRejectReq)}
+        title="Tolak Permintaan Akun Duta?"
+        message={
+          confirmRejectReq
+            ? `Tolak pengajuan akun atas nama ${confirmRejectReq.fullName}? Calon anggota tidak akan menerima tautan undangan aktivasi.`
+            : ''
+        }
+        confirmLabel="Ya, Tolak Permintaan"
+        danger
+        onConfirm={() => {
+          const target = confirmRejectReq;
+          setConfirmRejectReq(null);
+          if (target) handleDecideReq(target.id, 'ditolak');
+        }}
+        onCancel={() => setConfirmRejectReq(null)}
+      />
 
       <A4PrintModal open={Boolean(printConfig)} config={printConfig} onClose={() => setPrintConfig(null)} />
     </div>

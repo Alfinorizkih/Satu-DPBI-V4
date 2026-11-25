@@ -1,6 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { Download, FileText, FileUp } from 'lucide-react';
 import { apiUploadFile, apiUrl } from '../../lib/api';
+import { compressImageFile } from '../../lib/imageCompress';
+
+function formatBytesShort(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function FileDropzone({
   label,
@@ -18,13 +25,19 @@ export function FileDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compressionNote, setCompressionNote] = useState<string | null>(null);
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
     setError(null);
+    setCompressionNote(null);
     setUploading(true);
     try {
-      const res = await apiUploadFile(file, moduleName);
+      const { file: readyFile, compressed, originalSize, finalSize } = await compressImageFile(file);
+      if (compressed) {
+        setCompressionNote(`Gambar dioptimalkan: ${formatBytesShort(originalSize)} -> ${formatBytesShort(finalSize)}`);
+      }
+      const res = await apiUploadFile(readyFile, moduleName);
       onUploaded(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal mengunggah berkas.');
@@ -48,10 +61,10 @@ export function FileDropzone({
           <FileUp className="w-5 h-5 text-[#0EA5E9] shrink-0" />
           <div className="min-w-0">
             <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
-              {uploading ? 'Memvalidasi MIME & menyimpan berkas...' : uploadedFileName || 'Tarik & lepas berkas ke sini, atau pilih file'}
+              {uploading ? 'Mengoptimalkan & memvalidasi berkas...' : uploadedFileName || 'Tarik & lepas berkas ke sini, atau pilih file'}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Validasi signature MIME aktif · Maksimal 15 MB
+              {compressionNote || 'Validasi signature MIME & kompresi foto otomatis · Maksimal 15 MB'}
             </p>
           </div>
         </div>

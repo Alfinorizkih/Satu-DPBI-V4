@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Eye, FileText, MapPin, Plus, Printer, Save } from 'lucide-react';
+import { CheckCircle2, Download, Eye, FileText, MapPin, Plus, Printer, RotateCcw, Save } from 'lucide-react';
 import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -42,6 +42,14 @@ export function LklPage({
   const [reviewNote, setReviewNote] = useState('');
   const [locModalOpen, setLocModalOpen] = useState(false);
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
+  const [pendingReview, setPendingReview] = useState<'diterima' | 'ditolak' | null>(null);
+  const [reviseForm, setReviseForm] = useState<{
+    summary: string;
+    outcomes: string;
+    participantCount: number;
+    pdfFileId: string | null;
+    pdfFileName: string | null;
+  } | null>(null);
 
   const draftKey = user ? `satu_dpbi_lkl_draft_${user.id}` : 'satu_dpbi_lkl_draft';
 
@@ -120,6 +128,17 @@ export function LklPage({
         setSelected(target);
         setPreviewPdfId(target.pdfFileId);
         setReviewNote('');
+        setReviseForm(
+          target.status === 'perlu_revisi'
+            ? {
+                summary: target.summary,
+                outcomes: target.outcomes,
+                participantCount: target.participantCount,
+                pdfFileId: target.pdfFileId,
+                pdfFileName: target.pdfFileName,
+              }
+            : null
+        );
       }
     }
   }, [loading, initialMode, initialId, reports]);
@@ -180,7 +199,23 @@ export function LklPage({
     }
   };
 
+  const handleReviseLkl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected || !reviseForm) return;
+    try {
+      const res = await apiPost<{ version: number }>(`/api/lkl/${selected.id}/revise`, reviseForm);
+      notify(`Revisi LKL versi ${res.version} berhasil dikirim ulang untuk pemeriksaan.`, 'success');
+      setSelected(null);
+      setReviseForm(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengirim revisi LKL.', 'error');
+    }
+  };
+
   if (loading) return <LoadingSkeleton rows={5} />;
+
+  const approvedProposals = proposals.filter((p) => p.status === 'disetujui');
 
   const paged = reports.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -253,6 +288,17 @@ export function LklPage({
                             setSelected(r);
                             setPreviewPdfId(r.pdfFileId);
                             setReviewNote('');
+                            setReviseForm(
+                              r.status === 'perlu_revisi'
+                                ? {
+                                    summary: r.summary,
+                                    outcomes: r.outcomes,
+                                    participantCount: r.participantCount,
+                                    pdfFileId: r.pdfFileId,
+                                    pdfFileName: r.pdfFileName,
+                                  }
+                                : null
+                            );
                             navigate(`/laporan-kegiatan/${r.id}`);
                           }}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white font-semibold"
@@ -286,6 +332,17 @@ export function LklPage({
                       setSelected(r);
                       setPreviewPdfId(r.pdfFileId);
                       setReviewNote('');
+                      setReviseForm(
+                        r.status === 'perlu_revisi'
+                          ? {
+                              summary: r.summary,
+                              outcomes: r.outcomes,
+                              participantCount: r.participantCount,
+                              pdfFileId: r.pdfFileId,
+                              pdfFileName: r.pdfFileName,
+                            }
+                          : null
+                      );
                     }}
                     className="w-full min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold"
                   >
@@ -309,15 +366,43 @@ export function LklPage({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold mb-1">Hubungkan ke Proposal (Opsional)</label>
-              <select value={form.proposalId} onChange={(e) => setForm({ ...form, proposalId: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                <option value="">Tidak terhubung ke proposal</option>
-                {proposals.map((p) => <option key={p.id} value={p.id}>{p.referenceNumber} — {p.title}</option>)}
+              <label className="block font-semibold mb-1">Hubungkan ke Proposal Disetujui (Opsional)</label>
+              <select
+                value={form.proposalId}
+                onChange={(e) => {
+                  const chosenId = e.target.value;
+                  const prop = approvedProposals.find((p) => p.id === chosenId);
+                  if (prop) {
+                    updateLklForm({
+                      proposalId: chosenId,
+                      activityName: form.activityName || prop.title,
+                      eventDate: prop.eventDate || form.eventDate,
+                      category: prop.category || form.category,
+                      activityMode: prop.activityMode === 'daring' ? 'daring' : 'luring',
+                      participantCount: prop.estimatedParticipants || form.participantCount,
+                    });
+                  } else {
+                    updateLklForm({ proposalId: chosenId });
+                  }
+                }}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Kegiatan Non-Proposal (Mandiri)</option>
+                {approvedProposals.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.referenceNumber} — {p.title}
+                  </option>
+                ))}
               </select>
+              {approvedProposals.length === 0 && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Hanya proposal berstatus <strong>Disetujui</strong> yang dapat ditautkan ke LKL.
+                </p>
+              )}
             </div>
             <div>
               <label className="block font-semibold mb-1">Moda Kegiatan</label>
-              <select value={form.activityMode} onChange={(e) => setForm({ ...form, activityMode: e.target.value as 'luring' | 'daring' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+              <select value={form.activityMode} onChange={(e) => updateLklForm({ activityMode: e.target.value as 'luring' | 'daring' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
                 <option value="luring">Luring (Lokasi Fisik)</option>
                 <option value="daring">Daring (Platform Digital)</option>
               </select>
@@ -397,6 +482,29 @@ export function LklPage({
                 })
               }
             />
+          </div>
+
+          {/* Pre-submit readiness checklist */}
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 p-3 space-y-1.5">
+            <p className="font-semibold text-slate-800 dark:text-slate-200">Daftar Periksa Kelengkapan Sebelum Kirim</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className={`w-3.5 h-3.5 ${form.summary.trim() ? 'text-emerald-600' : 'text-slate-400'}`} />
+                Ringkasan &amp; capaian terisi
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className={`w-3.5 h-3.5 ${form.pdfFileId ? 'text-emerald-600' : 'text-slate-400'}`} />
+                PDF laporan resmi {form.pdfFileId ? 'terunggah' : '(disarankan)'}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className={`w-3.5 h-3.5 ${form.photoFileIds.length > 0 ? 'text-emerald-600' : 'text-slate-400'}`} />
+                Foto dokumentasi ({form.photoFileIds.length} berkas)
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className={`w-3.5 h-3.5 ${form.proposalId ? 'text-emerald-600' : 'text-slate-400'}`} />
+                {form.proposalId ? 'Tautan proposal disetujui' : 'Kegiatan non-proposal'}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
@@ -527,6 +635,61 @@ export function LklPage({
               </div>
             )}
 
+            {selected.status === 'perlu_revisi' && can('lkl', 'edit') && reviseForm && (
+              <form onSubmit={handleReviseLkl} className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <p className="font-bold flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                  <RotateCcw className="w-4 h-4" /> Perbaiki &amp; Kirim Revisi LKL
+                </p>
+                {selected.reviewNote && (
+                  <p className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-2.5 text-amber-900 dark:text-amber-200">
+                    Catatan Peninjau: {selected.reviewNote}
+                  </p>
+                )}
+                <div>
+                  <label className="block font-semibold mb-1">Ringkasan Pelaksanaan *</label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={reviseForm.summary}
+                    onChange={(e) => setReviseForm({ ...reviseForm, summary: e.target.value })}
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1">Hasil &amp; Capaian *</label>
+                    <input
+                      required
+                      value={reviseForm.outcomes}
+                      onChange={(e) => setReviseForm({ ...reviseForm, outcomes: e.target.value })}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Jumlah Peserta</label>
+                    <input
+                      type="number"
+                      min={1}
+                      required
+                      value={reviseForm.participantCount}
+                      onChange={(e) => setReviseForm({ ...reviseForm, participantCount: Number(e.target.value) })}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    />
+                  </div>
+                </div>
+                <FileDropzone
+                  label="Unggah PDF LKL Revisi (Opsional)"
+                  accept=".pdf,application/pdf"
+                  moduleName="lkl"
+                  uploadedFileName={reviseForm.pdfFileName}
+                  onUploaded={(res) => setReviseForm({ ...reviseForm, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+                />
+                <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white font-semibold">
+                  Kirim Revisi LKL
+                </button>
+              </form>
+            )}
+
             {can('lkl', 'review') && user?.role !== 'duta' && (
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="flex items-center justify-between gap-2">
@@ -539,9 +702,9 @@ export function LklPage({
                 </div>
                 <input value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} placeholder="Catatan pemeriksaan atau arahan revisi..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => handleReview('diterima')} className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-semibold">Terima LKL</button>
+                  <button type="button" onClick={() => setPendingReview('diterima')} className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-semibold">Terima LKL</button>
                   <button type="button" onClick={() => handleReview('perlu_revisi')} className="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-semibold">Minta Revisi</button>
-                  <button type="button" onClick={() => handleReview('ditolak')} className="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-semibold">Tolak</button>
+                  <button type="button" onClick={() => setPendingReview('ditolak')} className="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-semibold">Tolak</button>
                 </div>
               </div>
             )}
@@ -583,6 +746,24 @@ export function LklPage({
         danger
         onConfirm={confirmLeave}
         onCancel={cancelLeave}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingReview)}
+        title={pendingReview === 'diterima' ? 'Terima LKL & Selesaikan Tugas Pelaporan?' : 'Konfirmasi Penolakan LKL'}
+        message={
+          pendingReview === 'diterima'
+            ? 'Menerima LKL ini akan otomatis menyelesaikan tugas dokumentasi & pelaporan terkait pada proposal yang terhubung.'
+            : 'LKL yang ditolak tidak dapat diajukan ulang pada laporan yang sama. Pastikan catatan alasan sudah lengkap.'
+        }
+        confirmLabel={pendingReview === 'diterima' ? 'Ya, Terima LKL' : 'Ya, Tolak LKL'}
+        danger={pendingReview === 'ditolak'}
+        onConfirm={() => {
+          const d = pendingReview;
+          setPendingReview(null);
+          if (d) handleReview(d);
+        }}
+        onCancel={() => setPendingReview(null)}
       />
 
       <A4PrintModal

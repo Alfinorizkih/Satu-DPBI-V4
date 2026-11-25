@@ -23,6 +23,8 @@ import { SafeguardingPage, EvaluationsPage, ArchivePage } from './pages/SafetyEv
 import { SystemAdminPage, SettingsPage } from './pages/SystemAndSettingsPages';
 import { MyActivityPage } from './pages/MyActivityPage';
 import { AlumniPage } from './pages/AlumniPage';
+import { ApprovalCenterPage } from './pages/ApprovalCenterPage';
+import { EmailCenterPage } from './pages/EmailCenterPage';
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -96,6 +98,10 @@ function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
       return <EvaluationsPage />;
     case 'archive':
       return <ArchivePage />;
+    case 'approval_center':
+      return <ApprovalCenterPage />;
+    case 'email':
+      return <EmailCenterPage />;
     case 'system':
       return <SystemAdminPage initialTab={route.initialTab} />;
     case 'settings':

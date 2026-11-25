@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Edit3, Eye, FileText, History, Info, Plus, Printer, Send } from 'lucide-react';
+import { AlertTriangle, Calendar, CheckSquare, Download, Edit3, Eye, FileText, History, Info, Plus, Printer, Send } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -15,7 +15,7 @@ import {
 } from '../components/ui';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { ProposalRecord } from '../lib/types';
-import { formatTanggalIndonesia, OFFICIAL_BIDANGS } from '../lib/rbac';
+import { formatTanggalIndonesia, OFFICIAL_BIDANGS, ROLE_LABELS } from '../lib/rbac';
 
 const PAGE_SIZE = 10;
 
@@ -27,7 +27,7 @@ function getNextActionSummary(p: ProposalRecord): string {
     case 'pemeriksaan_administrasi':
     case 'pemeriksaan_wilayah':
     case 'menunggu_persetujuan_nasional':
-      return `Langkah Berikutnya: Menunggu pemeriksaan & keputusan dari ${p.assignedApproverRole.replace(/_/g, ' ')}.`;
+      return `Langkah Berikutnya: Menunggu pemeriksaan & keputusan dari ${ROLE_LABELS[p.assignedApproverRole] || p.assignedApproverRole.replace(/_/g, ' ')}.`;
     case 'perlu_revisi':
       return 'Langkah Berikutnya: Pengaju wajib mengunggah revisi PDF sesuai catatan pemeriksaan di bawah.';
     case 'disetujui':
@@ -67,6 +67,10 @@ export function ProposalsPage({
   const [showMatrix, setShowMatrix] = useState(false);
   const [previewPdfId, setPreviewPdfId] = useState<string | null>(null);
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
+  const [duplicateMatches, setDuplicateMatches] = useState<
+    { id: string; referenceNumber: string; title: string; eventDate: string; provinceName: string; status: string }[]
+  >([]);
+  const [pendingDecision, setPendingDecision] = useState<'disetujui' | 'ditolak' | null>(null);
 
   const defaultForm = {
     title: '',
@@ -167,6 +171,31 @@ export function ProposalsPage({
     setFormDirty(true);
     setForm((prev) => ({ ...prev, ...patch }));
   };
+
+  useEffect(() => {
+    if (!createOpen) {
+      setDuplicateMatches([]);
+      return;
+    }
+    const cleanTitle = form.title.trim();
+    if (cleanTitle.length < 4) {
+      setDuplicateMatches([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const qs = new URLSearchParams({
+        title: cleanTitle,
+        eventDate: form.eventDate || '',
+      });
+      if (editingDraftId) qs.set('excludeId', editingDraftId);
+      apiGet<{
+        duplicates: { id: string; referenceNumber: string; title: string; eventDate: string; provinceName: string; status: string }[];
+      }>(`/api/proposals/check-duplicate?${qs.toString()}`)
+        .then((res) => setDuplicateMatches(res.duplicates || []))
+        .catch(() => setDuplicateMatches([]));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [createOpen, form.title, form.eventDate, editingDraftId]);
 
   const closeCreateModal = () => {
     guardAction(() => {
@@ -450,6 +479,21 @@ export function ProposalsPage({
         title={editingDraftId ? 'Lanjutkan Draft Proposal' : 'Ajukan Proposal Kegiatan Baru'}
       >
         <div className="space-y-4 text-xs">
+          {duplicateMatches.length > 0 && (
+            <div
+              role="alert"
+              className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50 p-3 space-y-1 text-amber-900 dark:text-amber-200"
+            >
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> Proposal Serupa Ditemukan di Tanggal / Judul Terdekat
+              </p>
+              {duplicateMatches.map((d) => (
+                <p key={d.id} className="text-[11px]">
+                  <span className="font-mono font-semibold">{d.referenceNumber}</span> · {d.title} ({d.provinceName} · {d.eventDate} · {d.status.replace(/_/g, ' ')})
+                </p>
+              ))}
+            </div>
+          )}
           <div>
             <label className="block font-semibold mb-1">Judul Kegiatan *</label>
             <input type="text" required value={form.title} onChange={(e) => updateProposalForm({ title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
@@ -553,7 +597,7 @@ export function ProposalsPage({
           navigate('/proposal');
         }}
         title={selected?.title || 'Detail Proposal'}
-        subtitle={selected ? `${selected.referenceNumber} · Versi ${selected.version} · Peninjau: ${selected.assignedApproverRole.replace(/_/g, ' ')}` : ''}
+        subtitle={selected ? `${selected.referenceNumber} · Versi ${selected.version} · Peninjau: ${ROLE_LABELS[selected.assignedApproverRole] || selected.assignedApproverRole.replace(/_/g, ' ')}` : ''}
         maxWidth="max-w-3xl"
       >
         {selected && (
@@ -617,9 +661,47 @@ export function ProposalsPage({
             </div>
 
             {/* Clear Next Action Guidance */}
-            <div className="rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 p-3 flex items-start gap-2.5">
-              <Info className="w-4 h-4 text-[#0EA5E9] shrink-0 mt-0.5" />
-              <p className="text-slate-700 dark:text-slate-200 leading-relaxed">{getNextActionSummary(selected)}</p>
+            <div className="rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 p-3 space-y-2">
+              <div className="flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-[#0EA5E9] shrink-0 mt-0.5" />
+                <p className="text-slate-700 dark:text-slate-200 leading-relaxed">{getNextActionSummary(selected)}</p>
+              </div>
+              {selected.status === 'disetujui' && (
+                <div className="flex flex-wrap gap-2 pl-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(null);
+                      navigate('/kalender');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 text-[#0EA5E9] font-semibold"
+                  >
+                    <Calendar className="w-3.5 h-3.5" /> Lihat Agenda di Kalender
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(null);
+                      navigate('/tugas');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 text-[#0EA5E9] font-semibold"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" /> Buka 4 Checklist Tugas
+                  </button>
+                  {can('lkl', 'create') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelected(null);
+                        navigate('/laporan-kegiatan/baru');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0EA5E9] text-white font-semibold"
+                    >
+                      Buat LKL Terkait
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {previewPdfId && (
@@ -713,13 +795,13 @@ export function ProposalsPage({
                   className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => handleDecide('disetujui')} className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-semibold">
+                  <button type="button" onClick={() => setPendingDecision('disetujui')} className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-semibold">
                     Setujui Proposal
                   </button>
                   <button type="button" onClick={() => handleDecide('perlu_revisi')} className="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-semibold">
                     Minta Revisi
                   </button>
-                  <button type="button" onClick={() => handleDecide('ditolak')} className="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-semibold">
+                  <button type="button" onClick={() => setPendingDecision('ditolak')} className="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-semibold">
                     Tolak
                   </button>
                 </div>
@@ -755,6 +837,24 @@ export function ProposalsPage({
         danger
         onConfirm={confirmLeave}
         onCancel={cancelLeave}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingDecision)}
+        title={pendingDecision === 'disetujui' ? 'Setujui Proposal & Buat Agenda Tugas?' : 'Konfirmasi Penolakan Proposal'}
+        message={
+          pendingDecision === 'disetujui'
+            ? 'Menyetujui proposal ini akan otomatis membuat agenda di Kalender Kerja serta 4 tugas pelaksanaan/pelaporan bertahap.'
+            : 'Proposal yang ditolak akan berstatus final dan tidak dapat dilanjutkan lagi. Pastikan alasan penolakan telah tertulis dengan jelas.'
+        }
+        confirmLabel={pendingDecision === 'disetujui' ? 'Ya, Setujui Proposal' : 'Ya, Tolak Proposal'}
+        danger={pendingDecision === 'ditolak'}
+        onConfirm={() => {
+          const dec = pendingDecision;
+          setPendingDecision(null);
+          if (dec) handleDecide(dec);
+        }}
+        onCancel={() => setPendingDecision(null)}
       />
 
       <A4PrintModal

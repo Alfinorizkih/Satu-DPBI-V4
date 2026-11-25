@@ -6,11 +6,15 @@ import multer from 'multer';
 import { getDb, IS_DEMO_MODE, nextReferenceNumber, PRIVATE_STORAGE_DIR } from './db';
 import {
   type AuthenticatedRequest,
+  canAccessStoredFile,
+  checkGenericThrottle,
   checkLoginThrottle,
   clearLoginFailures,
   clearSessionCookie,
+  createNotificationIdempotent,
   createSession,
   hashPassword,
+  hasScopedUserPermission,
   inspectFileMagicBytes,
   recordLoginFailure,
   requireAuth,
@@ -23,6 +27,12 @@ import {
   writeActivityTimeline,
   writeAuditLog,
 } from './security';
+import {
+  computeDashboardAnalytics,
+  onLklApproved,
+  onProposalApproved,
+  onProposalScheduleUpdated,
+} from './workflow';
 import {
   calculateAlumniWindow,
   calculateProfileCompleteness,
@@ -430,6 +440,15 @@ export function registerCoreRoutes(app: Express): void {
 
     if (!userRow || !verifyPassword(password, String(userRow.password_hash))) {
       recordLoginFailure(throttleKey);
+      writeAuditLog(
+        db,
+        { id: userRow ? String(userRow.id) : 'anonymous', fullName: email || 'Tidak Dikenal', role: userRow ? String(userRow.role) : 'anonymous' },
+        'LOGIN_FAILED',
+        'session',
+        email || 'empty',
+        'gagal',
+        `IP: ${req.ip || '127.0.0.1'}`
+      );
       res.status(401).json({ error: 'Email atau kata sandi tidak sesuai.', code: 401 });
       return;
     }
@@ -661,12 +680,28 @@ export function registerCoreRoutes(app: Express): void {
 
   app.post('/api/auth/request-reset', (req, res: Response) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const throttle = checkGenericThrottle(`reset-req:${req.ip || 'local'}:${email}`, 5, 15 * 60_000);
+    if (!throttle.allowed) {
+      res.status(429).json({ error: `Terlalu banyak permintaan reset. Coba lagi dalam ${throttle.retryAfterSec} detik.`, code: 429 });
+      return;
+    }
     if (!email) {
       res.status(422).json({ error: 'Masukkan email akun yang terdaftar.' });
       return;
     }
     const db = getDb();
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: string } | undefined;
+    const user = db.prepare('SELECT id, full_name, role FROM users WHERE email = ?').get(email) as
+      | { id: string; full_name: string; role: string }
+      | undefined;
+    writeAuditLog(
+      db,
+      user ? { id: user.id, fullName: user.full_name, role: user.role } : { id: 'anonymous', fullName: email, role: 'anonymous' },
+      'PASSWORD_RESET_REQUEST',
+      'user',
+      email,
+      'berhasil',
+      `IP: ${req.ip || '127.0.0.1'}`
+    );
     if (user) {
       const rawToken = crypto.randomBytes(24).toString('hex');
       const tokenHash = sha256(rawToken);
@@ -686,6 +721,11 @@ export function registerCoreRoutes(app: Express): void {
   });
 
   app.post('/api/auth/complete-reset', (req, res: Response) => {
+    const throttle = checkGenericThrottle(`reset-complete:${req.ip || 'local'}`, 8, 15 * 60_000);
+    if (!throttle.allowed) {
+      res.status(429).json({ error: `Terlalu banyak percobaan reset. Tunggu ${throttle.retryAfterSec} detik.`, code: 429 });
+      return;
+    }
     const { token, newPassword } = req.body ?? {};
     if (!token || !newPassword || String(newPassword).length < 8) {
       res.status(422).json({ error: 'Token valid dan password baru minimal 8 karakter diperlukan.' });
@@ -703,10 +743,16 @@ export function registerCoreRoutes(app: Express): void {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(newPassword)), String(row.user_id));
     db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(now, String(row.id));
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(String(row.user_id));
+    writeAuditLog(db, { id: String(row.user_id), fullName: String(row.user_id), role: 'user' }, 'PASSWORD_RESET_COMPLETE', 'user', String(row.user_id));
     res.json({ ok: true, message: 'Kata sandi berhasil diperbarui.' });
   });
 
   app.post('/api/auth/accept-invitation', (req, res: Response) => {
+    const throttle = checkGenericThrottle(`invite-accept:${req.ip || 'local'}`, 10, 15 * 60_000);
+    if (!throttle.allowed) {
+      res.status(429).json({ error: `Terlalu banyak percobaan aktivasi. Tunggu ${throttle.retryAfterSec} detik.`, code: 429 });
+      return;
+    }
     const { token, password } = req.body ?? {};
     if (!token || !password || String(password).length < 8) {
       res.status(422).json({ error: 'Token undangan dan kata sandi minimal 8 karakter wajib diisi.' });
@@ -744,11 +790,18 @@ export function registerCoreRoutes(app: Express): void {
       res.status(500).json({ error: 'Gagal mengaktifkan akun undangan.' });
       return;
     }
+    writeAuditLog(db, { id: userId, fullName: String(inv.full_name), role: String(inv.role) }, 'ACCEPT_INVITATION', 'user', userId);
     res.json({ ok: true, message: 'Akun berhasil diaktifkan. Silakan masuk menggunakan email dan password Anda.' });
   });
 
   // ==================== SECURE FILE UPLOAD & AUTHENTICATED DOWNLOAD ====================
   app.post('/api/files/upload', requireAuth, upload.single('file'), (req: AuthenticatedRequest, res: Response) => {
+    const user = req.authUser!;
+    const throttle = checkGenericThrottle(`file-upload:${user.id}`, 30, 60_000);
+    if (!throttle.allowed) {
+      res.status(429).json({ error: `Batas unggah sementara tercapai. Tunggu ${throttle.retryAfterSec} detik.`, code: 429 });
+      return;
+    }
     const file = req.file;
     if (!file) {
       res.status(422).json({ error: 'Tidak ada berkas yang diunggah.' });
@@ -762,13 +815,19 @@ export function registerCoreRoutes(app: Express): void {
     const db = getDb();
     const checksum = sha256(file.buffer);
     const moduleName = String(req.body?.module || 'umum');
+    const now = new Date().toISOString();
     const existing = db
       .prepare('SELECT id, original_name, mime_type, size_bytes FROM stored_files WHERE checksum_sha256 = ?')
       .get(checksum) as Record<string, unknown> | undefined;
 
     if (existing) {
+      const existingFileId = String(existing.id);
+      db.prepare(
+        `INSERT OR IGNORE INTO file_access_grants (id, file_id, user_id, province_code, module, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(crypto.randomUUID(), existingFileId, user.id, user.provinceCode, moduleName, now);
       res.json({
-        fileId: String(existing.id),
+        fileId: existingFileId,
         fileName: file.originalname,
         mimeType: String(existing.mime_type),
         sizeBytes: Number(existing.size_bytes),
@@ -793,11 +852,16 @@ export function registerCoreRoutes(app: Express): void {
       file.size,
       checksum,
       moduleName,
-      req.authUser!.id,
-      new Date().toISOString()
+      user.id,
+      now
     );
 
-    writeAuditLog(db, req.authUser!, 'UPLOAD_FILE', 'file', fileId, 'berhasil', `${file.originalname} (${check.detectedMime})`);
+    db.prepare(
+      `INSERT OR IGNORE INTO file_access_grants (id, file_id, user_id, province_code, module, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(crypto.randomUUID(), fileId, user.id, user.provinceCode, moduleName, now);
+
+    writeAuditLog(db, user, 'UPLOAD_FILE', 'file', fileId, 'berhasil', `${file.originalname} (${check.detectedMime})`);
     res.status(201).json({
       fileId,
       fileName: file.originalname,
@@ -809,19 +873,26 @@ export function registerCoreRoutes(app: Express): void {
 
   const serveStoredFile = (req: AuthenticatedRequest, res: Response, forceDownload: boolean) => {
     const db = getDb();
+    const user = req.authUser!;
     const fileId = String(req.params.id).replace(/[^a-zA-Z0-9-]/g, '');
-    const row = db.prepare('SELECT * FROM stored_files WHERE id = ?').get(fileId) as Record<string, unknown> | undefined;
-    if (!row) {
-      res.status(404).json({ error: 'Berkas tidak ditemukan.' });
+    const acl = canAccessStoredFile(db, user, fileId);
+    if (!acl.exists || !acl.file) {
+      res.status(404).json({ error: 'Berkas tidak ditemukan.', code: 404 });
       return;
     }
+    if (!acl.allowed) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'file', fileId, 'ditolak', 'Percobaan akses berkas lintas objek/wilayah.');
+      res.status(403).json({ error: 'Akses ditolak: Anda tidak berwenang melihat atau mengunduh berkas ini.', code: 403 });
+      return;
+    }
+    const row = acl.file;
     const safeStored = path.basename(String(row.stored_name));
     const fullPath = path.join(PRIVATE_STORAGE_DIR, safeStored);
     if (!fullPath.startsWith(PRIVATE_STORAGE_DIR) || !fs.existsSync(fullPath)) {
       res.status(404).json({ error: 'Berkas fisik tidak ditemukan di penyimpanan privat.' });
       return;
     }
-    writeAuditLog(db, req.authUser!, forceDownload ? 'DOWNLOAD_FILE' : 'PREVIEW_FILE', 'file', fileId, 'berhasil', String(row.original_name));
+    writeAuditLog(db, user, forceDownload ? 'DOWNLOAD_FILE' : 'PREVIEW_FILE', 'file', fileId, 'berhasil', String(row.original_name));
     res.setHeader('Content-Type', String(row.mime_type));
     res.setHeader(
       'Content-Disposition',
@@ -834,6 +905,10 @@ export function registerCoreRoutes(app: Express): void {
     serveStoredFile(req, res, false);
   });
 
+  app.get('/api/files/:id/download', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    serveStoredFile(req, res, true);
+  });
+
   app.get('/api/files/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
     serveStoredFile(req, res, req.query.download === '1');
   });
@@ -844,53 +919,62 @@ export function registerCoreRoutes(app: Express): void {
     const user = req.authUser!;
     const isNational = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional'].includes(user.role);
     const isKorwil = user.role === 'koordinator_wilayah';
+    const rawDays = Number(req.query.days || 30);
+    const daysWindow: 7 | 30 | 90 = rawDays === 7 || rawDays === 90 ? rawDays : 30;
 
-    const provFilter = isKorwil && user.provinceCode ? `WHERE province_code = '${user.provinceCode.replace(/[^0-9]/g, '')}'` : '';
-    const personnelFilter =
-      user.role === 'duta' || user.role === 'alumni'
-        ? `WHERE id = '${(user.personnelId || '').replace(/[^a-zA-Z0-9-]/g, '')}'`
-        : provFilter;
+    let persSql = 'SELECT COUNT(*) AS c FROM personnel WHERE 1=1';
+    let dutaSql = "SELECT COUNT(*) AS c FROM personnel WHERE role_code = 'duta' AND personnel_status = 'aktif'";
+    const persParams: string[] = [];
+    if (user.role === 'duta' || user.role === 'alumni') {
+      persSql += ' AND id = ?';
+      dutaSql += ' AND id = ?';
+      persParams.push(user.personnelId || '__none__');
+    } else if (isKorwil && user.provinceCode) {
+      persSql += ' AND province_code = ?';
+      dutaSql += ' AND province_code = ?';
+      persParams.push(user.provinceCode);
+    }
 
-    const totalPersonnel = (db.prepare(`SELECT COUNT(*) AS c FROM personnel ${personnelFilter}`).get() as { c: number }).c;
-    const activeDuta = (db.prepare(`SELECT COUNT(*) AS c FROM personnel ${personnelFilter ? personnelFilter + " AND role_code = 'duta' AND personnel_status = 'aktif'" : "WHERE role_code = 'duta' AND personnel_status = 'aktif'"}`).get() as { c: number }).c;
+    const totalPersonnel = (db.prepare(persSql).get(...persParams) as { c: number }).c;
+    const activeDuta = (db.prepare(dutaSql).get(...persParams) as { c: number }).c;
     const activeProvinces = (db.prepare("SELECT COUNT(*) AS c FROM provinces WHERE status = 'aktif'").get() as { c: number }).c;
-    const pendingProposals = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS c FROM proposals ${
-            user.role === 'duta'
-              ? `WHERE applicant_personnel_id = '${user.personnelId || ''}' AND status IN ('diajukan', 'menunggu_persetujuan_nasional', 'perlu_revisi')`
-              : isKorwil && user.provinceCode
-              ? `WHERE province_code = '${user.provinceCode}' AND status IN ('diajukan', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')`
-              : "WHERE status IN ('diajukan', 'pemeriksaan_administrasi', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')"
-          }`
-        )
-        .get() as { c: number }
-    ).c;
 
-    const pendingLkl = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS c FROM lkl_reports ${
-            user.role === 'duta'
-              ? `WHERE submitter_personnel_id = '${user.personnelId || ''}' AND status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')`
-              : isKorwil && user.provinceCode
-              ? `WHERE province_code = '${user.provinceCode}' AND status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')`
-              : "WHERE status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')"
-          }`
-        )
-        .get() as { c: number }
-    ).c;
+    let propSql = 'SELECT COUNT(*) AS c FROM proposals WHERE 1=1';
+    const propParams: string[] = [];
+    if (user.role === 'duta') {
+      propSql += " AND applicant_personnel_id = ? AND status IN ('diajukan', 'menunggu_persetujuan_nasional', 'perlu_revisi')";
+      propParams.push(user.personnelId || '__none__');
+    } else if (isKorwil && user.provinceCode) {
+      propSql += " AND province_code = ? AND status IN ('diajukan', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')";
+      propParams.push(user.provinceCode);
+    } else {
+      propSql += " AND status IN ('diajukan', 'pemeriksaan_administrasi', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')";
+    }
+    const pendingProposals = (db.prepare(propSql).get(...propParams) as { c: number }).c;
 
-    const overdueTasks = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS c FROM tasks WHERE status NOT IN ('selesai', 'dibatalkan') AND deadline < ? ${
-            user.role === 'duta' ? `AND assignee_id = '${user.id}'` : isKorwil && user.provinceCode ? `AND province_code = '${user.provinceCode}'` : ''
-          }`
-        )
-        .get(new Date().toISOString().slice(0, 10)) as { c: number }
-    ).c;
+    let lklSql = 'SELECT COUNT(*) AS c FROM lkl_reports WHERE 1=1';
+    const lklParams: string[] = [];
+    if (user.role === 'duta') {
+      lklSql += " AND submitter_personnel_id = ? AND status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')";
+      lklParams.push(user.personnelId || '__none__');
+    } else if (isKorwil && user.provinceCode) {
+      lklSql += " AND province_code = ? AND status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')";
+      lklParams.push(user.provinceCode);
+    } else {
+      lklSql += " AND status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')";
+    }
+    const pendingLkl = (db.prepare(lklSql).get(...lklParams) as { c: number }).c;
+
+    let taskSql = "SELECT COUNT(*) AS c FROM tasks WHERE status NOT IN ('selesai', 'dibatalkan') AND deadline < ?";
+    const taskParams: string[] = [new Date().toISOString().slice(0, 10)];
+    if (user.role === 'duta') {
+      taskSql += ' AND assignee_id = ?';
+      taskParams.push(user.id);
+    } else if (isKorwil && user.provinceCode) {
+      taskSql += ' AND province_code = ?';
+      taskParams.push(user.provinceCode);
+    }
+    const overdueTasks = (db.prepare(taskSql).get(...taskParams) as { c: number }).c;
 
     const unreadNotifications = (
       db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0').get(user.id) as { c: number }
@@ -1018,16 +1102,15 @@ export function registerCoreRoutes(app: Express): void {
         .all() as { provinceName: string; proposalCount: number; lklCount: number }[]
     );
 
+    const timelineSql = `SELECT id, category, title, description, province_code, actor_name, related_path, created_at
+       FROM activity_timeline
+       ${isKorwil && user.provinceCode ? 'WHERE province_code IS NULL OR province_code = ?' : ''}
+       ORDER BY created_at DESC
+       LIMIT 8`;
     const recentActivities = (
       db
-        .prepare(
-          `SELECT id, category, title, description, province_code, actor_name, related_path, created_at
-           FROM activity_timeline
-           ${isKorwil && user.provinceCode ? `WHERE province_code IS NULL OR province_code = '${user.provinceCode}'` : ''}
-           ORDER BY created_at DESC
-           LIMIT 8`
-        )
-        .all() as Record<string, unknown>[]
+        .prepare(timelineSql)
+        .all(...(isKorwil && user.provinceCode ? [user.provinceCode] : [])) as Record<string, unknown>[]
     ).map((a) => ({
       id: String(a.id),
       category: String(a.category),
@@ -1068,6 +1151,8 @@ export function registerCoreRoutes(app: Express): void {
         })()
       : null;
 
+    const analytics = computeDashboardAnalytics(db, user, daysWindow);
+
     res.json({
       summary: {
         totalPersonnel,
@@ -1080,6 +1165,7 @@ export function registerCoreRoutes(app: Express): void {
         unreadNotifications,
         totalStorageBytes,
       },
+      analytics,
       bidangScope: bidangStats,
       attentionItems,
       charts: {
@@ -1109,48 +1195,72 @@ export function registerCoreRoutes(app: Express): void {
       results.push({ type: 'Wilayah', title: String(p.name), subtitle: `Kode ${p.code} · Status ${String(p.status).replace(/_/g, ' ')}`, path: '/wilayah' });
     }
 
-    // Personnel (RBAC isolated)
+    // Personnel (RBAC isolated + parameterized)
     if (hasPermission(user.permissions, 'personalia', 'view')) {
       let sql = 'SELECT id, full_name, member_number, province_code FROM personnel WHERE (LOWER(full_name) LIKE ? OR LOWER(member_number) LIKE ?)';
+      const params: string[] = [like, like];
       if (user.role === 'duta' || user.role === 'alumni') {
-        sql += ` AND id = '${user.personnelId || ''}'`;
+        sql += ' AND id = ?';
+        params.push(user.personnelId || '__none__');
       } else if (user.role === 'koordinator_wilayah' && user.provinceCode) {
-        sql += ` AND province_code = '${user.provinceCode}'`;
+        sql += ' AND province_code = ?';
+        params.push(user.provinceCode);
       }
       sql += ' LIMIT 5';
-      const pers = db.prepare(sql).all(like, like) as Record<string, unknown>[];
+      const pers = db.prepare(sql).all(...params) as Record<string, unknown>[];
       for (const p of pers) {
-        results.push({ type: 'Personalia', title: String(p.full_name), subtitle: `${p.member_number} · ${PROVINCE_BY_CODE.get(String(p.province_code))?.name ?? ''}`, path: '/personalia' });
+        results.push({ type: 'Personalia', title: String(p.full_name), subtitle: `${p.member_number} · ${PROVINCE_BY_CODE.get(String(p.province_code))?.name ?? ''}`, path: `/personalia/${String(p.id)}` });
       }
     }
 
-    // Proposals
+    // Proposals (RBAC scoped)
     if (hasPermission(user.permissions, 'proposal', 'view')) {
-      const props = db
-        .prepare('SELECT reference_number, title, status FROM proposals WHERE (LOWER(title) LIKE ? OR LOWER(reference_number) LIKE ?) LIMIT 5')
-        .all(like, like) as Record<string, unknown>[];
+      let pSql = 'SELECT id, reference_number, title, status FROM proposals WHERE (LOWER(title) LIKE ? OR LOWER(reference_number) LIKE ?)';
+      const pParams: string[] = [like, like];
+      if (user.role === 'duta') {
+        pSql += ' AND applicant_personnel_id = ?';
+        pParams.push(user.personnelId || '__none__');
+      } else if (user.role === 'koordinator_wilayah' && user.provinceCode) {
+        pSql += ' AND province_code = ?';
+        pParams.push(user.provinceCode);
+      }
+      pSql += ' LIMIT 5';
+      const props = db.prepare(pSql).all(...pParams) as Record<string, unknown>[];
       for (const pr of props) {
-        results.push({ type: 'Proposal', title: String(pr.title), subtitle: `${pr.reference_number} · ${String(pr.status).replace(/_/g, ' ')}`, path: '/proposal' });
+        results.push({ type: 'Proposal', title: String(pr.title), subtitle: `${pr.reference_number} · ${String(pr.status).replace(/_/g, ' ')}`, path: `/proposal/${String(pr.id)}` });
       }
     }
 
-    // LKL
+    // LKL (RBAC scoped)
     if (hasPermission(user.permissions, 'lkl', 'view')) {
-      const lmls = db
-        .prepare('SELECT reference_number, activity_name, status FROM lkl_reports WHERE (LOWER(activity_name) LIKE ? OR LOWER(reference_number) LIKE ?) LIMIT 5')
-        .all(like, like) as Record<string, unknown>[];
+      let lSql = 'SELECT id, reference_number, activity_name, status FROM lkl_reports WHERE (LOWER(activity_name) LIKE ? OR LOWER(reference_number) LIKE ?)';
+      const lParams: string[] = [like, like];
+      if (user.role === 'duta') {
+        lSql += ' AND submitter_personnel_id = ?';
+        lParams.push(user.personnelId || '__none__');
+      } else if (user.role === 'koordinator_wilayah' && user.provinceCode) {
+        lSql += ' AND province_code = ?';
+        lParams.push(user.provinceCode);
+      }
+      lSql += ' LIMIT 5';
+      const lmls = db.prepare(lSql).all(...lParams) as Record<string, unknown>[];
       for (const l of lmls) {
-        results.push({ type: 'LKL', title: String(l.activity_name), subtitle: `${l.reference_number} · ${String(l.status).replace(/_/g, ' ')}`, path: '/laporan-kegiatan' });
+        results.push({ type: 'LKL', title: String(l.activity_name), subtitle: `${l.reference_number} · ${String(l.status).replace(/_/g, ' ')}`, path: `/laporan-kegiatan/${String(l.id)}` });
       }
     }
 
-    // Documents
+    // Documents (RBAC scoped)
     if (hasPermission(user.permissions, 'dokumen', 'view')) {
-      const docs = db
-        .prepare('SELECT document_number, title, category FROM documents WHERE (LOWER(title) LIKE ? OR LOWER(document_number) LIKE ?) LIMIT 5')
-        .all(like, like) as Record<string, unknown>[];
+      let dSql = 'SELECT id, document_number, title, category FROM documents WHERE (LOWER(title) LIKE ? OR LOWER(document_number) LIKE ?)';
+      if (user.role === 'duta' || user.role === 'alumni') {
+        dSql += " AND access_level = 'internal_semua'";
+      } else if (user.role === 'koordinator_wilayah') {
+        dSql += " AND access_level IN ('internal_semua', 'koordinator_ke_atas')";
+      }
+      dSql += ' LIMIT 5';
+      const docs = db.prepare(dSql).all(like, like) as Record<string, unknown>[];
       for (const d of docs) {
-        results.push({ type: 'Dokumen', title: String(d.title), subtitle: `${d.document_number} · ${d.category}`, path: '/dokumen' });
+        results.push({ type: 'Dokumen', title: String(d.title), subtitle: `${d.document_number} · ${d.category}`, path: `/dokumen/${String(d.id)}` });
       }
     }
 
@@ -1371,18 +1481,25 @@ export function registerCoreRoutes(app: Express): void {
       res.status(422).json({ error: 'Provinsi, Koordinator lama, dan calon pengganti wajib diisi.' });
       return;
     }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(provinceCode)) {
+      const db = getDb();
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'handover', String(provinceCode), 'ditolak', 'Koordinator mencoba membuat serah terima provinsi lain');
+      res.status(403).json({ error: 'Koordinator hanya dapat mengajukan serah terima untuk provinsinya sendiri.' });
+      return;
+    }
     const db = getDb();
     const refNo = nextReferenceNumber(db, 'HND');
     const id = crypto.randomUUID();
     const taskCnt = (db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE province_code = ? AND status != 'selesai'").get(provinceCode) as { c: number }).c;
-    const propCnt = (db.prepare("SELECT COUNT(*) AS c FROM proposals WHERE province_code = ? AND status NOT IN ('disetujui', 'ditolak', 'diarsipkan')").get(provinceCode) as { c: number }).c;
+    const propCnt = (db.prepare("SELECT COUNT(*) AS c FROM proposals WHERE province_code = ? AND status NOT IN ('disetujui', 'ditolak', 'dibatalkan', 'diarsipkan')").get(provinceCode) as { c: number }).c;
 
     db.prepare(
       `INSERT INTO handovers (id, reference_number, province_code, outgoing_coordinator_name, incoming_coordinator_name, active_tasks_count, open_proposals_count, notes, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'menunggu_persetujuan', ?)`
     ).run(id, refNo, provinceCode, outgoingCoordinatorName, incomingCoordinatorName, taskCnt, propCnt, String(notes || ''), new Date().toISOString());
 
-    writeAuditLog(db, req.authUser!, 'CREATE_HANDOVER', 'handover', refNo);
+    writeAuditLog(db, user, 'CREATE_HANDOVER', 'handover', refNo);
     res.status(201).json({ ok: true, id, referenceNumber: refNo });
   });
 
@@ -1391,6 +1508,10 @@ export function registerCoreRoutes(app: Express): void {
     const h = db.prepare('SELECT * FROM handovers WHERE id = ?').get(String(req.params.id)) as Record<string, unknown> | undefined;
     if (!h) {
       res.status(404).json({ error: 'Data serah terima tidak ditemukan.' });
+      return;
+    }
+    if (String(h.status) !== 'menunggu_persetujuan') {
+      res.status(409).json({ error: 'Serah terima ini sudah diproses dan tidak dapat disahkan ulang.' });
       return;
     }
     const now = new Date().toISOString();
@@ -1469,8 +1590,23 @@ export function registerCoreRoutes(app: Express): void {
     const { decision } = req.body ?? {};
     const status = decision === 'disetujui' ? 'disetujui' : 'ditolak';
     const db = getDb();
-    db.prepare('UPDATE location_exceptions SET status = ?, decided_by = ? WHERE id = ?').run(status, req.authUser!.fullName, String(req.params.id));
-    writeAuditLog(db, req.authUser!, 'DECIDE_LOCATION_EXCEPTION', 'location_exception', String(req.params.id), 'berhasil', status);
+    const ex = db.prepare('SELECT * FROM location_exceptions WHERE id = ?').get(String(req.params.id)) as Record<string, unknown> | undefined;
+    if (!ex) {
+      res.status(404).json({ error: 'Pengajuan pengecualian lokasi tidak ditemukan.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(ex.province_code)) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'location_exception', String(ex.id), 'ditolak', 'Koordinator mencoba memutus pengecualian provinsi lain');
+      res.status(403).json({ error: 'Koordinator hanya dapat memutus pengecualian di wilayahnya.' });
+      return;
+    }
+    if (String(ex.status) !== 'menunggu') {
+      res.status(409).json({ error: 'Pengajuan pengecualian ini sudah diputuskan.' });
+      return;
+    }
+    db.prepare('UPDATE location_exceptions SET status = ?, decided_by = ? WHERE id = ?').run(status, user.fullName, String(ex.id));
+    writeAuditLog(db, user, 'DECIDE_LOCATION_EXCEPTION', 'location_exception', String(ex.id), 'berhasil', status);
     res.json({ ok: true });
   });
 
@@ -1703,6 +1839,12 @@ export function registerCoreRoutes(app: Express): void {
       res.status(404).json({ error: 'Personel tidak ditemukan.' });
       return;
     }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(existing.province_code)) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'personnel', String(existing.reference_number), 'ditolak', 'Koordinator mencoba verifikasi personel luar provinsi');
+      res.status(403).json({ error: 'Koordinator hanya dapat memverifikasi personel di wilayahnya sendiri.' });
+      return;
+    }
     if (status === 'terverifikasi') {
       const docs = JSON.parse(String(existing.docs_checklist_json || '{}'));
       if (!docs.pasFoto || !docs.kartuPelajar) {
@@ -1716,7 +1858,7 @@ export function registerCoreRoutes(app: Express): void {
       new Date().toISOString(),
       String(existing.id)
     );
-    writeAuditLog(db, req.authUser!, 'VERIFY_PERSONNEL', 'personnel', String(existing.reference_number), 'berhasil', `${status}: ${note || ''}`);
+    writeAuditLog(db, user, 'VERIFY_PERSONNEL', 'personnel', String(existing.reference_number), 'berhasil', `${status}: ${note || ''}`);
     res.json({ ok: true });
   });
 
@@ -1727,6 +1869,7 @@ export function registerCoreRoutes(app: Express): void {
       return;
     }
     const db = getDb();
+    const user = req.authUser!;
     const now = new Date().toISOString();
     let inserted = 0;
     const skipped: { email: string; reason: string }[] = [];
@@ -1736,9 +1879,13 @@ export function registerCoreRoutes(app: Express): void {
       for (const r of rows) {
         const email = String(r.email || '').trim().toLowerCase();
         const fullName = String(r.fullName || '').trim();
-        const prov = String(r.provinceCode || '31').trim();
+        const prov = String(r.provinceCode || user.provinceCode || '31').trim();
         if (!email || !fullName) {
           skipped.push({ email: email || '(kosong)', reason: 'Nama atau email kosong' });
+          continue;
+        }
+        if (user.role === 'koordinator_wilayah' && prov !== user.provinceCode) {
+          skipped.push({ email, reason: `Di luar wilayah Koordinator (${prov})` });
           continue;
         }
         const dup = db.prepare('SELECT id FROM personnel WHERE LOWER(email) = ?').get(email);
@@ -1760,7 +1907,7 @@ export function registerCoreRoutes(app: Express): void {
       res.status(500).json({ error: 'Gagal memproses impor massal dalam transaksi database.' });
       return;
     }
-    writeAuditLog(db, req.authUser!, 'BULK_IMPORT_PERSONNEL', 'personnel', `imported:${inserted}`, 'berhasil', `Dilewati: ${skipped.length}`);
+    writeAuditLog(db, user, 'BULK_IMPORT_PERSONNEL', 'personnel', `imported:${inserted}`, 'berhasil', `Dilewati: ${skipped.length}`);
     res.json({ ok: true, inserted, skipped });
   });
 
@@ -1880,6 +2027,24 @@ export function registerCoreRoutes(app: Express): void {
       res.status(422).json({ error: 'Semua data delegasi dan alasan wajib diisi.' });
       return;
     }
+    const startMs = Date.parse(String(startsAt));
+    const endMs = Date.parse(String(endsAt));
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+      res.status(422).json({ error: 'Rentang waktu delegasi tidak valid: waktu mulai harus lebih awal dari waktu berakhir.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role !== 'super_admin' && !hasPermission(user.permissions, String(module) as never, String(action) as never)) {
+      res.status(403).json({ error: 'Anda tidak dapat mendelegasikan kewenangan yang tidak Anda miliki.' });
+      return;
+    }
+    const scopedProvince = user.role === 'koordinator_wilayah'
+      ? (user.provinceCode || null)
+      : (provinceCode ? String(provinceCode) : null);
+    if (user.role === 'koordinator_wilayah' && (!scopedProvince || (provinceCode && String(provinceCode) !== user.provinceCode))) {
+      res.status(403).json({ error: 'Koordinator Wilayah hanya dapat mendelegasikan kewenangan untuk provinsinya sendiri.' });
+      return;
+    }
     const db = getDb();
     const targetUser = db.prepare('SELECT id, full_name FROM users WHERE id = ?').get(String(delegateUserId)) as { id: string; full_name: string } | undefined;
     if (!targetUser) {
@@ -1890,8 +2055,8 @@ export function registerCoreRoutes(app: Express): void {
     db.prepare(
       `INSERT INTO delegations (id, delegate_user_id, delegate_name, grantor_user_id, grantor_name, module, action, province_code, starts_at, ends_at, reason, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif', ?)`
-    ).run(id, targetUser.id, targetUser.full_name, req.authUser!.id, req.authUser!.fullName, String(module), String(action), provinceCode ? String(provinceCode) : null, String(startsAt), String(endsAt), String(reason), new Date().toISOString());
-    writeAuditLog(db, req.authUser!, 'CREATE_DELEGATION', 'delegation', id, 'berhasil', `${targetUser.full_name} -> ${module}:${action}`);
+    ).run(id, targetUser.id, targetUser.full_name, user.id, user.fullName, String(module), String(action), scopedProvince, String(startsAt), String(endsAt), String(reason), new Date().toISOString());
+    writeAuditLog(db, user, 'CREATE_DELEGATION', 'delegation', id, 'berhasil', `${targetUser.full_name} -> ${module}:${action}`);
     res.status(201).json({ ok: true, id });
   });
 
@@ -2019,6 +2184,10 @@ export function registerCoreRoutes(app: Express): void {
       decisionNote: r.decision_note ? String(r.decision_note) : null,
       decidedBy: r.decided_by ? String(r.decided_by) : null,
       decidedAt: r.decided_at ? String(r.decided_at) : null,
+      slaDueAt: r.sla_due_at ? String(r.sla_due_at) : null,
+      escalatedTo: r.escalated_to ? String(r.escalated_to) : null,
+      escalatedAt: r.escalated_at ? String(r.escalated_at) : null,
+      cancelledReason: r.cancelled_reason ? String(r.cancelled_reason) : null,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),
     }));
@@ -2031,8 +2200,57 @@ export function registerCoreRoutes(app: Express): void {
     });
   });
 
+  app.get('/api/proposals/check-duplicate', requireAuth, requirePermission('proposal', 'view'), (req: AuthenticatedRequest, res: Response) => {
+    const title = String(req.query.title || '').trim().toLowerCase();
+    const eventDate = String(req.query.eventDate || '').trim();
+    const provinceCode = String(req.query.provinceCode || req.authUser!.provinceCode || '').trim();
+    const excludeId = String(req.query.excludeId || '');
+    if (title.length < 4) {
+      res.json({ duplicates: [] });
+      return;
+    }
+    const db = getDb();
+    const token = title.split(/\s+/).filter((w) => w.length >= 3).slice(0, 3).join('%');
+    const rows = db
+      .prepare(
+        `SELECT id, reference_number, title, event_date, province_code, status
+         FROM proposals
+         WHERE id != ? AND status NOT IN ('ditolak', 'dibatalkan', 'diarsipkan')
+           AND (LOWER(title) LIKE ? OR (event_date = ? AND province_code = ?))
+         ORDER BY created_at DESC LIMIT 8`
+      )
+      .all(excludeId, `%${token || title}%`, eventDate, provinceCode) as Record<string, unknown>[];
+
+    res.json({
+      duplicates: rows.map((r) => ({
+        id: String(r.id),
+        referenceNumber: String(r.reference_number),
+        title: String(r.title),
+        eventDate: String(r.event_date),
+        provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? String(r.province_code),
+        status: String(r.status),
+      })),
+    });
+  });
+
   app.get('/api/proposals/:id/versions', requireAuth, requirePermission('proposal', 'view'), (req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
+    const prop = db.prepare('SELECT id, applicant_personnel_id, province_code FROM proposals WHERE id = ?').get(String(req.params.id)) as Record<string, unknown> | undefined;
+    if (!prop) {
+      res.status(404).json({ error: 'Proposal tidak ditemukan.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'duta' && prop.applicant_personnel_id !== user.personnelId && prop.applicant_personnel_id !== user.id) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal_versions', String(req.params.id), 'ditolak', 'Duta mencoba melihat versi proposal lain');
+      res.status(403).json({ error: 'Anda hanya dapat melihat riwayat versi proposal milik sendiri.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== prop.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal_versions', String(req.params.id), 'ditolak', 'Koordinator mencoba melihat versi proposal provinsi lain');
+      res.status(403).json({ error: 'Proposal ini berada di luar wilayah provinsi Anda.' });
+      return;
+    }
     const versions = db.prepare('SELECT * FROM proposal_versions WHERE proposal_id = ? ORDER BY version DESC').all(String(req.params.id));
     res.json({ versions });
   });
@@ -2050,10 +2268,15 @@ export function registerCoreRoutes(app: Express): void {
     }
     const db = getDb();
     const user = req.authUser!;
+    const provCode = String(b.provinceCode || user.provinceCode || '31');
+    if ((user.role === 'duta' || user.role === 'koordinator_wilayah') && user.provinceCode && provCode !== user.provinceCode) {
+      res.status(403).json({ error: 'Anda hanya dapat mengajukan proposal pada provinsi asal Anda.' });
+      return;
+    }
     const refNo = nextReferenceNumber(db, 'PROP');
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const provCode = String(b.provinceCode || user.provinceCode || '31');
+    const slaDue = isDraft ? null : new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     const riskLevel = (['rendah', 'sedang', 'tinggi'].includes(b.riskLevel) ? b.riskLevel : 'rendah') as 'rendah' | 'sedang' | 'tinggi';
     const usesDpbiIdentity = b.usesDpbiIdentity !== false;
     const externalPermitNeeded = Boolean(b.externalPermitNeeded);
@@ -2069,14 +2292,14 @@ export function registerCoreRoutes(app: Express): void {
         id, reference_number, version, title, applicant_personnel_id, applicant_name, province_code, batch_id,
         bidang, category, risk_level, uses_dpbi_identity, external_permit_needed, assigned_approver_role,
         objective, target_audience, event_date, event_time, location, pic_name, estimated_participants,
-        activity_mode, pdf_file_id, pdf_file_name, status, created_at, updated_at
-      ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        activity_mode, pdf_file_id, pdf_file_name, status, sla_due_at, created_at, updated_at
+      ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, refNo, String(b.title).trim(), user.personnelId || user.id, user.fullName, provCode, String(b.batchId || user.batchId || 'batch-3'),
       String(b.bidang || 'Kebudayaan'), String(b.category || 'Lokakarya / Literasi Pelajar'), riskLevel, usesDpbiIdentity ? 1 : 0, externalPermitNeeded ? 1 : 0, route.approverRole,
       String(b.objective || ''), String(b.targetAudience || 'Pelajar'), String(b.eventDate || '2026-12-10'), String(b.eventTime || '09:00 WIB'),
       String(b.location || ''), String(b.picName || user.fullName), Number(b.estimatedParticipants || 30), String(b.activityMode || 'luring'),
-      b.pdfFileId ? String(b.pdfFileId) : null, b.pdfFileName ? String(b.pdfFileName) : null, initialStatus, now, now
+      b.pdfFileId ? String(b.pdfFileId) : null, b.pdfFileName ? String(b.pdfFileName) : null, initialStatus, slaDue, now, now
     );
 
     if (b.pdfFileId) {
@@ -2104,7 +2327,17 @@ export function registerCoreRoutes(app: Express): void {
     }
     const user = req.authUser!;
     if (user.role === 'duta' && prop.applicant_personnel_id !== user.personnelId && prop.applicant_personnel_id !== user.id) {
-      res.status(403).json({ error: 'Anda hanya dapat mengubah draft proposal milik sendiri.' });
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal', String(prop.reference_number), 'ditolak', 'Duta mencoba mengubah proposal lain');
+      res.status(403).json({ error: 'Anda hanya dapat mengubah proposal milik sendiri.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== prop.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal', String(prop.reference_number), 'ditolak', 'Koordinator mencoba mengubah proposal luar provinsi');
+      res.status(403).json({ error: 'Koordinator hanya dapat mengubah proposal di provinsinya.' });
+      return;
+    }
+    if (['ditolak', 'dibatalkan', 'diarsipkan'].includes(String(prop.status))) {
+      res.status(409).json({ error: 'Proposal dengan status final (ditolak/dibatalkan/diarsipkan) tidak dapat diubah.' });
       return;
     }
     const b = req.body ?? {};
@@ -2131,6 +2364,7 @@ export function registerCoreRoutes(app: Express): void {
         : 'diajukan'
       : String(prop.status);
     const now = new Date().toISOString();
+    const nextSla = submitNow && !prop.sla_due_at ? new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString() : (prop.sla_due_at ? String(prop.sla_due_at) : null);
 
     db.prepare(
       `UPDATE proposals SET
@@ -2149,14 +2383,22 @@ export function registerCoreRoutes(app: Express): void {
         pdf_file_id = COALESCE(?, pdf_file_id),
         pdf_file_name = COALESCE(?, pdf_file_name),
         status = ?,
+        sla_due_at = ?,
         updated_at = ?
        WHERE id = ?`
     ).run(
       b.title ?? null, b.bidang ?? null, b.category ?? null, riskLevel, usesDpbiIdentity ? 1 : 0, externalPermitNeeded ? 1 : 0,
       route.approverRole, b.objective ?? null, b.eventDate ?? null, b.location ?? null,
       b.estimatedParticipants ? Number(b.estimatedParticipants) : null, b.activityMode ?? null,
-      b.pdfFileId ?? null, b.pdfFileName ?? null, nextStatus, now, id
+      b.pdfFileId ?? null, b.pdfFileName ?? null, nextStatus, nextSla, now, id
     );
+
+    if (String(prop.status) === 'disetujui' || b.eventDate !== undefined || b.location !== undefined || b.title !== undefined) {
+      const updated = db.prepare('SELECT * FROM proposals WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+      if (updated) {
+        onProposalScheduleUpdated(db, updated);
+      }
+    }
 
     writeAuditLog(db, user, submitNow ? 'SUBMIT_PROPOSAL_FROM_DRAFT' : 'UPDATE_PROPOSAL_DRAFT', 'proposal', String(prop.reference_number));
     res.json({ ok: true, status: nextStatus, assignedApproverRole: route.approverRole });
@@ -2180,8 +2422,20 @@ export function registerCoreRoutes(app: Express): void {
       return;
     }
     const user = req.authUser!;
-    if (decision === 'disetujui' && !hasPermission(user.permissions, 'proposal', 'approve')) {
-      // Allow Koordinator Wilayah ONLY if proposal is routed to koordinator_wilayah
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== prop.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal', String(prop.reference_number), 'ditolak', 'Koordinator mencoba memutus proposal provinsi lain');
+      res.status(403).json({ error: 'Koordinator hanya dapat memeriksa proposal dari provinsinya sendiri.' });
+      return;
+    }
+    if (prop.applicant_personnel_id === user.personnelId || prop.applicant_personnel_id === user.id) {
+      res.status(403).json({ error: 'Pengusul tidak dapat menyetujui atau memeriksa proposalnya sendiri (pemisahan wewenang).' });
+      return;
+    }
+    if (['disetujui', 'ditolak', 'dibatalkan', 'diarsipkan'].includes(String(prop.status))) {
+      res.status(409).json({ error: 'Proposal ini sudah memiliki keputusan final dan tidak dapat diputuskan ulang.' });
+      return;
+    }
+    if (decision === 'disetujui' && !hasScopedUserPermission(user, 'proposal', 'approve', String(prop.province_code))) {
       if (!(user.role === 'koordinator_wilayah' && prop.assigned_approver_role === 'koordinator_wilayah' && user.provinceCode === prop.province_code)) {
         res.status(403).json({ error: 'Proposal ini memerlukan persetujuan Pengurus Nasional sesuai Approval Matrix.' });
         return;
@@ -2193,19 +2447,27 @@ export function registerCoreRoutes(app: Express): void {
       String(decision), String(note || ''), user.fullName, now, now, String(prop.id)
     );
 
-    // Notify applicant
     const applicantUser = db.prepare('SELECT id FROM users WHERE personnel_id = ?').get(String(prop.applicant_personnel_id)) as { id: string } | undefined;
     if (applicantUser) {
-      db.prepare(
-        `INSERT INTO notifications (id, user_id, title, message, category, target_path, is_read, created_at)
-         VALUES (?, ?, ?, ?, 'proposal', '/proposal', 0, ?)`
-      ).run(crypto.randomUUID(), applicantUser.id, `Status Proposal ${prop.reference_number}: ${decision.replace(/_/g, ' ')}`, String(note || prop.title), now);
+      createNotificationIdempotent(db, {
+        userId: applicantUser.id,
+        title: `Status Proposal ${prop.reference_number}: ${String(decision).replace(/_/g, ' ')}`,
+        message: String(note || prop.title),
+        category: 'proposal',
+        targetPath: '/proposal',
+        eventKey: `proposal:${prop.id}:${decision}:${now.slice(0, 16)}`,
+      });
+    }
+
+    let workflowEffects: { eventId: string; createdTaskIds: string[] } | null = null;
+    if (decision === 'disetujui') {
+      workflowEffects = onProposalApproved(db, prop, user);
     }
 
     writeAuditLog(db, user, `DECIDE_PROPOSAL_${String(decision).toUpperCase()}`, 'proposal', String(prop.reference_number), 'berhasil', String(note || ''));
-    writeActivityTimeline(db, 'Proposal', `Proposal ${prop.reference_number} ${decision.replace(/_/g, ' ')}`, `${prop.title} ditindaklanjuti oleh ${user.fullName}.`, user.fullName, String(prop.province_code), String(prop.batch_id), '/proposal');
+    writeActivityTimeline(db, 'Proposal', `Proposal ${prop.reference_number} ${String(decision).replace(/_/g, ' ')}`, `${prop.title} ditindaklanjuti oleh ${user.fullName}.`, user.fullName, String(prop.province_code), String(prop.batch_id), '/proposal');
 
-    res.json({ ok: true });
+    res.json({ ok: true, workflowEffects });
   });
 
   app.post('/api/proposals/:id/revise', requireAuth, requirePermission('proposal', 'edit'), (req: AuthenticatedRequest, res: Response) => {
@@ -2216,19 +2478,35 @@ export function registerCoreRoutes(app: Express): void {
       res.status(404).json({ error: 'Proposal tidak ditemukan.' });
       return;
     }
+    const user = req.authUser!;
+    if (user.role === 'duta' && prop.applicant_personnel_id !== user.personnelId && prop.applicant_personnel_id !== user.id) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal', String(prop.reference_number), 'ditolak', 'Duta mencoba merevisi proposal lain');
+      res.status(403).json({ error: 'Anda hanya dapat mengirim revisi untuk proposal milik sendiri.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== prop.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'proposal', String(prop.reference_number), 'ditolak', 'Koordinator mencoba merevisi proposal provinsi lain');
+      res.status(403).json({ error: 'Proposal ini berada di luar wilayah provinsi Anda.' });
+      return;
+    }
+    if (!['draft', 'perlu_revisi', 'perlu_kelengkapan'].includes(String(prop.status))) {
+      res.status(409).json({ error: 'Revisi hanya dapat dikirim untuk proposal berstatus draft, perlu revisi, atau perlu kelengkapan.' });
+      return;
+    }
     const nextVersion = Number(prop.version) + 1;
     const now = new Date().toISOString();
     const nextStatus = prop.assigned_approver_role === 'pengurus_nasional' ? 'menunggu_persetujuan_nasional' : 'diajukan';
+    const nextSla = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
 
-    db.prepare('UPDATE proposals SET version = ?, pdf_file_id = COALESCE(?, pdf_file_id), pdf_file_name = COALESCE(?, pdf_file_name), status = ?, updated_at = ? WHERE id = ?').run(
-      nextVersion, pdfFileId ?? null, pdfFileName ?? null, nextStatus, now, String(prop.id)
+    db.prepare('UPDATE proposals SET version = ?, pdf_file_id = COALESCE(?, pdf_file_id), pdf_file_name = COALESCE(?, pdf_file_name), status = ?, sla_due_at = ?, updated_at = ? WHERE id = ?').run(
+      nextVersion, pdfFileId ?? null, pdfFileName ?? null, nextStatus, nextSla, now, String(prop.id)
     );
     db.prepare(
       `INSERT INTO proposal_versions (id, proposal_id, version, pdf_file_id, pdf_file_name, change_note, uploaded_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(crypto.randomUUID(), String(prop.id), nextVersion, pdfFileId ?? prop.pdf_file_id, pdfFileName ?? prop.pdf_file_name, String(changeNote || `Revisi versi ${nextVersion}`), req.authUser!.fullName, now);
+    ).run(crypto.randomUUID(), String(prop.id), nextVersion, pdfFileId ?? prop.pdf_file_id, pdfFileName ?? prop.pdf_file_name, String(changeNote || `Revisi versi ${nextVersion}`), user.fullName, now);
 
-    writeAuditLog(db, req.authUser!, 'REVISE_PROPOSAL', 'proposal', String(prop.reference_number), 'berhasil', `Versi ${nextVersion}`);
+    writeAuditLog(db, user, 'REVISE_PROPOSAL', 'proposal', String(prop.reference_number), 'berhasil', `Versi ${nextVersion}`);
     res.json({ ok: true, version: nextVersion });
   });
 
@@ -2297,16 +2575,37 @@ export function registerCoreRoutes(app: Express): void {
     }
     const db = getDb();
     const user = req.authUser!;
-    const refNo = nextReferenceNumber(db, 'LKL');
-    const id = crypto.randomUUID();
     const provCode = String(b.provinceCode || user.provinceCode || '31');
-    const mode = b.activityMode === 'daring' ? 'daring' : 'luring';
+    if ((user.role === 'duta' || user.role === 'koordinator_wilayah') && user.provinceCode && provCode !== user.provinceCode) {
+      res.status(403).json({ error: 'Anda hanya dapat mengirim LKL untuk provinsi asal Anda.' });
+      return;
+    }
 
     let proposalRef: string | null = null;
     if (b.proposalId) {
-      const p = db.prepare('SELECT reference_number FROM proposals WHERE id = ?').get(String(b.proposalId)) as { reference_number: string } | undefined;
-      if (p) proposalRef = p.reference_number;
+      const p = db.prepare('SELECT id, reference_number, status, province_code, applicant_personnel_id FROM proposals WHERE id = ?').get(String(b.proposalId)) as Record<string, unknown> | undefined;
+      if (!p) {
+        res.status(404).json({ error: 'Proposal rujukan tidak ditemukan.' });
+        return;
+      }
+      if (user.role === 'duta' && p.applicant_personnel_id !== user.personnelId && p.applicant_personnel_id !== user.id) {
+        res.status(403).json({ error: 'Proposal rujukan bukan milik akun Anda.' });
+        return;
+      }
+      if (user.role === 'koordinator_wilayah' && p.province_code !== user.provinceCode) {
+        res.status(403).json({ error: 'Proposal rujukan berada di luar wilayah provinsi Anda.' });
+        return;
+      }
+      if (String(p.status) !== 'disetujui') {
+        res.status(422).json({ error: 'Proposal rujukan harus berstatus disetujui sebelum LKL dapat dikirim.' });
+        return;
+      }
+      proposalRef = String(p.reference_number);
     }
+
+    const refNo = nextReferenceNumber(db, 'LKL');
+    const id = crypto.randomUUID();
+    const mode = b.activityMode === 'daring' ? 'daring' : 'luring';
 
     db.prepare(
       `INSERT INTO lkl_reports (
@@ -2338,10 +2637,69 @@ export function registerCoreRoutes(app: Express): void {
     res.status(201).json({ ok: true, id, referenceNumber: refNo });
   });
 
+  app.post('/api/lkl/:id/revise', requireAuth, requirePermission('lkl', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const lkl = db.prepare('SELECT * FROM lkl_reports WHERE id = ?').get(String(req.params.id)) as Record<string, unknown> | undefined;
+    if (!lkl) {
+      res.status(404).json({ error: 'LKL tidak ditemukan.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'duta' && lkl.submitter_personnel_id !== user.personnelId && lkl.submitter_personnel_id !== user.id) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'lkl', String(lkl.reference_number), 'ditolak', 'Duta mencoba merevisi LKL milik orang lain');
+      res.status(403).json({ error: 'Anda hanya dapat merevisi LKL milik sendiri.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== lkl.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'lkl', String(lkl.reference_number), 'ditolak', 'Koordinator mencoba merevisi LKL provinsi lain');
+      res.status(403).json({ error: 'LKL berada di luar wilayah provinsi Anda.' });
+      return;
+    }
+    if (!['perlu_revisi', 'draft'].includes(String(lkl.status))) {
+      res.status(409).json({ error: 'Revisi hanya dapat dikirim untuk LKL berstatus perlu revisi atau draft.' });
+      return;
+    }
+    const b = req.body ?? {};
+    const nextVersion = Number(lkl.version || 1) + 1;
+    db.prepare(
+      `UPDATE lkl_reports SET
+        version = ?,
+        activity_name = COALESCE(?, activity_name),
+        summary = COALESCE(?, summary),
+        outcomes = COALESCE(?, outcomes),
+        obstacles = COALESCE(?, obstacles),
+        follow_up = COALESCE(?, follow_up),
+        participant_count = COALESCE(?, participant_count),
+        pdf_file_id = COALESCE(?, pdf_file_id),
+        pdf_file_name = COALESCE(?, pdf_file_name),
+        photo_file_ids_json = COALESCE(?, photo_file_ids_json),
+        status = 'menunggu_pemeriksaan'
+       WHERE id = ?`
+    ).run(
+      nextVersion,
+      b.activityName ?? null,
+      b.summary ?? null,
+      b.outcomes ?? null,
+      b.obstacles ?? null,
+      b.followUp ?? null,
+      b.participantCount !== undefined ? Number(b.participantCount) : null,
+      b.pdfFileId ?? null,
+      b.pdfFileName ?? null,
+      Array.isArray(b.photoFileIds) ? JSON.stringify(b.photoFileIds) : null,
+      String(lkl.id)
+    );
+    writeAuditLog(db, user, 'REVISE_LKL', 'lkl', String(lkl.reference_number), 'berhasil', `Versi ${nextVersion}`);
+    res.json({ ok: true, version: nextVersion });
+  });
+
   app.post('/api/lkl/:id/review', requireAuth, requirePermission('lkl', 'review'), (req: AuthenticatedRequest, res: Response) => {
     const { decision, note } = req.body ?? {};
     if (!['diterima', 'perlu_revisi', 'ditolak'].includes(String(decision))) {
       res.status(422).json({ error: 'Keputusan harus diterima, perlu_revisi, atau ditolak.' });
+      return;
+    }
+    if ((decision === 'perlu_revisi' || decision === 'ditolak') && !String(note || '').trim()) {
+      res.status(422).json({ error: 'Alasan atau catatan perbaikan wajib diisi saat meminta revisi atau menolak LKL.' });
       return;
     }
     const db = getDb();
@@ -2352,7 +2710,12 @@ export function registerCoreRoutes(app: Express): void {
     }
     const user = req.authUser!;
     if (user.role === 'koordinator_wilayah' && user.provinceCode !== lkl.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'lkl', String(lkl.reference_number), 'ditolak', 'Koordinator mencoba memeriksa LKL provinsi lain');
       res.status(403).json({ error: 'Koordinator hanya dapat memeriksa LKL di provinsinya.' });
+      return;
+    }
+    if (lkl.submitter_personnel_id === user.personnelId || lkl.submitter_personnel_id === user.id) {
+      res.status(403).json({ error: 'Pengirim LKL tidak dapat memeriksa laporannya sendiri (pemisahan wewenang).' });
       return;
     }
     const now = new Date().toISOString();
@@ -2362,14 +2725,22 @@ export function registerCoreRoutes(app: Express): void {
 
     const submitterUser = db.prepare('SELECT id FROM users WHERE personnel_id = ?').get(String(lkl.submitter_personnel_id)) as { id: string } | undefined;
     if (submitterUser) {
-      db.prepare(
-        `INSERT INTO notifications (id, user_id, title, message, category, target_path, is_read, created_at)
-         VALUES (?, ?, ?, ?, 'lkl', '/laporan-kegiatan', 0, ?)`
-      ).run(crypto.randomUUID(), submitterUser.id, `Pemeriksaan LKL ${lkl.reference_number}: ${decision.replace(/_/g, ' ')}`, String(note || lkl.activity_name), now);
+      createNotificationIdempotent(db, {
+        userId: submitterUser.id,
+        title: `Pemeriksaan LKL ${lkl.reference_number}: ${String(decision).replace(/_/g, ' ')}`,
+        message: String(note || lkl.activity_name),
+        category: 'lkl',
+        targetPath: '/laporan-kegiatan',
+        eventKey: `lkl:${lkl.id}:${decision}:${now.slice(0, 16)}`,
+      });
+    }
+
+    if (decision === 'diterima') {
+      onLklApproved(db, lkl, user);
     }
 
     writeAuditLog(db, user, `REVIEW_LKL_${String(decision).toUpperCase()}`, 'lkl', String(lkl.reference_number), 'berhasil', String(note || ''));
-    writeActivityTimeline(db, 'LKL', `LKL ${lkl.reference_number} ${decision.replace(/_/g, ' ')}`, `${lkl.activity_name} diperiksa oleh ${user.fullName}.`, user.fullName, String(lkl.province_code), null, '/laporan-kegiatan');
+    writeActivityTimeline(db, 'LKL', `LKL ${lkl.reference_number} ${String(decision).replace(/_/g, ' ')}`, `${lkl.activity_name} diperiksa oleh ${user.fullName}.`, user.fullName, String(lkl.province_code), null, '/laporan-kegiatan');
     res.json({ ok: true });
   });
 
@@ -2416,13 +2787,18 @@ export function registerCoreRoutes(app: Express): void {
     const db = getDb();
     const user = req.authUser!;
     const provCode = String(b.provinceCode || user.provinceCode || '31');
+    if (user.role === 'koordinator_wilayah' && user.provinceCode && provCode !== user.provinceCode) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'coordinator_report', provCode, 'ditolak', 'Koordinator mencoba membuat laporan untuk provinsi lain');
+      res.status(403).json({ error: 'Koordinator hanya dapat membuat laporan untuk provinsinya sendiri.' });
+      return;
+    }
     const refNo = nextReferenceNumber(db, 'LKW');
     const id = crypto.randomUUID();
     const lklCnt = (db.prepare("SELECT COUNT(*) AS c FROM lkl_reports WHERE province_code = ? AND status = 'diterima'").get(provCode) as { c: number }).c;
 
     db.prepare(
-      `INSERT INTO coordinator_reports (id, reference_number, report_type, province_code, batch_id, coordinator_id, coordinator_name, period_label, personnel_condition, activities_summary, lkl_recap_count, obstacles, coaching_needs, follow_up_plan, pdf_file_id, pdf_file_name, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dikirim', ?)`
+      `INSERT INTO coordinator_reports (id, reference_number, report_type, province_code, batch_id, coordinator_id, coordinator_name, period_label, personnel_condition, activities_summary, lkl_recap_count, obstacles, coaching_needs, follow_up_plan, pdf_file_id, pdf_file_name, status, version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dikirim', 1, ?)`
     ).run(
       id, refNo, b.reportType === 'akhir' ? 'akhir' : 'bulanan', provCode, String(b.batchId || user.batchId || 'batch-3'),
       user.id, user.fullName, String(b.periodLabel), String(b.personnelCondition), String(b.activitiesSummary),
@@ -2435,10 +2811,68 @@ export function registerCoreRoutes(app: Express): void {
     res.status(201).json({ ok: true, id, referenceNumber: refNo });
   });
 
+  app.post('/api/coordinator-reports/:id/revise', requireAuth, requirePermission('laporan_koordinator', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const r = db.prepare('SELECT * FROM coordinator_reports WHERE id = ?').get(String(req.params.id)) as Record<string, unknown> | undefined;
+    if (!r) {
+      res.status(404).json({ error: 'Laporan koordinator tidak ditemukan.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== r.province_code) {
+      writeAuditLog(db, user, 'ACCESS_DENIED_IDOR', 'coordinator_report', String(r.reference_number), 'ditolak', 'Koordinator mencoba merevisi laporan provinsi lain');
+      res.status(403).json({ error: 'Laporan koordinator ini berada di luar wilayah provinsi Anda.' });
+      return;
+    }
+    if (String(r.status) !== 'perlu_revisi') {
+      res.status(409).json({ error: 'Revisi hanya dapat dikirim untuk laporan koordinator berstatus perlu revisi.' });
+      return;
+    }
+    const b = req.body ?? {};
+    const nextVersion = Number(r.version || 1) + 1;
+    db.prepare(
+      `UPDATE coordinator_reports SET
+        version = ?,
+        period_label = COALESCE(?, period_label),
+        personnel_condition = COALESCE(?, personnel_condition),
+        activities_summary = COALESCE(?, activities_summary),
+        obstacles = COALESCE(?, obstacles),
+        coaching_needs = COALESCE(?, coaching_needs),
+        follow_up_plan = COALESCE(?, follow_up_plan),
+        pdf_file_id = COALESCE(?, pdf_file_id),
+        pdf_file_name = COALESCE(?, pdf_file_name),
+        status = 'dikirim'
+       WHERE id = ?`
+    ).run(
+      nextVersion,
+      b.periodLabel ?? null,
+      b.personnelCondition ?? null,
+      b.activitiesSummary ?? null,
+      b.obstacles ?? null,
+      b.coachingNeeds ?? null,
+      b.followUpPlan ?? null,
+      b.pdfFileId ?? null,
+      b.pdfFileName ?? null,
+      String(r.id)
+    );
+    writeAuditLog(db, user, 'REVISE_COORDINATOR_REPORT', 'coordinator_report', String(r.reference_number), 'berhasil', `Versi ${nextVersion}`);
+    writeActivityTimeline(db, 'Laporan Wilayah', `Revisi Laporan ${r.reference_number}`, `${r.period_label} diperbaiki dan dikirim ulang oleh ${user.fullName}.`, user.fullName, String(r.province_code), String(r.batch_id), '/laporan-koordinator');
+    res.json({ ok: true, version: nextVersion });
+  });
+
   app.post('/api/coordinator-reports/:id/review', requireAuth, requirePermission('laporan_koordinator', 'review'), (req: AuthenticatedRequest, res: Response) => {
     const { decision, note } = req.body ?? {};
     if (!['diterima', 'perlu_revisi'].includes(String(decision))) {
       res.status(422).json({ error: 'Keputusan harus diterima atau perlu_revisi.' });
+      return;
+    }
+    if (decision === 'perlu_revisi' && !String(note || '').trim()) {
+      res.status(422).json({ error: 'Catatan perbaikan wajib diisi saat mengembalikan laporan koordinator.' });
+      return;
+    }
+    const user = req.authUser!;
+    if (user.role === 'koordinator_wilayah') {
+      res.status(403).json({ error: 'Pemeriksaan laporan koordinator dilakukan oleh Sekretariat Nasional / Admin.' });
       return;
     }
     const db = getDb();
@@ -2447,13 +2881,45 @@ export function registerCoreRoutes(app: Express): void {
       res.status(404).json({ error: 'Laporan koordinator tidak ditemukan.' });
       return;
     }
-    db.prepare('UPDATE coordinator_reports SET status = ?, review_note = ?, reviewed_by = ? WHERE id = ?').run(
+    if (r.coordinator_id === user.id) {
+      res.status(403).json({ error: 'Pembuat laporan tidak dapat mengesahkan laporannya sendiri.' });
+      return;
+    }
+    const now = new Date().toISOString();
+    db.prepare('UPDATE coordinator_reports SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?').run(
       String(decision),
       String(note || ''),
-      req.authUser!.fullName,
+      user.fullName,
+      now,
       String(r.id)
     );
-    writeAuditLog(db, req.authUser!, 'REVIEW_COORDINATOR_REPORT', 'coordinator_report', String(r.reference_number), 'berhasil', String(decision));
+    if (decision === 'diterima') {
+      if (String(r.report_type) === 'akhir') {
+        db.prepare('UPDATE provinces SET final_report_submitted = 1 WHERE code = ?').run(String(r.province_code));
+      } else {
+        db.prepare('UPDATE provinces SET monthly_report_submitted = 1 WHERE code = ?').run(String(r.province_code));
+      }
+      if (r.coordinator_id) {
+        createNotificationIdempotent(db, {
+          userId: String(r.coordinator_id),
+          title: `Laporan Koordinator ${r.reference_number} Diterima`,
+          message: `Laporan ${r.period_label} telah disahkan oleh ${user.fullName}.`,
+          category: 'laporan_koordinator',
+          targetPath: '/laporan-koordinator',
+          eventKey: `cr:${r.id}:diterima:${now.slice(0, 16)}`,
+        });
+      }
+    } else if (r.coordinator_id) {
+      createNotificationIdempotent(db, {
+        userId: String(r.coordinator_id),
+        title: `Laporan Koordinator ${r.reference_number} Perlu Revisi`,
+        message: String(note || ''),
+        category: 'laporan_koordinator',
+        targetPath: '/laporan-koordinator',
+        eventKey: `cr:${r.id}:perlu_revisi:${now.slice(0, 16)}`,
+      });
+    }
+    writeAuditLog(db, user, 'REVIEW_COORDINATOR_REPORT', 'coordinator_report', String(r.reference_number), 'berhasil', String(decision));
     res.json({ ok: true });
   });
 }

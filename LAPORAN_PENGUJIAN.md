@@ -1,6 +1,6 @@
 # Laporan Pengujian & Audit Kualitas — SATU DPBI
 
-Dokumen ini mencatat hasil verifikasi teknis dan pengujian fungsional yang dijalankan **setelah perubahan kode terakhir** pada platform **SATU DPBI** (*Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia*). Seluruh status dilaporkan secara objektif menggunakan label **LULUS**, **GAGAL**, atau **BELUM DIUJI**.
+Dokumen ini mencatat hasil verifikasi teknis, audit keamanan, dan pengujian fungsional yang dijalankan **setelah perubahan kode terakhir** pada platform **SATU DPBI** (*Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia*). Seluruh status dilaporkan secara objektif menggunakan label **LULUS**, **GAGAL**, atau **BELUM DIUJI**.
 
 ---
 
@@ -10,67 +10,54 @@ Dokumen ini mencatat hasil verifikasi teknis dan pengujian fungsional yang dijal
 |---|---|---|---|
 | Pemeriksaan Tipe TypeScript (`npm run lint`) | `tsc --noEmit` | **LULUS** | 0 galat tipe di seluruh `src/` dan `server/`. |
 | Build Produksi (`npm run build`) | Vite 8 + esbuild (`compile_applet`) | **LULUS** | Berhasil mengompilasi bundel klien `dist/` dan server produksi `server.js`. |
-| Pengujian Unit Logika Domain & Router (`npm test`) | `npx --yes tsx --test src/lib/domain.test.ts` | **LULUS** | **12 dari 12** sub-tes lulus (38 provinsi, 6 Bidang resmi, pemisahan domisili vs penugasan Kab/Kota, sanitasi statistik publik, bounding box & proyeksi GeoJSON, RBAC, delegasi, approval matrix, verifikasi koordinat, kalkulator alumni 30 hari, kelengkapan profil + nomor surat, dan router URL bersih termasuk rute legal/error). |
-| Uji Kesehatan API (`/api/health`) | `curl http://localhost:3000/api/health` | **LULUS** | Mengembalikan HTTP 200 JSON `{"ok":true,"service":"SATU DPBI","mode":"DEMO_SIMULASI"}`. |
-| Uji UI/UX, Footer Hak Cipta, Peta GeoJSON, CMS, RBAC & Responsivitas Browser Nyata (Putaran 1–3) | Chromium Headless (`playwright-cli`) | **LULUS** | **0 galat konsol** (`Errors: 0`), diuji pada desktop `1440x900` dan seluler `390x844` tanpa luapan horizontal (`scrollWidth <= innerWidth`). |
-| Kelengkapan Dokumentasi (`/docs/` + Root) | Audit Direktori | **LULUS** | 17 dokumen teknis & panduan di `docs/` plus `README.md`, `CHANGELOG.md`, `LAPORAN_PENGUJIAN.md`, dan `PANDUAN_DEPLOYMENT_SATU_DPBI.md`. |
+| Audit Dependensi | `bun audit` | **LULUS** | `No vulnerabilities found (checked 341 packages)`. |
+| Pengujian Unit & Integrasi Keamanan | `npx --yes tsx --test src/lib/domain.test.ts server/api.security.test.ts` | **LULUS** | **20 dari 20** sub-tes lulus (16 unit domain/RBAC/CSV/email + 4 integrasi penuh API keamanan, sesi, IDOR, alur kerja terhubung & Pusat Email). |
+| Uji Kesehatan API (`/api/health`) | `GET http://localhost:3000/api/health` | **LULUS** | Mengembalikan HTTP 200 JSON `{"ok":true,"service":"SATU DPBI","mode":"DEMO_SIMULASI"}`. |
+| Uji UI/UX, Pusat Persetujuan, Pusat Email, RBAC & Responsivitas Browser Nyata | Chromium Headless (`playwright-cli`) | **LULUS** | **0 galat konsol** (`Errors: 0`), diuji pada desktop `1440x900` (Light & Dark Mode) serta seluler `390x844` tanpa luapan horizontal (`scrollWidth: 390`, `overflow390: false`). |
 | Pengemasan Arsip Rilis Bersih (`npm run package:zip`) | `scripts/create-release-zip.mjs` | **LULUS** | Menghasilkan `satu-dpbi-paket-final.zip` yang telah diverifikasi bebas `node_modules/`, `.db*`, `.env`, `dist/`, `storage/`, dan `.playwright-cli/`. |
-| Deployment Langsung Eksternal (GitHub, Vercel, Domainesia, ArenHost) | Infrastruktur Eksternal | **BELUM DIUJI** | Memerlukan kredensial akun produksi, domain, dan server hosting Node.js/MySQL milik organisasi DPBI. |
+| Pengiriman Email SMTP Produksi & Deployment Eksternal | Infrastruktur Eksternal | **BELUM DIUJI** | Pusat Email beroperasi dalam mode **Sandbox Outbox (SQLite)** sampai `SMTP_HOST` dikonfigurasi; deployment GitHub/Vercel/Domainesia/ArenHost membutuhkan kredensial produksi organisasi. |
 
 ---
 
-## 2. Rincian Hasil Pengujian Unit (`src/lib/domain.test.ts`)
+## 2. Rincian Hasil Pengujian Otomatis (`20/20 LULUS`)
 
-Seluruh **12 sub-tes** pada `npx --yes tsx --test src/lib/domain.test.ts` lulus (`pass 12`, `fail 0`):
-
-1. `supports all 38 official Indonesian provinces` (`getProvinceCount() === 38`) — **LULUS**
-2. `defines all 6 official national Bidang and matches proposals accurately` (`OFFICIAL_BIDANGS`, 6 Bidang resmi tanpa duplikasi Kemendikdasmen aktif) — **LULUS**
+### A. Pengujian Unit Domain & RBAC (`src/lib/domain.test.ts` — 16 sub-tes)
+1. `supports all 38 official Indonesian provinces` — **LULUS**
+2. `defines all 6 official national Bidang and matches proposals accurately` — **LULUS**
 3. `distinguishes Duta domicile vs assignment vs coordinator/activity coverage in regencies` — **LULUS**
-4. `sanitizes public statistics payload based on privacy approval flag` (nol PII pada payload publik) — **LULUS**
+4. `sanitizes public statistics payload based on privacy approval flag` — **LULUS**
 5. `computes GeoJSON bounding boxes and SVG path projections faithfully` — **LULUS**
 6. `RBAC isolates Duta and Alumni from national system/command center actions` — **LULUS**
 7. `Delegation grants temporary permission only within active date window` — **LULUS**
 8. `Approval matrix routes proposals accurately without overloading Super Admin` — **LULUS**
 9. `Coordinator province coordinate verification accurately checks boundaries` — **LULUS**
 10. `Alumni 30-day archive window calculates reminders and expiration accurately` — **LULUS**
-11. `Profile completeness & reference number generator produce exact institutional values` (`DPBI/PROP/2026/0042`) — **LULUS**
+11. `Profile completeness & reference number generator produce exact institutional values` — **LULUS**
 12. `Clean parameterized router resolves public paths, CMS route, deep links, and active nav bases safely` — **LULUS**
+13. `hasScopedPermission blocks cross-province Korwil actions and enforces province-scoped delegation windows` — **LULUS**
+14. `csvSafeCell escapes spreadsheet formula prefixes and embedded quotes safely` — **LULUS**
+15. `Email template placeholder validation & rendering accept only allowlisted variables` — **LULUS**
+16. `Approval Center and Email Center routes and BASE_ROLE_PERMISSIONS enforce role boundaries` — **LULUS**
+
+### B. Pengujian Keamanan & Alur Kerja API Terintegrasi (`server/api.security.test.ts` — 4 sub-tes)
+1. **Keamanan Sesi & Anti Brute-Force**: Batas TTL sesi maksimal 24 jam, inspeksi sesi aktif & pencabutan paksa seluruh sesi oleh admin (`419`), pencatatan `LOGIN_FAILED`, dan penguncian otomatis (`429`) setelah 5 percobaan gagal — **LULUS**
+2. **Isolasi IDOR & Batas Provinsi**: Penolakan akses `duta` ke `audit_logs` & berkas privat pengguna lain (`403`), penolakan `koordinator_wilayah` lintas provinsi (`403`), dan penegakan delegasi bercakupan provinsi — **LULUS**
+3. **Alur Kerja Terhubung End-to-End**: Cek duplikasi proposal -> persetujuan proposal -> pembuatan otomatis agenda kalender + 4 tugas bertahap -> sinkronisasi perubahan jadwal -> LKL wajib menautkan proposal disetujui -> revisi & penerimaan LKL menyelesaikan tugas terkait -> revisi laporan koordinator -> persetujuan permintaan akun menghasilkan token undangan aktif -> analitik dashboard `7/30/90` hari — **LULUS**
+4. **Pusat Email & Pengiriman Massal**: Deduplikasi audiens, validasi placeholder, pembatasan izin `email:publish`, mode `sandbox_outbox`, penjadwalan & pembatalan (`409` setelah terkirim), retry log gagal, dan perlindungan CSV — **LULUS**
 
 ---
 
-## 3. Rincian Pengujian Browser Nyata (`playwright-cli` di `http://localhost:3000`)
+## 3. Rincian Verifikasi Browser Nyata (`playwright-cli`)
 
-### A. Putaran 1 — Pemisahan 3 Zona, Peran Bidang & Responsivitas
-1. **Zona 1 Website Publik (`/`, `/tentang`, `/wilayah`, `/bantuan`)**: Tampil sebagai halaman publik institusional independen dengan logo resmi DPBI, nol PII peserta didik, tanpa Demo Switcher di beranda, serta toggle mode terang/gelap konsisten (`1440x900`) — **LULUS**
-2. **Responsivitas Seluler (`390x844`)**: Navigasi drawer dan kartu informasi pada `/` terender rapi tanpa luapan horizontal (`scrollWidth === innerWidth`) — **LULUS**
-3. **Zona 2 Portal Masuk (`/login`)**: Demo Switcher terisolasi khusus di `/login`, formulir masuk dan tautan pemulihan kata sandi/aktivasi undangan berjalan lancar — **LULUS**
-4. **Pengurus Nasional per Bidang (`/dashboard`, `/proposal`)**: Filter `Fokus Bidang Saya` dan `Hanya Bidang Saya` menyaring antrean sesuai Bidang Pendidikan & Kebudayaan — **LULUS**
-5. **Super Admin (`/wilayah`, `/personalia/tambah`, `/tugas`, `/dokumen`, `/pengaturan/cms`)**: Seluruh rute utama terbuka tanpa galat konsol — **LULUS**
-
-### B. Temuan Kritik Putaran 1 & Perbaikan Sebelum Putaran 2
-1. **Kontrol Orientasi Cetak A4 (`A4PrintEngine.tsx`)**: Mengganti tombol siklus tunggal menjadi tombol tersegmentasi eksplisit **A4 Potret** dan **A4 Lanskap** dengan atribut `aria-pressed` agar orientasi dapat dipilih langsung (dan berlaku penuh termasuk pada pratinjau sertifikat).
-2. **Padding Kanan Dropdown `<select>` (`PublicRegionsPage.tsx`, `RegionsPage.tsx`, `SystemAndSettingsPages.tsx`)**: Menambah `pl-3 pr-8` serta `min-w` proporsional agar ikon panah bawaan browser tidak menumpuk teks `"Semua Kepulauan"` maupun `"Tampilkan Jumlah Agregat Duta"`.
-3. **Atribut Eksplisit Kode GeoJSON (`IndonesiaMap.tsx`)**: Menambahkan `data-province-code` dan `data-regency-code` pada elemen `<g>` SVG untuk mempermudah inspeksi aksesibilitas dan pengujian drilldown.
-4. **Baris Tab Pengaturan & Tinggi Textarea CMS (`SystemAndSettingsPages.tsx`)**: Merapikan label 8 tab agar muat sempurna dalam satu baris horizontal pada `1440px` tanpa terpotong di tepi kanan, serta memperbesar `<textarea rows={5}>` pada editor CMS agar teks multi-paragraf terbaca utuh.
-
-### C. Putaran 2 — Verifikasi Pasca-Perbaikan
-1. **Drilldown Peta GeoJSON (`/wilayah`, `1440x900`)**: Klik provinsi Jawa Barat (`[data-province-code="32"]`) lalu klik `Buka Peta Kabupaten/Kota` merender seluruh 27 poligon Kab/Kota secara akurat; padding dropdown `"Semua Kepulauan"` lega — **LULUS**
-2. **Pratinjau Cetak A4 (`A4PrintModal` pada `/proposal/prop-1`)**: Tombol **A4 Potret** dan **A4 Lanskap** tampil berdampingan, mengaktifkan status `aria-pressed="true"` saat diklik dan mengubah lebar lembar A4 ke mode lanskap — **LULUS**
-3. **Formulir Personalia Bertingkat (`/personalia/tambah` Langkah `2. Pendidikan & Domisili`)**: Dropdown berjenjang Provinsi, Kabupaten/Kota, Kecamatan, Desa/Kelurahan beserta opsi input manual terender bersih — **LULUS**
-4. **Alur CMS Live & Tata Letak Tab Pengaturan (`/pengaturan/cms` -> `/`)**: Penyuntingan `hero_subtitle` disimpan via UI, langsung tayang di halaman depan `/`, lalu dipulihkan kembali ke teks institusional baku; seluruh 8 tab pengaturan muat dalam 1 baris tanpa overflow (`tabOverflow: false`) dan 0 galat konsol — **LULUS**
-
-### D. Putaran 3 — Penyempurnaan Footer Hak Cipta, Rute Hukum & Halaman Status
-1. **Footer Institusional 4 Kolom & Strip Hak Cipta (`PublicFooter`)**: Terverifikasi pada `/` (`1440x900` dan seluler `390x844` tanpa overflow horizontal) menampilkan identitas resmi DPBI, navigasi portal, tautan `/privasi`, `/ketentuan`, modal ringkasan perlindungan data, kontak `sekretariat@dpbi.or.id`, pemberitahuan hak cipta & kekayaan intelektual DPBI, serta atribusi geospasial BIG/BPS (`MIT / CC BY 4.0`) — **LULUS**
-2. **Rute Kebijakan Privasi & Hak Cipta (`/privasi`, `/ketentuan`, `/hak-cipta`)**: Terverifikasi transisi langsung dalam mode gelap (`Aktifkan mode gelap`) beserta muat ulang halaman langsung (*deep-link reload*) pada `/ketentuan` tetap merender utuh tanpa raw markdown maupun fallback 404 — **LULUS**
-3. **Rute Error & Pemeliharaan Langsung (`/403`, `/pemeliharaan`)**: Terverifikasi rute status langsung merender `ErrorView` 403 dan 503 pemeliharaan terjadwal dengan aksi kembali yang jelas — **LULUS**
-4. **Footer Hak Cipta Portal Internal (`AppShell`)**: Setelah masuk melalui `/login` ke `/dashboard`, footer internal ringkas di bagian bawah shell menampilkan pemberitahuan hak cipta serta tautan aktif `/privasi`, `/ketentuan`, dan `/bantuan` yang membuka halaman terkait di dalam `AppShell` dengan 0 galat konsol — **LULUS**
+- **Putaran 1**: Verifikasi visual `/login`, `/dashboard` (Light & Dark Mode), `/persetujuan`, `/email`, `/proposal`, `/laporan-kegiatan`, `/laporan-koordinator`, `/pengaturan/pengguna`, `/pengaturan`, serta mobile `390x844`. Teridentifikasi dan diperbaiki:
+  1. Tab filter `/persetujuan` overflow pada `390px` -> ditambahkan pembungkus responsif `flex-wrap`.
+  2. Nilai fallback sintetis `14.5 jam` pada analitik jendela kosong `7 Hari` -> diganti menjadi `null` dengan label jujur `"Belum ada"`.
+  3. Pemisah `•` di awal ringkasan LKL daring di antrean persetujuan -> dibersihkan dengan `.filter(Boolean).join(' • ')`.
+  4. Penyiapan 4 templat email resmi DPBI pada database demo yang sudah ada (`seedDefaultEmailTemplates`).
+- **Putaran 2 (Pasca-Perbaikan)**: Verifikasi ulang `/dashboard`, `/email` (`Templat Resmi (4)`), dan `/persetujuan` pada `390x844` (`scrollWidth: 390`, `overflow390: false`) dengan `0` galat dan `0` peringatan konsol.
 
 ---
 
 ## 4. Daftar Item Belum Diuji (Lingkungan Produksi Eksternal)
-
-Item berikut hanya dapat diverifikasi saat organisasi melakukan tahap deployment produksi sesuai `docs/DEPLOYMENT.md` dan `docs/DEPLOYMENT-ARENHOST.md`:
-- Push repositori ke akun GitHub organisasi DPBI & eksekusi workflow CI pada runner GitHub — **BELUM DIUJI**
-- Build & penayangan SPA pada akun Vercel produksi beserta SSL & `VITE_API_BASE_URL` — **BELUM DIUJI**
-- Propagasi DNS `A`/`CNAME` pada panel Domainesia — **BELUM DIUJI**
-- Pengaktifan proses Node.js (`>= 22.x`), impor `database/schema_mysql.sql`, serta uji cookie lintas subdomain HTTPS pada server/VPS ArenHost — **BELUM DIUJI**
+- Pengiriman email keluar sungguhan melalui `SMTP_HOST` produksi — **BELUM DIUJI** (membutuhkan kredensial SMTP organisasi).
+- Push repositori, eksekusi CI eksternal, deployment Vercel/Domainesia/ArenHost, serta migrasi MySQL produksi — **BELUM DIUJI** (membutuhkan kredensial hosting dan domain organisasi).

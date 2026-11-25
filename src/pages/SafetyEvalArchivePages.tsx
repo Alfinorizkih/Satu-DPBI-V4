@@ -724,7 +724,7 @@ export function ArchivePage() {
                   <p className="text-slate-500 font-mono text-[11px]">{String(d.document_number)}</p>
                 </div>
                 {d.file_id ? (
-                  <a href={`/api/files/${d.file_id}?download=1`} target="_blank" rel="noreferrer" className="text-[#0EA5E9] font-semibold shrink-0 hover:underline">
+                  <a href={apiUrl(`/api/files/${d.file_id}?download=1`)} target="_blank" rel="noreferrer" className="text-[#0EA5E9] font-semibold shrink-0 hover:underline">
                     Unduh PDF
                   </a>
                 ) : null}

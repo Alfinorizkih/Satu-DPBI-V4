@@ -8,6 +8,7 @@ import { getDb, IS_DEMO_MODE } from './server/db';
 import { ensureSeeded } from './server/seed';
 import { registerCoreRoutes } from './server/routes';
 import { registerModuleRoutes } from './server/routes_modules';
+import { registerWorkflowAndEmailRoutes } from './server/routes_workflow_email';
 import { recordSystemError, requireSafeOrigin } from './server/security';
 
 async function startServer() {
@@ -40,10 +41,20 @@ async function startServer() {
   });
 
   // Security headers
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-XSS-Protection', '0');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+    if (process.env.NODE_ENV === 'production') {
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self';"
+      );
+      if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      }
+    }
     next();
   });
 
@@ -69,6 +80,7 @@ async function startServer() {
   // Register API Routes
   registerCoreRoutes(app);
   registerModuleRoutes(app);
+  registerWorkflowAndEmailRoutes(app);
 
   // API 404 handler (prevent falling through to HTML for unknown /api/* calls)
   app.use('/api', (_req, res) => {

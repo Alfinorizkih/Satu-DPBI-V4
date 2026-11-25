@@ -6,9 +6,12 @@ export const IS_DEMO_MODE =
   process.env.DEMO_MODE === 'true' ||
   (process.env.DEMO_MODE === undefined && process.env.NODE_ENV !== 'production');
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-export const PRIVATE_STORAGE_DIR = path.resolve(process.cwd(), 'storage', 'private');
-export const BACKUP_STORAGE_DIR = path.resolve(process.cwd(), 'storage', 'backups');
+const DATA_ROOT = process.env.SATU_DPBI_DATA_ROOT
+  ? path.resolve(process.env.SATU_DPBI_DATA_ROOT)
+  : process.cwd();
+const DATA_DIR = path.resolve(DATA_ROOT, 'data');
+export const PRIVATE_STORAGE_DIR = path.resolve(DATA_ROOT, 'storage', 'private');
+export const BACKUP_STORAGE_DIR = path.resolve(DATA_ROOT, 'storage', 'backups');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PRIVATE_STORAGE_DIR, { recursive: true });
@@ -707,45 +710,140 @@ function initSchema(db: DatabaseSync): void {
       is_published INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS file_access_grants (
+      id TEXT PRIMARY KEY,
+      file_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      province_code TEXT,
+      module TEXT NOT NULL DEFAULT 'umum',
+      created_at TEXT NOT NULL,
+      UNIQUE(file_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_grants_file ON file_access_grants(file_id);
+    CREATE INDEX IF NOT EXISTS idx_file_grants_user ON file_access_grants(user_id);
+
+    CREATE TABLE IF NOT EXISTS email_templates (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS email_campaigns (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      template_id TEXT,
+      subject TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      audience_filter_json TEXT NOT NULL DEFAULT '{}',
+      delivery_mode TEXT NOT NULL DEFAULT 'sandbox_outbox',
+      status TEXT NOT NULL DEFAULT 'draft',
+      total_recipients INTEGER NOT NULL DEFAULT 0,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      scheduled_at TEXT,
+      sent_at TEXT,
+      created_by TEXT NOT NULL,
+      created_by_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS email_logs (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      recipient_user_id TEXT,
+      recipient_email TEXT NOT NULL,
+      recipient_name TEXT NOT NULL DEFAULT '',
+      subject_rendered TEXT NOT NULL,
+      body_rendered TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'terantre_outbox',
+      delivery_mode TEXT NOT NULL DEFAULT 'sandbox_outbox',
+      error_message TEXT,
+      provider_message_id TEXT,
+      sent_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_logs_campaign ON email_logs(campaign_id);
   `);
 
   // Safe idempotent column migrations for existing databases
-  const personnelCols = db.prepare('PRAGMA table_info(personnel)').all() as { name: string }[];
-  if (!personnelCols.some((c) => c.name === 'avatar_file_id')) {
-    db.exec('ALTER TABLE personnel ADD COLUMN avatar_file_id TEXT;');
-  }
-  if (!personnelCols.some((c) => c.name === 'assignment_province_code')) {
-    db.exec('ALTER TABLE personnel ADD COLUMN assignment_province_code TEXT;');
-  }
-  if (!personnelCols.some((c) => c.name === 'regency_code')) {
-    db.exec('ALTER TABLE personnel ADD COLUMN regency_code TEXT;');
+  const addColumnIfMissing = (table: string, col: string, ddl: string) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl};`);
+    }
+  };
+
+  addColumnIfMissing('personnel', 'avatar_file_id', 'TEXT');
+  addColumnIfMissing('personnel', 'assignment_province_code', 'TEXT');
+  addColumnIfMissing('personnel', 'regency_code', 'TEXT');
+
+  addColumnIfMissing('users', 'notification_prefs_json', "TEXT DEFAULT '{}'");
+
+  addColumnIfMissing('provinces', 'logo_file_id', 'TEXT');
+  addColumnIfMissing('provinces', 'description', 'TEXT');
+
+  addColumnIfMissing('tasks', 'attachment_file_id', 'TEXT');
+  addColumnIfMissing('tasks', 'attachment_file_name', 'TEXT');
+  addColumnIfMissing('tasks', 'proposal_id', 'TEXT');
+  addColumnIfMissing('tasks', 'lkl_id', 'TEXT');
+  addColumnIfMissing('tasks', 'event_id', 'TEXT');
+  addColumnIfMissing('tasks', 'category', "TEXT DEFAULT 'umum'");
+
+  addColumnIfMissing('announcements', 'is_public', 'INTEGER NOT NULL DEFAULT 0');
+
+  addColumnIfMissing('proposals', 'sla_due_at', 'TEXT');
+  addColumnIfMissing('proposals', 'escalated_to', 'TEXT');
+  addColumnIfMissing('proposals', 'escalated_at', 'TEXT');
+  addColumnIfMissing('proposals', 'cancelled_reason', 'TEXT');
+
+  addColumnIfMissing('calendar_events', 'proposal_id', 'TEXT');
+  addColumnIfMissing('calendar_events', 'task_id', 'TEXT');
+
+  addColumnIfMissing('evaluations', 'lkl_id', 'TEXT');
+
+  addColumnIfMissing('coordinator_reports', 'reviewed_at', 'TEXT');
+  addColumnIfMissing('coordinator_reports', 'version', 'INTEGER NOT NULL DEFAULT 1');
+
+  addColumnIfMissing('documents', 'owner_user_id', 'TEXT');
+
+  addColumnIfMissing('notifications', 'event_key', 'TEXT');
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_event_key ON notifications(user_id, event_key) WHERE event_key IS NOT NULL;'
+  );
+
+  // Enforce hard 24h ceiling on any pre-existing session_ttl_hours value
+  const existingTtl = db
+    .prepare("SELECT value FROM system_settings WHERE key = 'session_ttl_hours'")
+    .get() as { value: string } | undefined;
+  if (existingTtl) {
+    const parsedTtl = Number(existingTtl.value);
+    if (!Number.isFinite(parsedTtl) || parsedTtl > 24 || parsedTtl < 1) {
+      const clamped = String(Math.max(1, Math.min(24, Number.isFinite(parsedTtl) ? Math.round(parsedTtl) : 24)));
+      db.prepare("UPDATE system_settings SET value = ?, updated_at = ? WHERE key = 'session_ttl_hours'").run(
+        clamped,
+        new Date().toISOString()
+      );
+    }
   }
 
-  const userCols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
-  if (!userCols.some((c) => c.name === 'notification_prefs_json')) {
-    db.exec("ALTER TABLE users ADD COLUMN notification_prefs_json TEXT DEFAULT '{}';");
-  }
-
-  const provCols = db.prepare('PRAGMA table_info(provinces)').all() as { name: string }[];
-  if (!provCols.some((c) => c.name === 'logo_file_id')) {
-    db.exec('ALTER TABLE provinces ADD COLUMN logo_file_id TEXT;');
-  }
-  if (!provCols.some((c) => c.name === 'description')) {
-    db.exec('ALTER TABLE provinces ADD COLUMN description TEXT;');
-  }
-
-  const taskCols = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
-  if (!taskCols.some((c) => c.name === 'attachment_file_id')) {
-    db.exec('ALTER TABLE tasks ADD COLUMN attachment_file_id TEXT;');
-  }
-  if (!taskCols.some((c) => c.name === 'attachment_file_name')) {
-    db.exec('ALTER TABLE tasks ADD COLUMN attachment_file_name TEXT;');
-  }
-
-  const annCols = db.prepare('PRAGMA table_info(announcements)').all() as { name: string }[];
-  if (!annCols.some((c) => c.name === 'is_public')) {
-    db.exec('ALTER TABLE announcements ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0;');
-  }
+  // Record schema migration version cleanly
+  const migNow = new Date().toISOString();
+  const migStmt = db.prepare('INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)');
+  migStmt.run(1, 'baseline_satu_dpbi_v4', migNow);
+  migStmt.run(2, 'security_hardening_file_grants_and_24h_session_cap', migNow);
+  migStmt.run(3, 'connected_workflow_linkage_and_email_center', migNow);
 }
 
 export function nextReferenceNumber(

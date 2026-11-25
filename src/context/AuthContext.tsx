@@ -1,12 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { apiGet, apiPost, setApiHandlers } from '../lib/api';
-import type { AuthUser, ModuleCode, PermissionAction } from '../lib/types';
+import type { AuthUser, ModuleCode, PermissionAction, ToastVariant } from '../lib/types';
 import { hasPermission } from '../lib/rbac';
 import { getRouteTitle, matchPrivateRoute, normalizePathname } from '../lib/routes';
 
 interface ToastItem {
   id: string;
-  type: 'success' | 'error' | 'info';
+  type: ToastVariant;
   message: string;
 }
 
@@ -46,6 +47,8 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/pengaturan/pengguna': 'Manajemen Pengguna',
   '/pengaturan/hak-akses': 'Hak Akses & Peran (RBAC)',
   '/pengaturan/cms': 'CMS Portal Publik & Bantuan',
+  '/persetujuan': 'Pusat Persetujuan Nasional',
+  '/email': 'Pusat Email & Pengiriman Massal',
   '/bantuan': 'Pusat Bantuan Internal',
 };
 
@@ -73,7 +76,9 @@ interface AuthContextValue {
   dismissOnboarding: () => void;
   logout: () => Promise<void>;
   can: (module: ModuleCode, action?: PermissionAction) => boolean;
-  notify: (message: string, type?: 'success' | 'error' | 'info') => void;
+  notify: (message: string, type?: ToastVariant, options?: { durationMs?: number }) => string;
+  dismissToast: (id: string) => void;
+  updateToast: (id: string, message: string, type?: ToastVariant, options?: { durationMs?: number }) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -125,13 +130,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const notify = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = `${Date.now()}-${Math.random()}`;
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
+  const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismissToast = useCallback((id: string) => {
+    const existing = toastTimersRef.current.get(id);
+    if (existing) {
+      clearTimeout(existing);
+      toastTimersRef.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const scheduleToastDismiss = useCallback(
+    (id: string, type: ToastVariant, durationMs?: number) => {
+      const existing = toastTimersRef.current.get(id);
+      if (existing) {
+        clearTimeout(existing);
+        toastTimersRef.current.delete(id);
+      }
+      if (type === 'loading' || durationMs === 0) return;
+      const ms = durationMs ?? (type === 'error' || type === 'warning' ? 8000 : 4500);
+      const timer = setTimeout(() => {
+        toastTimersRef.current.delete(id);
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, ms);
+      toastTimersRef.current.set(id, timer);
+    },
+    []
+  );
+
+  const notify = useCallback(
+    (message: string, type: ToastVariant = 'info', options?: { durationMs?: number }): string => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      setToasts((prev) => [...prev, { id, type, message }].slice(-4));
+      scheduleToastDismiss(id, type, options?.durationMs);
+      return id;
+    },
+    [scheduleToastDismiss]
+  );
+
+  const updateToast = useCallback(
+    (id: string, message: string, type: ToastVariant = 'info', options?: { durationMs?: number }) => {
+      setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, message, type } : t)));
+      scheduleToastDismiss(id, type, options?.durationMs);
+    },
+    [scheduleToastDismiss]
+  );
 
   useEffect(() => {
     setApiHandlers({
@@ -332,6 +376,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         can,
         notify,
+        dismissToast,
+        updateToast,
       }}
     >
       {children}
@@ -340,21 +386,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
         className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"
       >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className={`pointer-events-auto rounded-xl px-4 py-3 text-sm font-medium shadow-lg border backdrop-blur-md transition-all ${
-              t.type === 'success'
-                ? 'bg-emerald-50/95 dark:bg-emerald-950/90 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
-                : t.type === 'error'
-                ? 'bg-rose-50/95 dark:bg-rose-950/90 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-100'
-                : 'bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100'
-            }`}
-          >
-            {t.message}
-          </div>
-        ))}
+        {toasts.map((t) => {
+          const isAlert = t.type === 'error' || t.type === 'warning';
+          const Icon =
+            t.type === 'success'
+              ? CheckCircle2
+              : t.type === 'error'
+              ? AlertCircle
+              : t.type === 'warning'
+              ? AlertTriangle
+              : t.type === 'loading'
+              ? Loader2
+              : Info;
+          const styleClass =
+            t.type === 'success'
+              ? 'bg-emerald-50/95 dark:bg-emerald-950/95 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
+              : t.type === 'error'
+              ? 'bg-rose-50/95 dark:bg-rose-950/95 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-100'
+              : t.type === 'warning'
+              ? 'bg-amber-50/95 dark:bg-amber-950/95 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-100'
+              : 'bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100';
+          return (
+            <div
+              key={t.id}
+              role={isAlert ? 'alert' : 'status'}
+              className={`pointer-events-auto rounded-xl px-3.5 py-3 text-xs sm:text-sm font-medium shadow-lg border backdrop-blur-md transition-all flex items-start gap-2.5 ${styleClass}`}
+            >
+              <Icon
+                className={`w-4 h-4 shrink-0 mt-0.5 ${t.type === 'loading' ? 'animate-spin text-[#0EA5E9]' : ''}`}
+                aria-hidden="true"
+              />
+              <span className="flex-1 leading-snug">{t.message}</span>
+              <button
+                type="button"
+                onClick={() => dismissToast(t.id)}
+                aria-label="Tutup notifikasi"
+                className="p-1 -mr-1 -mt-0.5 rounded-lg opacity-65 hover:opacity-100 transition-opacity shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </AuthContext.Provider>
   );

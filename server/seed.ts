@@ -171,6 +171,8 @@ export function ensureSeeded(db: DatabaseSync): void {
     ['eval_weight_timeliness', '25'],
     ['eval_weight_quality', '25'],
     ['eval_weight_coordination', '20'],
+    ['session_ttl_hours', '24'],
+    ['idle_timeout_minutes', '45'],
   ];
   const sStmt = db.prepare('INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)');
   if (settingsCount === 0) {
@@ -179,6 +181,8 @@ export function ensureSeeded(db: DatabaseSync): void {
     }
   } else {
     sStmt.run('public_show_duta_count', 'true', now);
+    sStmt.run('session_ttl_hours', '24', now);
+    sStmt.run('idle_timeout_minutes', '45', now);
   }
 
   // 2b. Always seed CMS Public Contents & Help Center Articles if empty
@@ -327,6 +331,7 @@ export function ensureSeeded(db: DatabaseSync): void {
     ];
     const rUpd = db.prepare("UPDATE regencies SET status = ?, coordinator_name = COALESCE(coordinator_name, ?) WHERE code = ? AND status = 'belum_terbentuk'");
     for (const [rc, st, cn] of activeRegs) rUpd.run(st, cn, rc);
+    seedDefaultEmailTemplates(db, now);
     return;
   }
 
@@ -866,4 +871,58 @@ export function ensureSeeded(db: DatabaseSync): void {
   tlStmt.run('tl-1', 'Proposal', 'Proposal DPBI/PROP/2026/0001 Disetujui', 'Pekan Literasi Aksara Sunda Pelajar Jawa Barat memperoleh persetujuan nasional.', '32', 'Niken Larasati (Simulasi)', '/proposal', now);
   tlStmt.run('tl-2', 'LKL', 'LKL DPBI/LKL/2026/0001 Diterima', 'Klinik Aksara Sunda Tahap 1 di SMAN 1 Bogor diterima dengan 64 peserta pelajar.', '32', 'Siti Nurhaliza Putri (Simulasi)', '/laporan-kegiatan', now);
   tlStmt.run('tl-3', 'Dokumen', 'SOP Perlindungan Peserta v2.1 Diterbitkan', 'Pembaruan standar pendampingan peserta di bawah 18 tahun berlaku nasional.', null, 'Dr. Hendra Wijaya (Simulasi)', '/dokumen', now);
+
+  // Backfill file_access_grants for seeded files
+  db.prepare(
+    `INSERT OR IGNORE INTO file_access_grants (id, file_id, user_id, province_code, module, created_at)
+     SELECT 'fg-' || id, id, uploaded_by, NULL, module, created_at FROM stored_files`
+  ).run();
+
+  seedDefaultEmailTemplates(db, now);
+}
+
+function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
+  const tplCount = (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get() as { c: number }).c;
+  if (tplCount === 0) {
+    const tEmailStmt = db.prepare(
+      `INSERT OR IGNORE INTO email_templates (id, code, name, category, subject, body_text, is_active, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
+    );
+    tEmailStmt.run(
+      'etpl-1',
+      'undangan_akun',
+      'Undangan Aktivasi Akun Resmi SATU DPBI',
+      'Akun & Aktivasi',
+      '[SATU DPBI] Undangan Aktivasi Akun {{jabatan}} - {{provinsi}}',
+      'Yth. {{nama}},\n\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi yang diberikan oleh admin sebelum {{tanggal}}.\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
+      now
+    );
+    tEmailStmt.run(
+      'etpl-2',
+      'pengingat_laporan_bulanan',
+      'Pengingat Batas Laporan Bulanan Wilayah',
+      'Koordinasi Wilayah',
+      '[Pengingat] Laporan Bulanan Wilayah {{provinsi}} — Batas {{tanggal}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon lengkapi rekap LKL dan unggah Laporan Bulanan Koordinator Wilayah melalui modul Laporan Koordinator sebelum {{tanggal}}.\n\nReferensi: {{referensi}}',
+      now
+    );
+    tEmailStmt.run(
+      'etpl-3',
+      'informasi_kegiatan',
+      'Informasi Resmi Kegiatan Nasional / Wilayah',
+      'Kegiatan',
+      '[Informasi Kegiatan] Pemberitahuan Program {{angkatan}} — {{provinsi}}',
+      'Halo {{nama}},\n\nBerikut informasi koordinasi kegiatan resmi DPBI untuk wilayah {{provinsi}} pada {{tanggal}}. Silakan pantau detail jadwal pada menu Kalender Organisasi.\n\nSalam budaya,\nSekretariat Nasional DPBI',
+      now
+    );
+    tEmailStmt.run(
+      'etpl-4',
+      'transisi_alumni',
+      'Pengingat Masa Transisi Alumni (30 Hari)',
+      'Alumni',
+      '[SATU DPBI] Pengingat Jendela Arsip Alumni — {{nama}}',
+      'Yth. {{nama}},\n\nMasa tugas {{angkatan}} telah berakhir dan akun Anda berada pada jendela akses arsip alumni 30 hari hingga {{tanggal}}. Mohon unduh sertifikat dan portofolio kegiatan Anda melalui menu Arsip.\n\nReferensi: {{referensi}}',
+      now
+    );
+  }
 }

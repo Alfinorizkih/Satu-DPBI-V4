@@ -50,6 +50,8 @@ export type ModuleCode =
   | 'perlindungan'
   | 'evaluasi'
   | 'arsip'
+  | 'persetujuan'
+  | 'email'
   | 'sistem'
   | 'pengaturan';
 
@@ -294,6 +296,10 @@ export interface ProposalRecord {
   decisionNote: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
+  slaDueAt?: string | null;
+  escalatedTo?: string | null;
+  escalatedAt?: string | null;
+  cancelledReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -354,6 +360,10 @@ export interface TaskRecord {
   checklist: { id: string; text: string; done: boolean }[];
   attachmentFileId?: string | null;
   attachmentFileName?: string | null;
+  proposalId?: string | null;
+  lklId?: string | null;
+  eventId?: string | null;
+  category?: string | null;
   isTemplate: boolean;
   recurrence: 'tidak' | 'bulanan' | 'mingguan';
   commentCount: number;
@@ -420,3 +430,76 @@ export interface HelpArticleRecord {
   isPublished: boolean;
   updatedAt: string;
 }
+
+export type ToastVariant = 'success' | 'error' | 'warning' | 'info' | 'loading';
+
+export interface ApprovalQueueItem {
+  id: string;
+  itemType: 'proposal' | 'lkl' | 'coordinator_report' | 'account_request' | 'handover';
+  referenceNumber: string;
+  title: string;
+  applicantName: string;
+  provinceCode: string | null;
+  provinceName: string | null;
+  status: string;
+  priority: 'rendah' | 'sedang' | 'tinggi';
+  assignedReviewerName: string | null;
+  escalatedTo: string | null;
+  submittedAt: string;
+  slaDueAt: string | null;
+  isOverdue: boolean;
+  targetPath: string;
+  summary: string;
+}
+
+export interface EmailTemplateRecord {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  subject: string;
+  bodyText: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface EmailCampaignRecord {
+  id: string;
+  title: string;
+  templateId: string | null;
+  subject: string;
+  bodyText: string;
+  audienceFilter: {
+    mode: 'single' | 'bulk';
+    allActive?: boolean;
+    roles?: string[];
+    bidang?: string;
+    provinceCode?: string;
+    batchId?: string;
+    manualEmails?: string[];
+  };
+  deliveryMode: 'smtp_live' | 'sandbox_outbox';
+  status: 'draft' | 'terjadwal' | 'terkirim' | 'sebagian_gagal' | 'dibatalkan';
+  totalRecipients: number;
+  sentCount: number;
+  failedCount: number;
+  scheduledAt: string | null;
+  sentAt: string | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface EmailLogRecord {
+  id: string;
+  campaignId: string;
+  recipientEmail: string;
+  recipientName: string;
+  subjectRendered: string;
+  status: 'terkirim' | 'terantre_outbox' | 'gagal' | 'dibatalkan';
+  deliveryMode: 'smtp_live' | 'sandbox_outbox';
+  errorMessage: string | null;
+  providerMessageId: string | null;
+  sentAt: string | null;
+  createdAt: string;
+}
+

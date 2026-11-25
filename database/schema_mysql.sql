@@ -748,4 +748,106 @@ CREATE TABLE IF NOT EXISTS `help_articles` (
   UNIQUE KEY `uq_help_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `schema_migrations` (
+  `version` INT NOT NULL,
+  `name` VARCHAR(191) NOT NULL,
+  `applied_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `file_access_grants` (
+  `id` VARCHAR(64) NOT NULL,
+  `file_id` VARCHAR(64) NOT NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `province_code` VARCHAR(16) NULL,
+  `module` VARCHAR(64) NOT NULL DEFAULT 'umum',
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_file_grant` (`file_id`, `user_id`),
+  KEY `idx_file_grants_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `email_templates` (
+  `id` VARCHAR(64) NOT NULL,
+  `code` VARCHAR(80) NOT NULL,
+  `name` VARCHAR(191) NOT NULL,
+  `category` VARCHAR(80) NOT NULL,
+  `subject` VARCHAR(255) NOT NULL,
+  `body_text` LONGTEXT NOT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `updated_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_email_tpl_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `email_campaigns` (
+  `id` VARCHAR(64) NOT NULL,
+  `title` VARCHAR(255) NOT NULL,
+  `template_id` VARCHAR(64) NULL,
+  `subject` VARCHAR(255) NOT NULL,
+  `body_text` LONGTEXT NOT NULL,
+  `audience_filter_json` LONGTEXT NOT NULL,
+  `delivery_mode` VARCHAR(32) NOT NULL DEFAULT 'sandbox_outbox',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'draft',
+  `total_recipients` INT NOT NULL DEFAULT 0,
+  `sent_count` INT NOT NULL DEFAULT 0,
+  `failed_count` INT NOT NULL DEFAULT 0,
+  `scheduled_at` VARCHAR(40) NULL,
+  `sent_at` VARCHAR(40) NULL,
+  `created_by` VARCHAR(64) NOT NULL,
+  `created_by_name` VARCHAR(191) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `email_logs` (
+  `id` VARCHAR(64) NOT NULL,
+  `campaign_id` VARCHAR(64) NOT NULL,
+  `recipient_user_id` VARCHAR(64) NULL,
+  `recipient_email` VARCHAR(191) NOT NULL,
+  `recipient_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `subject_rendered` VARCHAR(255) NOT NULL,
+  `body_rendered` LONGTEXT NOT NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'terantre_outbox',
+  `delivery_mode` VARCHAR(32) NOT NULL DEFAULT 'sandbox_outbox',
+  `error_message` TEXT NULL,
+  `provider_message_id` VARCHAR(191) NULL,
+  `sent_at` VARCHAR(40) NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_email_logs_campaign` (`campaign_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Workflow linkage columns parity for MySQL 8
+ALTER TABLE `proposals`
+  ADD COLUMN `sla_due_at` VARCHAR(40) NULL,
+  ADD COLUMN `escalated_to` VARCHAR(191) NULL,
+  ADD COLUMN `escalated_at` VARCHAR(40) NULL,
+  ADD COLUMN `cancelled_reason` TEXT NULL;
+
+ALTER TABLE `tasks`
+  ADD COLUMN `proposal_id` VARCHAR(64) NULL,
+  ADD COLUMN `lkl_id` VARCHAR(64) NULL,
+  ADD COLUMN `event_id` VARCHAR(64) NULL,
+  ADD COLUMN `category` VARCHAR(48) NULL DEFAULT 'umum';
+
+ALTER TABLE `calendar_events`
+  ADD COLUMN `proposal_id` VARCHAR(64) NULL,
+  ADD COLUMN `task_id` VARCHAR(64) NULL;
+
+ALTER TABLE `evaluations`
+  ADD COLUMN `lkl_id` VARCHAR(64) NULL;
+
+ALTER TABLE `coordinator_reports`
+  ADD COLUMN `reviewed_at` VARCHAR(40) NULL,
+  ADD COLUMN `version` INT NOT NULL DEFAULT 1;
+
+ALTER TABLE `documents`
+  ADD COLUMN `owner_user_id` VARCHAR(64) NULL;
+
+ALTER TABLE `notifications`
+  ADD COLUMN `event_key` VARCHAR(160) NULL,
+  ADD UNIQUE KEY `uq_notifications_user_event` (`user_id`, `event_key`);
+
 SET FOREIGN_KEY_CHECKS = 1;
+

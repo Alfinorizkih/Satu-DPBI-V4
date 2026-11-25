@@ -967,7 +967,7 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                                 <Eye className="w-3.5 h-3.5" /> Pratinjau
                               </button>
                               <a
-                                href={`/api/files/${d.fileId}?download=1`}
+                                href={apiUrl(`/api/files/${d.fileId}?download=1`)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
@@ -1006,7 +1006,7 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                           <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> Pratinjau
                         </button>
                         <a
-                          href={`/api/files/${d.fileId}?download=1`}
+                          href={apiUrl(`/api/files/${d.fileId}?download=1`)}
                           target="_blank"
                           rel="noreferrer"
                           className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"

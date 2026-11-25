@@ -2,18 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { Award, Building2, Eye, Plus, ShieldCheck } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { ConfirmDialog } from '../components/ui';
 import { GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
 import type { BatchRecord, BatchStatus, ModuleCode, PermissionAction } from '../lib/types';
 import { formatTanggalIndonesia, isRecordRelevantToBidang, OFFICIAL_BIDANGS } from '../lib/rbac';
 
 export function OrganizationPage() {
-  const { can, notify } = useAuth();
+  const { user, can, notify } = useAuth();
   const [positions, setPositions] = useState<Record<string, unknown>[]>([]);
   const [delegations, setDelegations] = useState<Record<string, unknown>[]>([]);
   const [users, setUsers] = useState<{ id: string; fullName: string; roleLabel: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [posOpen, setPosOpen] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
+  const [confirmRevokeDel, setConfirmRevokeDel] = useState<{ id: string; name: string } | null>(null);
 
   const [posForm, setPosForm] = useState<{ title: string; bidang: string; level: string; holderName: string; skNumber: string }>({
     title: '',
@@ -62,9 +64,14 @@ export function OrganizationPage() {
 
   const handleCreateDel = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (delForm.startsAt >= delForm.endsAt) {
+      notify('Tanggal berakhir delegasi harus lebih lambat dari tanggal mulai.', 'error');
+      return;
+    }
     try {
       await apiPost('/api/organization/delegations', {
         ...delForm,
+        provinceCode: user?.role === 'koordinator_wilayah' ? user.provinceCode : undefined,
         startsAt: `${delForm.startsAt}T00:00:00Z`,
         endsAt: `${delForm.endsAt}T23:59:59Z`,
       });
@@ -211,7 +218,11 @@ export function OrganizationPage() {
               <div className="flex items-center gap-3">
                 <StatusIndicator status={String(d.status) === 'aktif' ? 'aktif' : 'nonaktif'} customLabel={String(d.status)} />
                 {String(d.status) === 'aktif' && can('organisasi', 'assign') && (
-                  <button type="button" onClick={() => handleRevoke(String(d.id))} className="px-2.5 py-1 rounded-lg border border-rose-200 text-rose-600 text-[11px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRevokeDel({ id: String(d.id), name: String(d.delegate_name) })}
+                    className="px-2.5 py-1 rounded-lg border border-rose-200 text-rose-600 text-[11px] font-semibold"
+                  >
                     Cabut
                   </button>
                 )}
@@ -301,6 +312,24 @@ export function OrganizationPage() {
           <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-sm font-semibold">Terbitkan Delegasi</button>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmRevokeDel)}
+        title="Cabut Delegasi Kewenangan?"
+        message={
+          confirmRevokeDel
+            ? `Yakin ingin mencabut delegasi sementara milik ${confirmRevokeDel.name}? Hak akses delegasi akan langsung berhenti.`
+            : ''
+        }
+        confirmLabel="Ya, Cabut Delegasi"
+        danger
+        onConfirm={() => {
+          const target = confirmRevokeDel;
+          setConfirmRevokeDel(null);
+          if (target) handleRevoke(target.id);
+        }}
+        onCancel={() => setConfirmRevokeDel(null)}
+      />
     </div>
   );
 }

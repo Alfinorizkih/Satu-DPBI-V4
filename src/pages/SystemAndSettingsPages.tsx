@@ -21,7 +21,7 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import {
@@ -235,7 +235,7 @@ export function SystemAdminPage({
                     <button type="button" onClick={() => handleValidateBackup(b.id)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold">
                       Validasi SHA-256
                     </button>
-                    <a href={`/api/system/backup/${b.id}/download`} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
+                    <a href={apiUrl(`/api/system/backup/${b.id}/download`)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold">
                       <Download className="w-3.5 h-3.5" /> Unduh ZIP
                     </a>
                     {can('sistem', 'restore') && (
@@ -441,6 +441,7 @@ const MODULE_LABELS: Record<ModuleCode, string> = {
   wilayah: 'Wilayah (38 Prov)',
   angkatan: 'Angkatan',
   proposal: 'Proposal',
+  persetujuan: 'Pusat Persetujuan',
   lkl: 'LKL Kegiatan',
   laporan_koordinator: 'Lap. Koordinator',
   tugas: 'Tugas',
@@ -449,6 +450,7 @@ const MODULE_LABELS: Record<ModuleCode, string> = {
   kalender: 'Kalender',
   perlindungan: 'Safeguarding',
   evaluasi: 'Evaluasi Kinerja',
+  email: 'Pusat Email',
   arsip: 'Arsip & Ekspor',
   sistem: 'Pusat Kendali Sistem',
   pengaturan: 'Pengaturan',
@@ -523,6 +525,12 @@ export function SettingsPage({
   });
   const [confirmToggleUser, setConfirmToggleUser] = useState<{ id: string; name: string; next: string } | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  const [userSessionsModal, setUserSessionsModal] = useState<{
+    user: { id: string; full_name: string; email: string };
+    sessions: { id: string; device_label: string; ip_address: string; last_seen_at: string; expires_at: string }[];
+  } | null>(null);
+  const [confirmForceLogoutUser, setConfirmForceLogoutUser] = useState<{ id: string; name: string } | null>(null);
+  const [confirmDeleteArticle, setConfirmDeleteArticle] = useState<{ id: string; title: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -636,8 +644,40 @@ export function SettingsPage({
     }
   };
 
+  const handleOpenUserSessions = async (targetUserId: string) => {
+    try {
+      const res = await apiGet<{
+        user: { id: string; full_name: string; email: string };
+        sessions: { id: string; device_label: string; ip_address: string; last_seen_at: string; expires_at: string }[];
+      }>(`/api/settings/users/${targetUserId}/sessions`);
+      setUserSessionsModal(res);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memuat daftar sesi aktif pengguna.', 'error');
+    }
+  };
+
+  const handleForceLogoutUser = async () => {
+    if (!confirmForceLogoutUser) return;
+    try {
+      const res = await apiDelete<{ revokedCount: number }>(`/api/settings/users/${confirmForceLogoutUser.id}/sessions`);
+      notify(`${res.revokedCount} sesi aktif milik ${confirmForceLogoutUser.name} berhasil diputus paksa.`, 'success');
+      setConfirmForceLogoutUser(null);
+      if (userSessionsModal?.user.id === confirmForceLogoutUser.id) {
+        setUserSessionsModal((prev) => (prev ? { ...prev, sessions: [] } : null));
+      }
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memutus sesi pengguna.', 'error');
+    }
+  };
+
   const handleSaveSystemConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    const ttl = Number(config.settings.session_ttl_hours || 12);
+    if (!Number.isFinite(ttl) || ttl < 1 || ttl > 24) {
+      notify('Masa berlaku sesi wajib berada di antara 1 hingga maksimal 24 jam.', 'error');
+      return;
+    }
     try {
       await apiPatch('/api/system/settings', { settings: config.settings });
       notify('Konfigurasi organisasi dan kebijakan sesi disimpan.', 'success');
@@ -1007,7 +1047,14 @@ export function SettingsPage({
                     <td className="py-2.5 pr-4">{u.roleLabel}</td>
                     <td className="py-2.5 pr-4">{u.provinceName || 'Nasional'}</td>
                     <td className="py-2.5 pr-4"><StatusIndicator status={u.accountStatus} /></td>
-                    <td className="py-2.5 text-right">
+                    <td className="py-2.5 text-right space-x-1.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenUserSessions(u.id)}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                      >
+                        Sesi Aktif
+                      </button>
                       {u.id !== user?.id && (
                         <button
                           type="button"
@@ -1041,21 +1088,30 @@ export function SettingsPage({
                   </div>
                   <StatusIndicator status={u.accountStatus} />
                 </div>
-                {u.id !== user?.id && (
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setConfirmToggleUser({
-                        id: u.id,
-                        name: u.fullName,
-                        next: u.accountStatus === 'aktif' ? 'nonaktif' : 'aktif',
-                      })
-                    }
-                    className="w-full min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                    onClick={() => handleOpenUserSessions(u.id)}
+                    className="flex-1 min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                   >
-                    {u.accountStatus === 'aktif' ? 'Nonaktifkan Akun' : 'Aktifkan Akun'}
+                    Sesi Aktif
                   </button>
-                )}
+                  {u.id !== user?.id && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmToggleUser({
+                          id: u.id,
+                          name: u.fullName,
+                          next: u.accountStatus === 'aktif' ? 'nonaktif' : 'aktif',
+                        })
+                      }
+                      className="flex-1 min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                    >
+                      {u.accountStatus === 'aktif' ? 'Nonaktifkan' : 'Aktifkan'}
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -1122,12 +1178,13 @@ export function SettingsPage({
                   <input
                     type="number"
                     min={1}
-                    max={168}
+                    max={24}
                     disabled={!can('sistem', 'configure')}
                     value={config.settings.session_ttl_hours || '12'}
                     onChange={(e) => setConfig({ ...config, settings: { ...config.settings, session_ttl_hours: e.target.value } })}
                     className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 tabular-nums"
                   />
+                  <p className="text-[11px] text-slate-500 mt-1">Maksimal 24 jam (batas keamanan organisasi).</p>
                 </div>
                 <div>
                   <label className="block font-semibold mb-1">Batas Tidak Aktif / Idle (Menit)</label>
@@ -1343,7 +1400,7 @@ export function SettingsPage({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteArticle(String(art.id))}
+                      onClick={() => setConfirmDeleteArticle({ id: String(art.id), title: String(art.title) })}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-semibold"
                     >
                       <Trash2 className="w-3.5 h-3.5" /> Hapus
@@ -1524,6 +1581,87 @@ export function SettingsPage({
         confirmLabel="Ya, Terapkan"
         onConfirm={confirmStatusChange}
         onCancel={() => setConfirmToggleUser(null)}
+      />
+
+      <Modal
+        open={Boolean(userSessionsModal)}
+        onClose={() => setUserSessionsModal(null)}
+        title={`Sesi Aktif: ${userSessionsModal?.user.full_name || ''}`}
+        subtitle={userSessionsModal?.user.email || ''}
+      >
+        {userSessionsModal && (
+          <div className="space-y-4 text-xs">
+            {userSessionsModal.sessions.length === 0 ? (
+              <p className="text-slate-500 py-4 text-center">Pengguna ini tidak memiliki sesi login aktif saat ini.</p>
+            ) : (
+              <div className="divide-y divide-slate-200/70 dark:divide-slate-800">
+                {userSessionsModal.sessions.map((s) => (
+                  <div key={s.id} className="py-2.5 space-y-0.5">
+                    <p className="font-semibold text-slate-900 dark:text-white">{s.device_label}</p>
+                    <p className="font-mono text-[11px] text-slate-500 tabular-nums">
+                      IP: {s.ip_address} · Terakhir aktif: {formatTanggalIndonesia(s.last_seen_at, true)} · Kedaluwarsa: {formatTanggalIndonesia(s.expires_at, true)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setUserSessionsModal(null)}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+              >
+                Tutup
+              </button>
+              {userSessionsModal.sessions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmForceLogoutUser({
+                      id: userSessionsModal.user.id,
+                      name: userSessionsModal.user.full_name,
+                    })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold"
+                >
+                  Putus Semua Sesi
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmForceLogoutUser)}
+        title="Putus Paksa Seluruh Sesi Pengguna?"
+        message={
+          confirmForceLogoutUser
+            ? `Semua sesi login aktif milik ${confirmForceLogoutUser.name} akan langsung diakhiri di semua perangkat dan tercatat di Audit Log.`
+            : ''
+        }
+        danger
+        confirmLabel="Ya, Putus Semua Sesi"
+        onConfirm={handleForceLogoutUser}
+        onCancel={() => setConfirmForceLogoutUser(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmDeleteArticle)}
+        title="Hapus Artikel Pusat Bantuan?"
+        message={
+          confirmDeleteArticle
+            ? `Artikel "${confirmDeleteArticle.title}" akan dihapus dari Pusat Bantuan (/bantuan).`
+            : ''
+        }
+        danger
+        confirmLabel="Ya, Hapus Artikel"
+        onConfirm={() => {
+          const target = confirmDeleteArticle;
+          setConfirmDeleteArticle(null);
+          if (target) handleDeleteArticle(target.id);
+        }}
+        onCancel={() => setConfirmDeleteArticle(null)}
       />
 
       <ConfirmDialog

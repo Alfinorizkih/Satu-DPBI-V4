@@ -164,6 +164,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ALL_ACTIONS,
     evaluasi: ALL_ACTIONS,
     arsip: ALL_ACTIONS,
+    persetujuan: ALL_ACTIONS,
+    email: ALL_ACTIONS,
     sistem: ALL_ACTIONS,
     pengaturan: ALL_ACTIONS,
   },
@@ -184,6 +186,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'review'],
     evaluasi: ['view', 'review', 'export'],
     arsip: ['view', 'download'],
+    persetujuan: ['view', 'review', 'approve', 'reject', 'assign'],
+    email: ['view', 'create', 'publish'],
     pengaturan: ['view'],
   },
   penanggung_jawab: {
@@ -203,6 +207,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'review', 'manage'],
     evaluasi: ['view', 'review', 'export'],
     arsip: ['view', 'download'],
+    persetujuan: ['view', 'review', 'approve', 'reject'],
+    email: ['view'],
     pengaturan: ['view'],
   },
   pengurus_nasional: {
@@ -222,6 +228,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'review'],
     evaluasi: ['view', 'create', 'review'],
     arsip: ['view', 'download'],
+    persetujuan: ['view', 'review', 'approve', 'reject'],
+    email: ['view', 'create'],
     pengaturan: ['view'],
   },
   sekretariat_nasional: {
@@ -240,6 +248,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'create'],
     evaluasi: ['view'],
     arsip: ['view', 'create', 'download', 'archive'],
+    persetujuan: ['view', 'review'],
+    email: ['view', 'create', 'publish'],
     pengaturan: ['view'],
   },
   koordinator_wilayah: {
@@ -257,6 +267,7 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'create'],
     evaluasi: ['view', 'create'],
     arsip: ['view', 'download'],
+    persetujuan: ['view', 'review', 'approve', 'reject'],
     pengaturan: ['view'],
   },
   duta: {
@@ -292,7 +303,8 @@ export function resolveEffectivePermissions(
   const modules: ModuleCode[] = [
     'dashboard', 'command_center', 'organisasi', 'personalia', 'wilayah',
     'angkatan', 'proposal', 'lkl', 'laporan_koordinator', 'tugas', 'dokumen',
-    'pengumuman', 'kalender', 'perlindungan', 'evaluasi', 'arsip', 'sistem', 'pengaturan',
+    'pengumuman', 'kalender', 'perlindungan', 'evaluasi', 'arsip',
+    'persetujuan', 'email', 'sistem', 'pengaturan',
   ];
 
   for (const mod of modules) {
@@ -306,7 +318,7 @@ export function resolveEffectivePermissions(
     const endMs = Date.parse(del.endsAt);
     if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
     if (nowMs < startMs || nowMs > endMs) continue;
-    if (!result[del.module].includes(del.action)) {
+    if (result[del.module] && !result[del.module].includes(del.action)) {
       result[del.module].push(del.action);
     }
   }
@@ -322,6 +334,41 @@ export function hasPermission(
   const list = permissions[module];
   if (!list) return false;
   return list.includes(action);
+}
+
+/**
+ * Verifikasi izin dengan containment cakupan provinsi pada delegasi aktif.
+ * Jika izin berasal dari delegasi wilayah tertentu (del.provinceCode !== null),
+ * aksi terhadap targetProvinceCode di luar cakupan delegasi akan ditolak.
+ */
+export function hasScopedPermission(
+  role: RoleCode,
+  delegations: DelegationRecord[] = [],
+  module: ModuleCode,
+  action: PermissionAction,
+  targetProvinceCode?: string | null,
+  userProvinceCode?: string | null,
+  nowIso: string = new Date().toISOString()
+): boolean {
+  const baseActions = BASE_ROLE_PERMISSIONS[role]?.[module] ?? [];
+  if (baseActions.includes(action)) {
+    if (role === 'koordinator_wilayah' && targetProvinceCode && userProvinceCode && targetProvinceCode !== userProvinceCode) {
+      return false;
+    }
+    return true;
+  }
+
+  const nowMs = Date.parse(nowIso);
+  for (const del of delegations) {
+    if (del.status !== 'aktif') continue;
+    if (del.module !== module || del.action !== action) continue;
+    const startMs = Date.parse(del.startsAt);
+    const endMs = Date.parse(del.endsAt);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || nowMs < startMs || nowMs > endMs) continue;
+    if (!del.provinceCode) return true;
+    if (!targetProvinceCode || del.provinceCode === targetProvinceCode) return true;
+  }
+  return false;
 }
 
 export function resolveProposalApprover(input: {
@@ -585,3 +632,49 @@ export function formatTanggalIndonesia(iso: string | null | undefined, withTime 
 export function getProvinceCount(): number {
   return INDONESIA_PROVINCES.length;
 }
+
+export const ALLOWED_EMAIL_VARIABLES = [
+  'nama',
+  'email',
+  'jabatan',
+  'provinsi',
+  'angkatan',
+  'tanggal',
+  'referensi',
+] as const;
+
+export function validateEmailTemplatePlaceholders(template: string): {
+  valid: boolean;
+  variables: string[];
+  invalidVariables: string[];
+  unclosedBraces: boolean;
+} {
+  const stripped = template.replace(/\{\{[a-z0-9_]+\}\}/gi, '');
+  const unclosedBraces = stripped.includes('{{') || stripped.includes('}}');
+  const matches = [...template.matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)].map((m) => m[1].toLowerCase());
+  const unique = [...new Set(matches)];
+  const allowed = new Set<string>(ALLOWED_EMAIL_VARIABLES);
+  const invalidVariables = unique.filter((v) => !allowed.has(v));
+  return {
+    valid: !unclosedBraces && invalidVariables.length === 0,
+    variables: unique,
+    invalidVariables,
+    unclosedBraces,
+  };
+}
+
+export function renderEmailTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_full, key: string) => {
+    const k = key.toLowerCase();
+    return vars[k] ?? '';
+  });
+}
+
+export function csvSafeCell(value: unknown): string {
+  let str = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
