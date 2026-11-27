@@ -4,11 +4,13 @@ import path from 'node:path';
 import type { Express, Response } from 'express';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
-import { BACKUP_STORAGE_DIR, DB_PATH, getDb, IS_DEMO_MODE, nextReferenceNumber, PRIVATE_STORAGE_DIR, resetDbConnection } from './db';
+import { BACKUP_STORAGE_DIR, cleanupSqliteSidecarFiles, createWalSafeSqliteSnapshot, DB_PATH, getDb, IS_DEMO_MODE, nextReferenceNumber, PRIVATE_STORAGE_DIR, resetDbConnection } from './db';
 import {
   type AuthenticatedRequest,
+  getApiMetricsSnapshot,
   getSessionPolicy,
   hashPassword,
+  readAppVersion,
   requireAuth,
   requirePermission,
   sha256,
@@ -24,7 +26,7 @@ export function registerModuleRoutes(app: Express): void {
   app.get('/api/tasks', requireAuth, requirePermission('tugas', 'view'), (req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const user = req.authUser!;
-    let sql = 'SELECT * FROM tasks WHERE 1=1';
+    let sql = 'SELECT * FROM tasks WHERE soft_deleted_at IS NULL';
     const params: string[] = [];
     if (user.role === 'duta') {
       sql += ' AND assignee_id = ?';
@@ -57,6 +59,12 @@ export function registerModuleRoutes(app: Express): void {
         recurrence: String(r.recurrence),
         attachmentFileId: r.attachment_file_id ? String(r.attachment_file_id) : null,
         attachmentFileName: r.attachment_file_name ? String(r.attachment_file_name) : null,
+        programId: r.program_id ? String(r.program_id) : null,
+        dependsOnTaskId: r.depends_on_task_id ? String(r.depends_on_task_id) : null,
+        proposalId: r.proposal_id ? String(r.proposal_id) : null,
+        category: r.category ? String(r.category) : 'umum',
+        version: Number(r.version || 1),
+        updatedAt: r.updated_at ? String(r.updated_at) : String(r.created_at),
         commentCount,
         createdAt: String(r.created_at),
       };
@@ -78,14 +86,16 @@ export function registerModuleRoutes(app: Express): void {
     const assigneeRow = db.prepare('SELECT full_name FROM users WHERE id = ?').get(assigneeId) as { full_name: string } | undefined;
 
     db.prepare(
-      `INSERT INTO tasks (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, attachment_file_id, attachment_file_name, created_at)
-       VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, attachment_file_id, attachment_file_name, program_id, depends_on_task_id, category, created_at)
+       VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, refNo, String(b.title), String(b.description || ''), String(b.priority || 'sedang'), String(b.deadline),
       b.provinceCode ? String(b.provinceCode) : user.provinceCode, String(b.batchId || 'batch-3'),
       assigneeId, assigneeRow?.full_name || user.fullName, user.id, user.fullName,
       JSON.stringify(Array.isArray(b.checklist) ? b.checklist : []), b.isTemplate ? 1 : 0, String(b.recurrence || 'tidak'),
       b.attachmentFileId ? String(b.attachmentFileId) : null, b.attachmentFileName ? String(b.attachmentFileName) : null,
+      b.programId ? String(b.programId) : null, b.dependsOnTaskId ? String(b.dependsOnTaskId) : null,
+      String(b.category || 'umum'),
       new Date().toISOString()
     );
 
@@ -143,22 +153,59 @@ export function registerModuleRoutes(app: Express): void {
       res.status(403).json({ error: 'Akses ditolak: tugas ini berada di luar penugasan atau wilayah Anda.' });
       return;
     }
+    const expectedVersion = req.body?.expectedVersion !== undefined ? Number(req.body.expectedVersion) : null;
+    const currentVersion = Number(task.version || 1);
+    if (expectedVersion !== null && Number.isFinite(expectedVersion) && expectedVersion !== currentVersion) {
+      res.status(409).json({
+        error: 'Data tugas telah diperbarui oleh pengguna lain. Muat ulang data terbaru sebelum menyimpan perubahan.',
+        code: 409,
+        conflict: true,
+        latestRecord: {
+          id: String(task.id),
+          status: String(task.status),
+          version: currentVersion,
+          updatedAt: task.updated_at ? String(task.updated_at) : String(task.created_at),
+        },
+      });
+      return;
+    }
+    const nextDependsOn = req.body?.dependsOnTaskId !== undefined ? (req.body.dependsOnTaskId ? String(req.body.dependsOnTaskId) : null) : (task.depends_on_task_id ? String(task.depends_on_task_id) : null);
+    if (status === 'selesai' && nextDependsOn) {
+      const parentTask = db.prepare('SELECT reference_number, title, status FROM tasks WHERE id = ?').get(nextDependsOn) as { reference_number: string; title: string; status: string } | undefined;
+      if (parentTask && parentTask.status !== 'selesai') {
+        res.status(409).json({
+          error: `Tugas prasyarat ${parentTask.reference_number} (${parentTask.title}) belum selesai. Selesaikan tugas prasyarat terlebih dahulu.`,
+          code: 409,
+        });
+        return;
+      }
+    }
+    const nowIso = new Date().toISOString();
+    const nextVersion = currentVersion + 1;
     db.prepare(
       `UPDATE tasks SET
          status = COALESCE(?, status),
          checklist_json = COALESCE(?, checklist_json),
          attachment_file_id = COALESCE(?, attachment_file_id),
-         attachment_file_name = COALESCE(?, attachment_file_name)
+         attachment_file_name = COALESCE(?, attachment_file_name),
+         program_id = COALESCE(?, program_id),
+         depends_on_task_id = COALESCE(?, depends_on_task_id),
+         version = ?,
+         updated_at = ?
        WHERE id = ?`
     ).run(
       status ?? null,
       checklist ? JSON.stringify(checklist) : null,
       attachmentFileId ?? null,
       attachmentFileName ?? null,
+      req.body?.programId ?? null,
+      req.body?.dependsOnTaskId ?? null,
+      nextVersion,
+      nowIso,
       taskId
     );
     writeAuditLog(db, user, 'UPDATE_TASK', 'task', String(task.reference_number), 'berhasil', status ? `Status: ${status}` : 'Checklist/lampiran');
-    res.json({ ok: true });
+    res.json({ ok: true, version: nextVersion, updatedAt: nowIso });
   });
 
   app.get('/api/tasks/:id/comments', requireAuth, requirePermission('tugas', 'view'), (req: AuthenticatedRequest, res: Response) => {
@@ -235,6 +282,9 @@ export function registerModuleRoutes(app: Express): void {
         fileSizeBytes: Number(d.file_size_bytes || 0),
         notes: String(d.notes || ''),
         expiresAt: d.expires_at ? String(d.expires_at) : null,
+        parentDocumentId: d.parent_document_id ? String(d.parent_document_id) : null,
+        replacedById: d.replaced_by_id ? String(d.replaced_by_id) : null,
+        programId: d.program_id ? String(d.program_id) : null,
       })),
     });
   });
@@ -249,16 +299,21 @@ export function registerModuleRoutes(app: Express): void {
     const docNo = nextReferenceNumber(db, 'DOC');
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const parentDocId = b.parentDocumentId ? String(b.parentDocumentId) : null;
     db.prepare(
-      `INSERT INTO documents (id, document_number, title, category, owner_name, issuer_name, issued_date, status, version, access_level, file_id, file_name, file_size_bytes, notes, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'berlaku', ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO documents (id, document_number, title, category, owner_name, issuer_name, issued_date, status, version, access_level, file_id, file_name, file_size_bytes, notes, expires_at, parent_document_id, program_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'berlaku', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, docNo, String(b.title), String(b.category), String(b.ownerName || req.authUser!.fullName),
       req.authUser!.fullName, String(b.issuedDate || now.slice(0, 10)), String(b.version || '1.0'),
       String(b.accessLevel || 'internal_semua'), b.fileId ? String(b.fileId) : null, b.fileName ? String(b.fileName) : null,
-      Number(b.fileSizeBytes || 0), String(b.notes || ''), b.expiresAt ? String(b.expiresAt) : null, now
+      Number(b.fileSizeBytes || 0), String(b.notes || ''), b.expiresAt ? String(b.expiresAt) : null,
+      parentDocId, b.programId ? String(b.programId) : null, now
     );
-    writeAuditLog(db, req.authUser!, 'PUBLISH_DOCUMENT', 'document', docNo);
+    if (parentDocId) {
+      db.prepare("UPDATE documents SET status = 'diarsipkan', replaced_by_id = ? WHERE id = ?").run(id, parentDocId);
+    }
+    writeAuditLog(db, req.authUser!, 'PUBLISH_DOCUMENT', 'document', docNo, 'berhasil', parentDocId ? `Menggantikan dokumen ${parentDocId}` : '');
     writeActivityTimeline(db, 'Dokumen', `Dokumen ${docNo} Diterbitkan`, `${b.title} (${b.category}) diterbitkan.`, req.authUser!.fullName, null, null, '/dokumen');
     res.status(201).json({ ok: true, id, documentNumber: docNo });
   });
@@ -569,14 +624,24 @@ export function registerModuleRoutes(app: Express): void {
     const total = Math.round((t * 0.3 + tl * 0.25 + q * 0.25 + c * 0.2) * 10) / 10;
 
     const id = crypto.randomUUID();
+    const validEvaluatorTypes = [
+      'pengurus_nasional',
+      'koordinator_wilayah',
+      'rekan_duta',
+      'peserta_kegiatan',
+      'guru_pembina',
+      'penilaian_mandiri',
+    ];
+    const evaluatorType = validEvaluatorTypes.includes(String(b.evaluatorType)) ? String(b.evaluatorType) : 'pengurus_nasional';
     db.prepare(
-      `INSERT INTO evaluations (id, personnel_id, personnel_name, role_code, province_code, batch_id, task_completion_score, report_timeliness_score, report_quality_score, coordination_score, total_score, evaluator_name, coaching_recommendation, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'final', ?)`
+      `INSERT INTO evaluations (id, personnel_id, personnel_name, role_code, province_code, batch_id, task_completion_score, report_timeliness_score, report_quality_score, coordination_score, total_score, evaluator_name, evaluator_type, program_id, coaching_recommendation, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'final', ?)`
     ).run(
       id, String(b.personnelId), String(pers.full_name), String(pers.role_code), String(pers.province_code),
-      String(pers.batch_id), t, tl, q, c, total, req.authUser!.fullName, String(b.coachingRecommendation), new Date().toISOString()
+      String(pers.batch_id), t, tl, q, c, total, req.authUser!.fullName, evaluatorType,
+      b.programId ? String(b.programId) : null, String(b.coachingRecommendation), new Date().toISOString()
     );
-    writeAuditLog(db, req.authUser!, 'CREATE_EVALUATION', 'evaluation', String(b.personnelId));
+    writeAuditLog(db, req.authUser!, 'CREATE_EVALUATION', 'evaluation', String(b.personnelId), 'berhasil', `Tipe: ${evaluatorType}`);
     res.status(201).json({ ok: true, id, totalScore: total });
   });
 
@@ -680,8 +745,9 @@ export function registerModuleRoutes(app: Express): void {
     const settings = db.prepare('SELECT * FROM system_settings').all();
     const systemErrors = db.prepare('SELECT id, reference_code, http_status, route, error_message, created_at FROM system_errors ORDER BY created_at DESC LIMIT 30').all();
 
-    // Data Quality scanner (read-only recommendations, never auto-deletes)
+    // 7-Rule Data Quality scanner (read-only recommendations, never auto-deletes)
     const findings: { id: string; severity: 'tinggi' | 'sedang' | 'rendah'; type: string; detail: string; actionPath: string }[] = [];
+    // Rule 1: Unverified personnel profiles
     const incompleteProfiles = db
       .prepare("SELECT id, full_name FROM personnel WHERE verification_status != 'terverifikasi'")
       .all() as { id: string; full_name: string }[];
@@ -689,11 +755,12 @@ export function registerModuleRoutes(app: Express): void {
       findings.push({
         id: `dq-prof-${ip.id}`,
         severity: 'sedang',
-        type: 'Profil Belum Terverifikasi',
+        type: '1. Profil Belum Terverifikasi',
         detail: `${ip.full_name} belum menyelesaikan verifikasi berkas identitas.`,
         actionPath: '/personalia',
       });
     }
+    // Rule 2: Provinces in coaching without coordinator
     const coachingProvs = db
       .prepare("SELECT code, name FROM provinces WHERE status = 'dalam_pembinaan' AND coordinator_name IS NULL")
       .all() as { code: string; name: string }[];
@@ -701,15 +768,117 @@ export function registerModuleRoutes(app: Express): void {
       findings.push({
         id: `dq-prov-${cp.code}`,
         severity: 'tinggi',
-        type: 'Wilayah Dalam Pembinaan Tanpa Koordinator',
+        type: '2. Wilayah Dalam Pembinaan Tanpa Koordinator',
         detail: `Provinsi ${cp.name} memerlukan penetapan Koordinator Wilayah.`,
         actionPath: '/wilayah',
       });
     }
+    // Rule 3: Overdue SLA proposals
+    const nowIso = new Date().toISOString();
+    const overdueProps = db
+      .prepare("SELECT id, reference_number, title FROM proposals WHERE status IN ('diajukan', 'pemeriksaan_administrasi', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional') AND sla_due_at IS NOT NULL AND sla_due_at < ?")
+      .all(nowIso) as { id: string; reference_number: string; title: string }[];
+    for (const op of overdueProps) {
+      findings.push({
+        id: `dq-sla-${op.id}`,
+        severity: 'tinggi',
+        type: '3. Proposal Melewati Batas SLA',
+        detail: `${op.reference_number} (${op.title}) melewati batas waktu pemeriksaan 72 jam.`,
+        actionPath: '/persetujuan',
+      });
+    }
+    // Rule 4: Approved proposals > 7 days past event_date without LKL
+    const sevenDaysAgoIso = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const missingLkls = db
+      .prepare("SELECT p.id, p.reference_number, p.title, p.event_date FROM proposals p WHERE p.status = 'disetujui' AND p.event_date < ? AND NOT EXISTS (SELECT 1 FROM lkl_reports l WHERE l.proposal_id = p.id)")
+      .all(sevenDaysAgoIso) as { id: string; reference_number: string; title: string; event_date: string }[];
+    for (const ml of missingLkls) {
+      findings.push({
+        id: `dq-lkl-${ml.id}`,
+        severity: 'tinggi',
+        type: '4. Proposal Disetujui Belum Ada LKL (>H+7)',
+        detail: `${ml.reference_number} (${ml.title}) terlaksana ${ml.event_date}, namun LKL belum dikirim.`,
+        actionPath: '/laporan-kegiatan',
+      });
+    }
+    // Rule 5: Unlinked / orphaned user accounts without personnel link (non-operational)
+    const orphanUsers = db
+      .prepare("SELECT id, email, full_name FROM users WHERE personnel_id IS NULL AND role IN ('duta', 'koordinator_wilayah') AND account_status = 'aktif'")
+      .all() as { id: string; email: string; full_name: string }[];
+    for (const ou of orphanUsers) {
+      findings.push({
+        id: `dq-usr-${ou.id}`,
+        severity: 'sedang',
+        type: '5. Akun Operasional Belum Tertaut Personel',
+        detail: `Akun ${ou.full_name} (${ou.email}) berstatus peran lapangan namun belum ditautkan ke data Personel.`,
+        actionPath: '/pengaturan',
+      });
+    }
+    // Rule 6: Documents expired / expiring soon
+    const expiredDocs = db
+      .prepare("SELECT id, document_number, title, expires_at FROM documents WHERE status = 'berlaku' AND expires_at IS NOT NULL AND expires_at < ?")
+      .all(nowIso.slice(0, 10)) as { id: string; document_number: string; title: string; expires_at: string }[];
+    for (const ed of expiredDocs) {
+      findings.push({
+        id: `dq-doc-${ed.id}`,
+        severity: 'rendah',
+        type: '6. Dokumen Melewati Tanggal Berlaku',
+        detail: `${ed.document_number} (${ed.title}) kedaluwarsa sejak ${ed.expires_at}.`,
+        actionPath: '/dokumen',
+      });
+    }
+    // Rule 7: Unreviewed coordinator reports
+    const pendingCoordReports = db
+      .prepare("SELECT id, reference_number, province_code, period_label FROM coordinator_reports WHERE status = 'dikirim'")
+      .all() as { id: string; reference_number: string; province_code: string; period_label: string }[];
+    for (const cr of pendingCoordReports) {
+      findings.push({
+        id: `dq-coord-${cr.id}`,
+        severity: 'rendah',
+        type: '7. Laporan Koordinator Menunggu Tinjauan',
+        detail: `${cr.reference_number} (${PROVINCE_BY_CODE.get(cr.province_code)?.name ?? cr.province_code} — ${cr.period_label}) belum diperiksa.`,
+        actionPath: '/laporan-koordinator',
+      });
+    }
 
     const kemendikdasmenStatus = (db.prepare("SELECT value FROM system_settings WHERE key = 'kemendikdasmen_status'").get() as { value: string } | undefined)?.value || 'nonaktif';
+    const maintMode = (db.prepare("SELECT value FROM system_settings WHERE key = 'maintenance_mode'").get() as { value: string } | undefined)?.value === 'true';
+    const maintMsg = (db.prepare("SELECT value FROM system_settings WHERE key = 'maintenance_message'").get() as { value: string } | undefined)?.value || '';
+
+    const probeStart = performance.now();
+    db.prepare('SELECT 1').get();
+    const dbLatencyMs = Math.round((performance.now() - probeStart) * 100) / 100;
+
+    const migrationsApplied = (
+      db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get() as { c: number }
+    ).c;
+    const latestMigration = db
+      .prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version DESC LIMIT 1')
+      .get() as { version: number; name: string; applied_at: string } | undefined;
+
+    const emailCounts = db
+      .prepare(
+        `SELECT
+          SUM(CASE WHEN status = 'terantre_outbox' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status = 'terkirim' THEN 1 ELSE 0 END) AS sent,
+          SUM(CASE WHEN status = 'gagal' THEN 1 ELSE 0 END) AS failed
+         FROM email_logs`
+      )
+      .get() as { pending: number | null; sent: number | null; failed: number | null };
+
+    const openTicketsCount = (
+      db.prepare("SELECT COUNT(*) AS c FROM support_tickets WHERE status IN ('baru', 'ditinjau', 'diproses')").get() as {
+        c: number;
+      }
+    ).c;
+
+    const latestBackup = backups[0] as Record<string, unknown> | undefined;
+    const apiMetrics = getApiMetricsSnapshot();
 
     res.json({
+      version: readAppVersion(),
+      maintenanceMode: maintMode,
+      maintenanceMessage: maintMsg,
       storage: {
         quotaBytes,
         usedFilesBytes: totalUsedBytes,
@@ -719,23 +888,68 @@ export function registerModuleRoutes(app: Express): void {
         fileCount: files.length,
         byModule,
         largestFiles: files.slice(0, 6),
+        maxUploadMb: 10,
       },
       backups,
       automationJobs,
       findings,
       health: {
         database: 'sehat',
+        dbLatencyMs,
+        dbJournalMode: 'WAL',
         storage: totalUsedBytes + dbSizeBytes < quotaBytes * 0.85 ? 'sehat' : 'peringatan',
         authSessionEngine: 'sehat',
         demoMode: IS_DEMO_MODE,
+        maintenanceMode: maintMode,
+        version: readAppVersion(),
         kemendikdasmenIntegration: kemendikdasmenStatus,
         uptimeSeconds: Math.round(process.uptime()),
+        migrationsApplied,
+        latestMigration: latestMigration || null,
+        lastBackupAt: latestBackup ? String(latestBackup.created_at) : null,
+        lastBackupStatus: latestBackup ? String(latestBackup.status) : null,
+        emailQueue: {
+          pending: Number(emailCounts?.pending || 0),
+          sent: Number(emailCounts?.sent || 0),
+          failed: Number(emailCounts?.failed || 0),
+          mode: process.env.SMTP_HOST ? 'smtp_live' : 'sandbox_outbox',
+        },
+        apiMetrics,
+        openSupportTickets: openTicketsCount,
+        recentSystemErrorsCount: systemErrors.length,
       },
       auditLogs,
       timeline,
       settings,
       systemErrors,
     });
+  });
+
+  app.post('/api/system/maintenance', requireAuth, requirePermission('sistem', 'configure'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const enabled = Boolean(req.body?.enabled);
+    const message = String(
+      req.body?.message ||
+        'Portal sedang menjalani pemeliharaan sistem terjadwal oleh Super Admin. Operasi tulis sementara ditangguhkan.'
+    ).trim();
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO system_settings (key, value, updated_at) VALUES ('maintenance_mode', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+    ).run(enabled ? 'true' : 'false', now);
+    db.prepare(
+      "INSERT INTO system_settings (key, value, updated_at) VALUES ('maintenance_message', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+    ).run(message, now);
+
+    writeAuditLog(
+      db,
+      req.authUser!,
+      'TOGGLE_MAINTENANCE_MODE',
+      'system_settings',
+      'maintenance_mode',
+      'berhasil',
+      `${enabled ? 'DIAKTIFKAN' : 'DINONAKTIFKAN'}: ${message}`
+    );
+    res.json({ ok: true, maintenanceMode: enabled, maintenanceMessage: message });
   });
 
   app.post('/api/system/backup', requireAuth, requirePermission('sistem', 'manage'), async (req: AuthenticatedRequest, res: Response) => {
@@ -746,7 +960,15 @@ export function registerModuleRoutes(app: Express): void {
     const zip = new JSZip();
 
     if (fs.existsSync(DB_PATH)) {
-      zip.file('database.sqlite', fs.readFileSync(DB_PATH));
+      const tempSnapPath = path.join(BACKUP_STORAGE_DIR, `tmp_snap_${crypto.randomBytes(6).toString('hex')}.sqlite`);
+      try {
+        createWalSafeSqliteSnapshot(db, tempSnapPath);
+        zip.file('database.sqlite', fs.readFileSync(tempSnapPath));
+      } finally {
+        if (fs.existsSync(tempSnapPath)) {
+          fs.unlinkSync(tempSnapPath);
+        }
+      }
     }
     const filesFolder = zip.folder('private_files');
     if (filesFolder && fs.existsSync(PRIVATE_STORAGE_DIR)) {
@@ -757,7 +979,7 @@ export function registerModuleRoutes(app: Express): void {
         }
       }
     }
-    zip.file('manifest.json', JSON.stringify({ createdAt: now.toISOString(), isDemoMode: IS_DEMO_MODE, createdBy: req.authUser!.fullName }, null, 2));
+    zip.file('manifest.json', JSON.stringify({ createdAt: now.toISOString(), version: readAppVersion(), walSafeSnapshot: true, isDemoMode: IS_DEMO_MODE, createdBy: req.authUser!.fullName }, null, 2));
 
     const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
     const outPath = path.join(BACKUP_STORAGE_DIR, backupName);
@@ -767,7 +989,7 @@ export function registerModuleRoutes(app: Express): void {
 
     db.prepare(
       `INSERT INTO backups (id, backup_name, backup_type, size_bytes, checksum_sha256, status, notes, created_by, created_at)
-       VALUES (?, ?, 'manual', ?, ?, 'berhasil', 'Backup database & berkas privat tervalidasi SHA-256.', ?, ?)`
+       VALUES (?, ?, 'manual', ?, ?, 'berhasil', 'Backup WAL-safe (VACUUM INTO) & berkas privat tervalidasi SHA-256.', ?, ?)`
     ).run(id, backupName, zipBuf.length, checksum, req.authUser!.fullName, now.toISOString());
 
     writeAuditLog(db, req.authUser!, 'CREATE_BACKUP', 'backup', backupName);
@@ -839,9 +1061,10 @@ export function registerModuleRoutes(app: Express): void {
     const restoredDbBuf = await dbEntry.async('nodebuffer');
     const actor = req.authUser!;
     resetDbConnection();
+    cleanupSqliteSidecarFiles(DB_PATH);
     fs.writeFileSync(DB_PATH, restoredDbBuf);
     const freshDb = getDb();
-    writeAuditLog(freshDb, actor, 'RESTORE_BACKUP', 'backup', String(b.backup_name), 'berhasil', 'Database dipulihkan setelah validasi SHA-256.');
+    writeAuditLog(freshDb, actor, 'RESTORE_BACKUP', 'backup', String(b.backup_name), 'berhasil', 'Database dipulihkan (sidecar -wal/-shm dibersihkan) setelah validasi SHA-256.');
     res.json({ ok: true, message: 'Pemulihan database berhasil dijalankan dan diverifikasi.' });
   });
 
@@ -933,36 +1156,102 @@ export function registerModuleRoutes(app: Express): void {
   });
 
   app.post('/api/settings/users', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {
-    const { fullName, email, password, role, provinceCode, bidang } = req.body ?? {};
-    if (!fullName || !email || !password || !role) {
-      res.status(422).json({ error: 'Nama, email, kata sandi, dan role wajib diisi.' });
+    const {
+      fullName,
+      email,
+      password,
+      role,
+      provinceCode,
+      bidang,
+      linkMode,
+      personnelId,
+      allowMultipleAccounts,
+    } = req.body ?? {};
+    const mode = ['link_existing', 'create_both', 'operational_only'].includes(String(linkMode))
+      ? String(linkMode)
+      : 'create_both';
+
+    if (!email || !password || !role) {
+      res.status(422).json({ error: 'Email, kata sandi, dan role wajib diisi.' });
       return;
     }
     const db = getDb();
     const cleanEmail = String(email).trim().toLowerCase();
-    const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+    const exists = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
     if (exists) {
-      res.status(422).json({ error: 'Email sudah terdaftar.' });
+      res.status(422).json({ error: 'Email sudah terdaftar sebagai akun login.' });
       return;
     }
+
     const now = new Date().toISOString();
     const userId = crypto.randomUUID();
-    const persId = crypto.randomUUID();
-    const refNo = nextReferenceNumber(db, 'PERS');
-    const memberNo = `DPBI-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
+    let finalPersId: string | null = null;
+    let finalFullName = String(fullName || '').trim();
+    let finalProvCode = provinceCode ? String(provinceCode) : '31';
 
-    db.prepare(
-      `INSERT INTO personnel (id, member_number, reference_number, user_id, full_name, email, province_code, batch_id, position_title, bidang, role_code, personnel_status, verification_status, docs_checklist_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'batch-3', ?, ?, ?, 'aktif', 'terverifikasi', '{}', ?, ?)`
-    ).run(persId, memberNo, refNo, userId, String(fullName), cleanEmail, String(provinceCode || '31'), ROLE_LABELS[role as RoleCode] ?? String(role), String(bidang || 'Umum'), String(role), now, now);
+    if (mode === 'link_existing') {
+      if (!personnelId) {
+        res.status(422).json({ error: 'Pilih personel yang akan ditautkan pada mode tautkan personel yang sudah ada.' });
+        return;
+      }
+      const pRow = db.prepare('SELECT id, full_name, province_code, user_id FROM personnel WHERE id = ?').get(String(personnelId)) as
+        | { id: string; full_name: string; province_code: string; user_id: string | null }
+        | undefined;
+      if (!pRow) {
+        res.status(404).json({ error: 'Data personel tidak ditemukan.' });
+        return;
+      }
+      const existingActiveAcct = db
+        .prepare("SELECT id, email FROM users WHERE personnel_id = ? AND account_status = 'aktif'")
+        .get(pRow.id) as { id: string; email: string } | undefined;
+      if (existingActiveAcct && allowMultipleAccounts !== true) {
+        res.status(409).json({
+          error: `Personel ini sudah memiliki akun aktif (${existingActiveAcct.email}). Aktifkan izin multi-akun dengan catatan audit bila memang diperlukan.`,
+          code: 409,
+        });
+        return;
+      }
+      finalPersId = pRow.id;
+      finalFullName = finalFullName || pRow.full_name;
+      finalProvCode = provinceCode ? String(provinceCode) : pRow.province_code;
+      db.prepare('UPDATE personnel SET user_id = ?, updated_at = ? WHERE id = ?').run(userId, now, pRow.id);
+    } else if (mode === 'create_both') {
+      if (!finalFullName) {
+        res.status(422).json({ error: 'Nama lengkap wajib diisi untuk membuat profil personel dan akun sekaligus.' });
+        return;
+      }
+      const persId = crypto.randomUUID();
+      const refNo = nextReferenceNumber(db, 'PERS');
+      const memberNo = `DPBI-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
+      db.prepare(
+        `INSERT INTO personnel (id, member_number, reference_number, user_id, full_name, email, province_code, batch_id, position_title, bidang, role_code, personnel_status, verification_status, docs_checklist_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'batch-3', ?, ?, ?, 'aktif', 'terverifikasi', '{}', ?, ?)`
+      ).run(persId, memberNo, refNo, userId, finalFullName, cleanEmail, finalProvCode, ROLE_LABELS[role as RoleCode] ?? String(role), String(bidang || 'Umum'), String(role), now, now);
+      finalPersId = persId;
+    } else {
+      // operational_only: do NOT create a dummy personnel record
+      if (!finalFullName) {
+        res.status(422).json({ error: 'Nama akun operasional wajib diisi.' });
+        return;
+      }
+      finalPersId = null;
+    }
 
     db.prepare(
       `INSERT INTO users (id, email, password_hash, full_name, role, bidang, province_code, batch_id, personnel_id, account_status, is_demo, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'batch-3', ?, 'aktif', ?, ?)`
-    ).run(userId, cleanEmail, hashPassword(String(password)), String(fullName), String(role), String(bidang || 'Umum'), String(provinceCode || '31'), persId, IS_DEMO_MODE ? 1 : 0, now);
+    ).run(userId, cleanEmail, hashPassword(String(password)), finalFullName, String(role), String(bidang || 'Umum'), finalProvCode, finalPersId, IS_DEMO_MODE ? 1 : 0, now);
 
-    writeAuditLog(db, req.authUser!, 'CREATE_USER_DIRECT', 'user', cleanEmail, 'berhasil', `Role: ${role}`);
-    res.status(201).json({ ok: true, id: userId });
+    writeAuditLog(
+      db,
+      req.authUser!,
+      'CREATE_USER_DIRECT',
+      'user',
+      cleanEmail,
+      'berhasil',
+      `Mode: ${mode} | Role: ${role}${finalPersId ? ` | Personnel: ${finalPersId}` : ' | Tanpa profil personel'}`
+    );
+    res.status(201).json({ ok: true, id: userId, personnelId: finalPersId, linkMode: mode });
   });
 
   app.patch('/api/settings/users/:id/status', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {

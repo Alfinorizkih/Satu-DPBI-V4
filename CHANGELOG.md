@@ -4,6 +4,26 @@ Seluruh perubahan besar pada arsitektur, antarmuka, keamanan, pemetaan wilayah, 
 
 ---
 
+## [4.1.0] — Transformasi Total Tata Kelola, Program Unggulan, Persuratan Digital & Ketahanan Sistem
+
+### Arsitektur Data, Keamanan & Ketahanan Operasional
+- **Migrasi Skema Non-Destruktif (Migrasi 4–10)**: Penambahan tabel `org_position_history`, `import_batches`, `flagship_programs`, `approval_history`, `email_template_history`, `correspondence`, `correspondence_dispositions`, serta penyelarasan `/database/schema_mysql.sql`.
+- **Versioning & Mode Pemeliharaan**: Semantic Versioning `4.1.0` di `package.json`, endpoint `/api/system/version`, spanduk global **Mode Baca-Saja**, serta middleware `requireNotInMaintenance` (`HTTP 503`) untuk operasi tulis non-Super Admin.
+- **Backup WAL-Safe & Transaksi Atomik**: Backup SQLite menggunakan `VACUUM INTO` agar konsisten saat WAL aktif, pembersihan `-wal`/`-shm` saat pemulihan, dan konversi `nextReferenceNumber()` menggunakan `SAVEPOINT` SQLite agar aman di dalam transaksi majemuk.
+
+### Manajemen Personel, Organisasi, Approval & Handover
+- **Pemisahan Bersih Personel vs Akun vs Jabatan**: 3 mode pembuatan akun di `/pengaturan/pengguna` (`create_both`, `link_existing` dengan proteksi ganda `409`, `operational_only`), impor CSV berpeta kolom dengan deteksi duplikasi & *rollback* batch, serta siklus penuh undangan 6 tahap + cooldown 60 detik.
+- **Bagan Organisasi Hierarkis & Handover Paket Lengkap**: Struktur organisasi hierarkis dinamis (Pembina s.d. Alumni), posisi kosong, riwayat jabatan, cetak A4, ringkasan publik bebas-PII, serta serah terima Koordinator Wilayah dengan paket tugas/laporan/inventaris dan pencabutan sesi pejabat lama otomatis.
+- **Approval Engine Permanen & Pusat Revisi**: Riwayat `approval_history`, penanda SLA & eskalasi, blokir *self-approval* (`HTTP 403`), penugasan ulang beralasan, dan tab **Pusat Revisi Terpusat**.
+
+### Modul Baru & Ekspansi Fungsional
+- **Flagship Program Command Center (`/program`, `/program/:slug`)**: Pelacakan menyeluruh *Behind The Culture*, *Sedapnya Warisanku*, dan *Budaya Masuk Sekolah* terhubung ke Proposal, LKL, Tugas, Dokumen, Persuratan, dan Evaluasi (termasuk tampilan publik bebas-PII).
+- **Persuratan Digital & Disposisi (`/persuratan`)**: Agenda Surat Masuk/Keluar dengan penomoran atomik `DPBI/SURAT/...` dan disposisi bertenggat.
+- **Pusat Email 18 Templat Resmi & Repositori Versi**: 18 templat resmi DPBI, editor & pratinjau HTML/Teks, 11 variabel aman, riwayat edit templat, impor penerima CSV, serta penandaan versi dokumen usang (`replaced_by_id`).
+- **Tugas Ketergantungan, Evaluasi 6 Pihak & Kualitas Data**: Kunci ketergantungan tugas (`409`), 6 tipe penilai (`duta`, `panitia`, `peserta`, `sekolah`, `komunitas`, `mitra`), 7 pemeriksaan Data Quality Center, dan draft lapangan terisolasi per akun (`offlineDraft.ts`).
+
+---
+
 ## [3.0.0] — Perombakan Total UI/UX, Website Publik, Peta GeoJSON 38 Provinsi, 6 Bidang & Mesin Cetak A4
 
 ### Pemisahan Website Publik & CMS Mandiri

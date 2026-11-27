@@ -49,6 +49,8 @@ const MODULE_LINKS: Record<ModuleCode, { label: string; path: string }> = {
   perlindungan: { label: 'Perlindungan', path: '/perlindungan' },
   evaluasi: { label: 'Evaluasi', path: '/evaluasi' },
   email: { label: 'Pusat Email', path: '/email' },
+  program: { label: 'Program Unggulan', path: '/program' },
+  persuratan: { label: 'Persuratan & Disposisi', path: '/persuratan' },
   arsip: { label: 'Arsip & Alumni', path: '/arsip' },
   sistem: { label: 'Sistem', path: '/sistem' },
   pengaturan: { label: 'Pengaturan', path: '/pengaturan' },
@@ -114,6 +116,7 @@ export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [provinces, setProvinces] = useState<ProvinceRecord[]>([]);
   const [tasksDue, setTasksDue] = useState<TaskRecord[]>([]);
+  const [myTasks, setMyTasks] = useState<TaskRecord[]>([]);
   const [selectedProv, setSelectedProv] = useState<ProvinceRecord | null>(null);
   const [daysWindow, setDaysWindow] = useState<7 | 30 | 90>(30);
   const [loading, setLoading] = useState(true);
@@ -132,16 +135,19 @@ export function DashboardPage() {
         setProvinces((provRes as { provinces: ProvinceRecord[] }).provinces);
         if (taskRes) {
           const allTasks = (taskRes as { tasks: TaskRecord[] }).tasks || [];
-          setTasksDue(
-            allTasks
-              .filter((t) => t.status !== 'selesai' && t.status !== 'dibatalkan')
-              .sort((a, b) => a.deadline.localeCompare(b.deadline))
+          const active = allTasks
+            .filter((t) => t.status !== 'selesai' && t.status !== 'dibatalkan')
+            .sort((a, b) => a.deadline.localeCompare(b.deadline));
+          setTasksDue(active.slice(0, 5));
+          setMyTasks(
+            active
+              .filter((t) => t.assigneeId === user?.id || t.assigneeName === user?.fullName)
               .slice(0, 5)
           );
         }
       })
       .finally(() => setLoading(false));
-  }, [can, daysWindow]);
+  }, [can, daysWindow, user?.id, user?.fullName]);
 
   if (loading || !data || !user) {
     return <LoadingSkeleton rows={6} />;
@@ -334,6 +340,84 @@ export function DashboardPage() {
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{kpi.sub}</p>
           </button>
         ))}
+      </div>
+
+      {/* Widget Tugas Saya & Perlu Tindakan */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <GlassCard className="p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <ListTodo className="w-4 h-4 text-[#0EA5E9]" /> Tugas Saya
+            </h2>
+            <button type="button" onClick={() => navigate('/tugas-saya')} className="text-xs font-semibold text-[#0EA5E9] hover:underline">
+              Buka Tugas Saya
+            </button>
+          </div>
+          {myTasks.length === 0 ? (
+            <p className="text-xs text-slate-500 py-2">
+              Tidak ada tugas aktif yang tertaut langsung ke akun Anda saat ini.
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
+              {myTasks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => navigate(`/tugas/${t.id}`)}
+                  className="w-full text-left py-2 flex items-center justify-between gap-2 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 rounded-lg px-1"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate text-slate-900 dark:text-white">{t.title}</p>
+                    <p className="text-[11px] text-slate-500">Tenggat {formatTanggalIndonesia(t.deadline)} · Prioritas {t.priority}</p>
+                  </div>
+                  <StatusIndicator status={t.status} />
+                </button>
+              ))}
+            </div>
+          )}
+        </GlassCard>
+
+        <GlassCard className="p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Inbox className="w-4 h-4 text-amber-500" /> Perlu Tindakan Cepat
+            </h2>
+            {can('persetujuan', 'view') && (
+              <button type="button" onClick={() => navigate('/persetujuan')} className="text-xs font-semibold text-[#0EA5E9] hover:underline">
+                Pusat Persetujuan
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <button
+              type="button"
+              onClick={() => navigate('/proposal')}
+              className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 text-left hover:border-[#0EA5E9]"
+            >
+              <p className="text-[11px] text-slate-500">Proposal Berjalan</p>
+              <p className="font-mono text-lg font-bold text-slate-900 dark:text-white tabular-nums">{data.summary.pendingProposals}</p>
+              <span className="text-[11px] text-[#0EA5E9] font-semibold">Tinjau Proposal →</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/laporan-kegiatan')}
+              className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 text-left hover:border-[#0EA5E9]"
+            >
+              <p className="text-[11px] text-slate-500">LKL Menunggu</p>
+              <p className="font-mono text-lg font-bold text-slate-900 dark:text-white tabular-nums">{data.summary.pendingLkl}</p>
+              <span className="text-[11px] text-[#0EA5E9] font-semibold">Periksa LKL →</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(can('program', 'view') ? '/program' : '/tugas')}
+              className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 text-left hover:border-[#0EA5E9]"
+            >
+              <p className="text-[11px] text-slate-500">Tugas Terlambat</p>
+              <p className="font-mono text-lg font-bold text-amber-600 tabular-nums">{data.summary.overdueTasks}</p>
+              <span className="text-[11px] text-[#0EA5E9] font-semibold">Selesaikan →</span>
+            </button>
+          </div>
+        </GlassCard>
       </div>
 
       {/* Analitik Kinerja & Jejak Kontribusi Terverifikasi */}

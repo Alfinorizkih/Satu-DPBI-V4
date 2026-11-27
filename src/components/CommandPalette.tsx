@@ -12,6 +12,8 @@ const QUICK_ROUTES: { label: string; path: string; module?: ModuleCode }[] = [
   { label: 'Peta & Pengelolaan 38 Provinsi', path: '/wilayah', module: 'wilayah' },
   { label: 'Manajemen Batch & Angkatan', path: '/angkatan', module: 'angkatan' },
   { label: 'Direktori & Akses Alumni', path: '/alumni', module: 'arsip' },
+  { label: 'Program Unggulan Nasional DPBI', path: '/program', module: 'program' },
+  { label: 'Persuratan & Disposisi Digital', path: '/persuratan', module: 'persuratan' },
   { label: 'Pusat Persetujuan Nasional (Approval Queue)', path: '/persetujuan', module: 'persetujuan' },
   { label: 'Pengajuan & Persetujuan Proposal', path: '/proposal', module: 'proposal' },
   { label: 'Laporan Kegiatan Lapangan (LKL)', path: '/laporan-kegiatan', module: 'lkl' },

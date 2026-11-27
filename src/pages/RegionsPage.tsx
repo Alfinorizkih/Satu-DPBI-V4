@@ -631,34 +631,97 @@ export function RegionsPage({ initialId }: { initialId?: string }) {
 
       {tab === 'handover' && (
         <GlassCard className="p-5 space-y-3">
-          <h2 className="text-sm font-bold">Berita Acara Serah Terima Koordinator Wilayah</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold">Berita Acara Serah Terima Koordinator Wilayah</h2>
+              <p className="text-xs text-slate-500">
+                Pengesahan serah terima otomatis mencabut seluruh sesi login aktif koordinator lama dan mencatat riwayat jabatan organisasi.
+              </p>
+            </div>
+          </div>
           <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
-            {handovers.map((h) => (
-              <div key={String(h.id)} className="py-3.5 flex flex-wrap items-center justify-between gap-4 text-xs">
-                <div className="space-y-1">
-                  <p className="font-mono text-[11px] text-[#0EA5E9]">{String(h.referenceNumber)}</p>
-                  <p className="font-bold text-sm">
-                    {String(h.provinceName)}: {String(h.outgoingCoordinatorName)} → {String(h.incomingCoordinatorName)}
-                  </p>
-                  <p className="text-slate-500 tabular-nums">
-                    Tugas aktif dialihkan: {Number(h.activeTasksCount)} · Proposal terbuka: {Number(h.openProposalsCount)}
-                  </p>
-                  <p className="text-slate-600 dark:text-slate-400">{String(h.notes)}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusIndicator status={String(h.status)} />
-                  {String(h.status) === 'menunggu_persetujuan' && can('organisasi', 'assign') && (
-                    <button
-                      type="button"
-                      onClick={() => handleApproveHandover(String(h.id))}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold"
-                    >
-                      Sahkan Serah Terima
-                    </button>
+            {handovers.map((h) => {
+              const snap = (h.packageSnapshot || null) as {
+                generatedAt?: string;
+                activeTasks?: { id: string; ref: string; title: string; deadline: string }[];
+                openProposals?: { id: string; ref: string; title: string; status: string }[];
+                pendingReportsCount?: number;
+                upcomingEventsCount?: number;
+              } | null;
+              return (
+                <div key={String(h.id)} className="py-4 space-y-3 text-xs">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="font-mono text-[11px] text-[#0EA5E9]">{String(h.referenceNumber)}</p>
+                      <p className="font-bold text-sm text-slate-900 dark:text-white">
+                        {String(h.provinceName)}: {String(h.outgoingCoordinatorName)} → {String(h.incomingCoordinatorName)}
+                      </p>
+                      <p className="text-slate-500 tabular-nums">
+                        Tugas aktif dialihkan: {Number(h.activeTasksCount)} · Proposal terbuka: {Number(h.openProposalsCount)}
+                        {snap ? ` · Laporan tertunda: ${snap.pendingReportsCount ?? 0} · Agenda wilayah: ${snap.upcomingEventsCount ?? 0}` : ''}
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400">{String(h.notes)}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <div className="flex items-center gap-2">
+                        <StatusIndicator status={String(h.status)} />
+                        {String(h.status) === 'menunggu_persetujuan' && can('organisasi', 'assign') && (
+                          <button
+                            type="button"
+                            onClick={() => handleApproveHandover(String(h.id))}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                          >
+                            Sahkan Serah Terima
+                          </button>
+                        )}
+                      </div>
+                      {String(h.status) === 'menunggu_persetujuan' && can('organisasi', 'assign') && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                          Pengesahan akan mencabut sesi aktif koordinator lama &amp; memperbarui riwayat jabatan.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {snap && ((snap.activeTasks && snap.activeTasks.length > 0) || (snap.openProposals && snap.openProposals.length > 0)) && (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                          Daftar Tugas Aktif ({snap.activeTasks?.length || 0})
+                        </p>
+                        {snap.activeTasks && snap.activeTasks.length > 0 ? (
+                          <ul className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                            {snap.activeTasks.slice(0, 5).map((t) => (
+                              <li key={t.id} className="truncate">
+                                <span className="font-mono text-[#0EA5E9]">{t.ref}</span> · {t.title} ({formatTanggalIndonesia(t.deadline)})
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">Tidak ada tugas aktif.</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                          Daftar Proposal Terbuka ({snap.openProposals?.length || 0})
+                        </p>
+                        {snap.openProposals && snap.openProposals.length > 0 ? (
+                          <ul className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                            {snap.openProposals.slice(0, 5).map((p) => (
+                              <li key={p.id} className="truncate">
+                                <span className="font-mono text-[#0EA5E9]">{p.ref}</span> · {p.title} ({p.status.replace(/_/g, ' ')})
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">Tidak ada proposal terbuka.</p>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </GlassCard>
       )}
@@ -669,11 +732,28 @@ export function RegionsPage({ initialId }: { initialId?: string }) {
             <h2 className="text-sm font-bold">Riwayat Verifikasi Lokasi On-Demand</h2>
             <div className="divide-y divide-slate-200/60 dark:divide-slate-800 text-xs">
               {locLogs.map((l) => (
-                <div key={String(l.id)} className="py-2.5">
-                  <p className="font-semibold">
-                    {String(l.user_name)} · {String(l.action_type)}
-                  </p>
-                  <p className="text-slate-500 mt-0.5">{String(l.reason)}</p>
+                <div key={String(l.id)} className="py-3 space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-slate-900 dark:text-white">
+                      {String(l.user_name)} · {String(l.action_type).replace(/_/g, ' ')}
+                    </p>
+                    <StatusIndicator
+                      status={l.matched ? 'terverifikasi' : 'ditolak'}
+                      customLabel={l.matched ? 'Sesuai Wilayah' : 'Luar Wilayah'}
+                    />
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-300">{String(l.reason)}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    {l.reported_location_text ? (
+                      <span>Dilaporkan: <strong>{String(l.reported_location_text)}</strong></span>
+                    ) : null}
+                    {l.verified_location_proof ? (
+                      <span>Bukti: <span className="font-mono">{String(l.verified_location_proof)}</span></span>
+                    ) : null}
+                    {l.created_at ? (
+                      <span className="tabular-nums">{formatTanggalIndonesia(String(l.created_at), true)}</span>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>

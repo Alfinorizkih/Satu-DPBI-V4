@@ -10,15 +10,29 @@ interface PublicCmsPayload {
   cms?: Record<string, { title: string; body: string; updatedAt?: string }>;
 }
 
+interface PublicOrgPosition {
+  id: string;
+  title: string;
+  bidang: string;
+  level: string;
+  category: string;
+  isVacant: boolean;
+  holderName: string | null;
+}
+
 export function PublicAboutPage() {
   const { navigate } = useAuth();
   const [cms, setCms] = useState<Record<string, { title: string; body: string }>>({});
+  const [positions, setPositions] = useState<PublicOrgPosition[]>([]);
 
   useEffect(() => {
     apiGet<PublicCmsPayload>('/api/public/overview', true)
       .then((d) => {
         if (d.cms) setCms(d.cms);
       })
+      .catch(() => {});
+    apiGet<{ positions: PublicOrgPosition[] }>('/api/public/organization', true)
+      .then((d) => setPositions(d.positions || []))
       .catch(() => {});
   }, []);
 
@@ -116,6 +130,40 @@ export function PublicAboutPage() {
             ))}
           </div>
         </section>
+
+        {/* Public Organization Structure Overview */}
+        {positions.length > 0 && (
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-[#0EA5E9]">Susunan Kepengurusan Nasional (Publik)</p>
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-0.5">
+                Bagan Jabatan Inti Organisasi
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {positions.slice(0, 12).map((pos) => (
+                <GlassCard key={pos.id} className="p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-[#0EA5E9] truncate">{pos.category}</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{pos.title}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {pos.isVacant ? 'Posisi Terbuka / Lowong' : pos.holderName || 'Terisi'}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                      pos.isVacant
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                        : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                    }`}
+                  >
+                    {pos.isVacant ? 'Lowong' : 'Aktif'}
+                  </span>
+                </GlassCard>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       <PublicFooter />

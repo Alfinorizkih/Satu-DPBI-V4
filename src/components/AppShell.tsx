@@ -33,6 +33,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Sun,
   UserCheck,
   Users,
@@ -90,6 +91,7 @@ const NAV_GROUPS: NavGroup[] = [
     collapsible: true,
     items: [
       { label: 'Pusat Persetujuan', path: '/persetujuan', module: 'persetujuan', icon: CheckCircle2 },
+      { label: 'Program Unggulan', path: '/program', module: 'program', icon: Sparkles },
       { label: 'Proposal', path: '/proposal', module: 'proposal', icon: FileCheck2 },
       { label: 'Laporan Kegiatan', path: '/laporan-kegiatan', module: 'lkl', icon: ClipboardCheck },
       { label: 'Laporan Koordinator', path: '/laporan-koordinator', module: 'laporan_koordinator', icon: FileSpreadsheet },
@@ -102,6 +104,7 @@ const NAV_GROUPS: NavGroup[] = [
     group: 'Informasi',
     collapsible: true,
     items: [
+      { label: 'Persuratan & Disposisi', path: '/persuratan', module: 'persuratan', icon: FileSpreadsheet },
       { label: 'Pusat Email', path: '/email', module: 'email', icon: Mail },
       { label: 'Pengumuman', path: '/pengumuman', module: 'pengumuman', icon: Megaphone },
       { label: 'Notifikasi', path: '/notifikasi', icon: Bell },
@@ -149,6 +152,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     refreshUser,
     idleWarningSecondsLeft,
     extendSession,
+    appVersion,
+    maintenanceMode,
+    maintenanceMessage,
   } = useAuth();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -396,6 +402,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
+        {maintenanceMode && (
+          <div
+            role="status"
+            className="bg-rose-600 text-white border-b border-rose-700 px-4 py-1.5 text-[11px] flex items-center justify-between gap-2 no-print"
+          >
+            <span className="truncate font-medium">
+              <strong>Mode Pemeliharaan Aktif:</strong>{' '}
+              {maintenanceMessage || 'Perubahan data ditangguhkan sementara oleh Super Admin.'}
+            </span>
+            <span className="hidden sm:inline font-semibold shrink-0">Mode Baca-Saja</span>
+          </div>
+        )}
+
         {/* Compact Top Header */}
         <header className="sticky top-0 z-30 glass-sidebar border-b border-slate-200/80 dark:border-slate-800 px-4 lg:px-6 h-14 flex items-center justify-between gap-3 no-print">
           <div className="flex items-center gap-2 min-w-0">
@@ -611,7 +630,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <p>
               Hak Cipta © {new Date().getFullYear()} Duta Pelajar Berbudaya Indonesia (DPBI) ·{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">SATU DPBI</span> — Satu Sistem, Satu Data, Satu Koordinasi.
+              <span className="font-medium text-slate-700 dark:text-slate-300">SATU DPBI v{appVersion}</span> — Satu Sistem, Satu Data, Satu Koordinasi.
             </p>
             <div className="flex flex-wrap items-center gap-4 font-medium shrink-0">
               <button

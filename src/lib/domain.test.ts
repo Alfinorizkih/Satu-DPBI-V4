@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ALLOWED_EMAIL_VARIABLES,
   BASE_ROLE_PERMISSIONS,
   calculateAlumniWindow,
   calculateProfileCompleteness,
@@ -21,6 +22,12 @@ import {
   validateEmailTemplatePlaceholders,
   verifyCoordinateInProvince,
 } from './rbac';
+import {
+  clearAllUserDrafts,
+  clearOfflineDraft,
+  loadOfflineDraft,
+  saveOfflineDraft,
+} from './offlineDraft';
 import {
   computeCollectionBBox,
   computeFeatureSvgCenter,
@@ -473,4 +480,88 @@ test('Approval Center and Email Center routes and BASE_ROLE_PERMISSIONS enforce 
   assert.equal(BASE_ROLE_PERMISSIONS.alumni.persetujuan, undefined);
   assert.equal(BASE_ROLE_PERMISSIONS.alumni.email, undefined);
 });
+
+test('v4.1.0: supports all 11 email template variables, Flagship Program & Persuratan routes/RBAC, and SURAT/PROG numbers', () => {
+  assert.equal(ALLOWED_EMAIL_VARIABLES.length, 11);
+  assert.deepEqual(
+    [...ALLOWED_EMAIL_VARIABLES],
+    ['nama', 'email', 'jabatan', 'role', 'provinsi', 'angkatan', 'nomor_surat', 'tanggal', 'tenggat', 'tautan', 'referensi']
+  );
+  const allVarsTemplate = ALLOWED_EMAIL_VARIABLES.map((v) => `{{${v}}}`).join(' | ');
+  const check = validateEmailTemplatePlaceholders(allVarsTemplate);
+  assert.equal(check.valid, true);
+  assert.equal(check.variables.length, 11);
+
+  assert.equal(formatReferenceNumber('SURAT', 2026, 7), 'DPBI/SURAT/2026/0007');
+  assert.equal(formatReferenceNumber('PROG', 2026, 3), 'DPBI/PROG/2026/0003');
+
+  assert.equal(isPublicWebsitePath('/program'), true);
+  assert.equal(isPublicWebsitePath('/program/pelajar-berbudaya'), true);
+
+  assert.deepEqual(matchPrivateRoute('/program'), {
+    kind: 'programs',
+    module: 'program',
+    title: 'Pusat Program Unggulan DPBI',
+  });
+  assert.deepEqual(matchPrivateRoute('/program/pelajar-berbudaya'), {
+    kind: 'programs',
+    module: 'program',
+    title: 'Detail Program Unggulan',
+    slug: 'pelajar-berbudaya',
+  });
+  assert.deepEqual(matchPrivateRoute('/persuratan'), {
+    kind: 'correspondence',
+    module: 'persuratan',
+    title: 'Persuratan & Disposisi Resmi',
+  });
+  assert.equal(resolveBaseNavPath('/program/pelajar-berbudaya'), '/program');
+  assert.equal(resolveBaseNavPath('/persuratan/corr-1'), '/persuratan');
+
+  assert.ok(BASE_ROLE_PERMISSIONS.super_admin.program?.includes('manage'));
+  assert.ok(BASE_ROLE_PERMISSIONS.sekretariat_nasional.persuratan?.includes('assign'));
+  assert.equal(BASE_ROLE_PERMISSIONS.alumni.persuratan, undefined);
+});
+
+test('v4.1.0: offlineDraft helper isolates drafts per user and clears cleanly', () => {
+  const store = new Map<string, string>();
+  const prevWindow = (globalThis as { window?: unknown }).window;
+  (globalThis as { window: unknown }).window = {
+    localStorage: {
+      get length() {
+        return store.size;
+      },
+      key(idx: number) {
+        return [...store.keys()][idx] ?? null;
+      },
+      getItem(k: string) {
+        return store.get(k) ?? null;
+      },
+      setItem(k: string, v: string) {
+        store.set(k, v);
+      },
+      removeItem(k: string) {
+        store.delete(k);
+      },
+    },
+  };
+
+  try {
+    const savedAt = saveOfflineDraft('usr-a', 'lkl_form', { activityName: 'Festival Duta', participantCount: 45 });
+    assert.ok(savedAt);
+    const loadedA = loadOfflineDraft<{ activityName: string; participantCount: number }>('usr-a', 'lkl_form');
+    assert.equal(loadedA?.data.activityName, 'Festival Duta');
+    assert.equal(loadOfflineDraft('usr-b', 'lkl_form'), null);
+
+    saveOfflineDraft('usr-a', 'coordinator_report_form', { periodLabel: 'November 2026' });
+    clearOfflineDraft('usr-a', 'lkl_form');
+    assert.equal(loadOfflineDraft('usr-a', 'lkl_form'), null);
+    assert.ok(loadOfflineDraft('usr-a', 'coordinator_report_form'));
+
+    clearAllUserDrafts('usr-a');
+    assert.equal(loadOfflineDraft('usr-a', 'coordinator_report_form'), null);
+  } finally {
+    (globalThis as { window?: unknown }).window = prevWindow;
+  }
+});
+
 

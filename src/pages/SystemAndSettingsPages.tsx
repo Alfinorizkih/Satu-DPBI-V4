@@ -33,14 +33,14 @@ import {
   StatusIndicator,
 } from '../components/ui/Primitives';
 import { BASE_ROLE_PERMISSIONS, formatTanggalIndonesia, OFFICIAL_BIDANGS, ROLE_LABELS } from '../lib/rbac';
-import type { ModuleCode, RoleCode } from '../lib/types';
+import type { ModuleCode, PersonnelRecord, RoleCode } from '../lib/types';
 
 export function SystemAdminPage({
   initialTab = 'storage',
 }: {
   initialTab?: 'storage' | 'backup' | 'kualitas' | 'kesehatan' | 'otomatisasi' | 'kemendikdasmen' | 'audit' | 'timeline';
 }) {
-  const { can, notify } = useAuth();
+  const { can, notify, navigate, refreshSystemMeta } = useAuth();
   const [tab, setTab] = useState<
     'storage' | 'backup' | 'kualitas' | 'kesehatan' | 'otomatisasi' | 'kemendikdasmen' | 'audit' | 'timeline'
   >(initialTab);
@@ -48,6 +48,9 @@ export function SystemAdminPage({
   const [loading, setLoading] = useState(true);
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState<string | null>(null);
   const [restoreChecked, setRestoreChecked] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState<'semua' | 'tinggi' | 'sedang' | 'rendah'>('semua');
+  const [maintMsgDraft, setMaintMsgDraft] = useState('');
+  const [togglingMaint, setTogglingMaint] = useState(false);
 
   useEffect(() => {
     setTab(initialTab);
@@ -55,14 +58,42 @@ export function SystemAdminPage({
 
   const load = () => {
     setLoading(true);
-    apiGet('/api/system/overview')
-      .then(setData)
+    apiGet<any>('/api/system/overview')
+      .then((res) => {
+        setData(res);
+        setMaintMsgDraft(
+          res?.maintenanceMessage ||
+            'Portal sedang menjalani pemeliharaan sistem terjadwal oleh Super Admin. Operasi tulis sementara ditangguhkan.'
+        );
+      })
       .catch((err) => notify(err instanceof Error ? err.message : 'Gagal memuat ikhtisar sistem.', 'error'))
       .finally(() => setLoading(false));
   };
   useEffect(() => {
     load();
   }, []);
+
+  const handleToggleMaintenance = async (nextEnabled: boolean) => {
+    setTogglingMaint(true);
+    try {
+      const res = await apiPost<{ maintenanceMode: boolean; maintenanceMessage: string }>('/api/system/maintenance', {
+        enabled: nextEnabled,
+        message: maintMsgDraft,
+      });
+      await refreshSystemMeta();
+      notify(
+        res.maintenanceMode
+          ? 'Mode Pemeliharaan DIAKTIFKAN. Operasi tulis pengguna lain ditangguhkan sementara.'
+          : 'Mode Pemeliharaan DINONAKTIFKAN. Seluruh operasi normal kembali berjalan.',
+        res.maintenanceMode ? 'warning' : 'success'
+      );
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengubah mode pemeliharaan.', 'error');
+    } finally {
+      setTogglingMaint(false);
+    }
+  };
 
   const handleBackup = async () => {
     try {
@@ -129,11 +160,16 @@ export function SystemAdminPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
-            Pusat Kendali Sistem, Storage & Audit
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+              Pusat Kendali Sistem, Storage &amp; Audit
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 font-mono text-xs font-semibold text-[#0EA5E9]">
+              v{data.version || '4.1.0'}
+            </span>
+          </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Monitoring kapasitas penyimpanan, backup & pemulihan tervalidasi, kualitas data, otomatisasi, integrasi pendidikan, dan Audit Log.
+            Monitoring kapasitas penyimpanan, backup WAL-safe &amp; pemulihan, kualitas data, mode pemeliharaan, otomatisasi, dan Audit Log.
           </p>
         </div>
         <button
@@ -145,12 +181,31 @@ export function SystemAdminPage({
         </button>
       </div>
 
+      {data.maintenanceMode && (
+        <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="space-y-0.5">
+            <p className="font-bold text-amber-900 dark:text-amber-200">Mode Pemeliharaan Sedang Aktif</p>
+            <p className="text-amber-800 dark:text-amber-300">{data.maintenanceMessage}</p>
+          </div>
+          {can('sistem', 'configure') && (
+            <button
+              type="button"
+              disabled={togglingMaint}
+              onClick={() => handleToggleMaintenance(false)}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+            >
+              Nonaktifkan Pemeliharaan
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
         {[
           ['storage', 'Storage Control'],
           ['backup', 'Backup & Restore'],
-          ['kualitas', 'Data Quality'],
-          ['kesehatan', 'System Health'],
+          ['kualitas', `Data Quality (${data.findings?.length || 0})`],
+          ['kesehatan', 'System Health & Pemeliharaan'],
           ['otomatisasi', 'Automation Center'],
           ['kemendikdasmen', 'Integrasi Kemendikdasmen'],
           ['audit', 'Audit Log'],
@@ -209,10 +264,10 @@ export function SystemAdminPage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold flex items-center gap-2">
-                <DatabaseBackup className="w-4 h-4 text-[#0EA5E9]" /> Manajemen Backup & Pemulihan
+                <DatabaseBackup className="w-4 h-4 text-[#0EA5E9]" /> Manajemen Backup &amp; Pemulihan WAL-Safe
               </h2>
               <p className="text-xs text-slate-500">
-                Salinan database & berkas privat dikemas dalam arsip ZIP dengan checksum SHA-256.
+                Snapshot database menggunakan <code className="font-mono text-[#0EA5E9]">VACUUM INTO</code> (WAL-safe), pembersihan sidecar <code className="font-mono">-wal/-shm</code> saat restore, dan arsip ZIP tervalidasi checksum SHA-256.
               </p>
             </div>
             {can('sistem', 'manage') && (
@@ -251,27 +306,67 @@ export function SystemAdminPage({
         </GlassCard>
       )}
 
-      {tab === 'kualitas' && (
-        <GlassCard className="p-5 space-y-3 text-xs">
-          <h2 className="text-sm font-bold">Data Quality Center (Rekomendasi Tindak Lanjut — Tidak Menghapus Otomatis)</h2>
-          <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
-            {data.findings.length === 0 ? (
-              <p className="py-4 text-emerald-600 font-semibold">Tidak ada anomali kualitas data yang terdeteksi.</p>
-            ) : (
-              data.findings.map((f: any) => (
-                <div key={f.id} className="py-3 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">
-                      {f.type} <span className="text-slate-400">({f.severity})</span>
-                    </p>
-                    <p className="text-slate-500 mt-0.5">{f.detail}</p>
+      {tab === 'kualitas' && (() => {
+        const filteredFindings =
+          severityFilter === 'semua'
+            ? data.findings
+            : data.findings.filter((f: any) => f.severity === severityFilter);
+        return (
+          <GlassCard className="p-5 space-y-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold">Data Quality Center (7 Aturan Audit — Rekomendasi Tindak Lanjut)</h2>
+                <p className="text-slate-500 mt-0.5">Pemeriksaan otomatis tanpa penghapusan data sepihak.</p>
+              </div>
+              <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
+                {(['semua', 'tinggi', 'sedang', 'rendah'] as const).map((sev) => (
+                  <button
+                    key={sev}
+                    type="button"
+                    onClick={() => setSeverityFilter(sev)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize ${
+                      severityFilter === sev
+                        ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {sev}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
+              {filteredFindings.length === 0 ? (
+                <p className="py-4 text-emerald-600 font-semibold">Tidak ada anomali kualitas data pada filter ini.</p>
+              ) : (
+                filteredFindings.map((f: any) => (
+                  <div key={f.id} className="py-3 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-900 dark:text-white">{f.type}</p>
+                        <StatusIndicator
+                          status={f.severity === 'tinggi' ? 'kritis' : f.severity === 'sedang' ? 'peringatan' : 'info'}
+                          customLabel={f.severity}
+                        />
+                      </div>
+                      <p className="text-slate-500 mt-0.5">{f.detail}</p>
+                    </div>
+                    {f.actionPath && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(f.actionPath)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9] shrink-0"
+                      >
+                        Tindak Lanjuti
+                      </button>
+                    )}
                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </GlassCard>
-      )}
+                ))
+              )}
+            </div>
+          </GlassCard>
+        );
+      })()}
 
       {tab === 'kesehatan' && (
         <div className="space-y-4">
@@ -283,15 +378,56 @@ export function SystemAdminPage({
             </GlassCard>
             <GlassCard className="p-5 space-y-1">
               <Shield className="w-5 h-5 text-emerald-500" />
-              <p className="font-bold text-sm mt-2">Autentikasi & RBAC Server</p>
+              <p className="font-bold text-sm mt-2">Autentikasi &amp; RBAC Server</p>
               <StatusIndicator status={data.health.authSessionEngine} />
             </GlassCard>
             <GlassCard className="p-5 space-y-1">
               <CheckCircle2 className="w-5 h-5 text-[#0EA5E9]" />
-              <p className="font-bold text-sm mt-2">Uptime Layanan</p>
+              <p className="font-bold text-sm mt-2">Uptime Layanan (v{data.version || '4.1.0'})</p>
               <p className="font-mono text-lg font-bold tabular-nums">{data.health.uptimeSeconds} detik</p>
             </GlassCard>
           </div>
+
+          {can('sistem', 'configure') && (
+            <GlassCard className="p-5 space-y-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Kendali Mode Pemeliharaan (Maintenance Mode)
+                  </h2>
+                  <p className="text-slate-500 mt-0.5">
+                    Saat aktif, operasi tulis (POST/PUT/PATCH/DELETE) untuk peran selain Super Admin akan diblokir sementara (HTTP 503).
+                  </p>
+                </div>
+                <StatusIndicator
+                  status={data.maintenanceMode ? 'peringatan' : 'aktif'}
+                  customLabel={data.maintenanceMode ? 'Pemeliharaan Aktif' : 'Operasional Normal'}
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Pesan Pemeliharaan untuk Pengguna</label>
+                <input
+                  value={maintMsgDraft}
+                  onChange={(e) => setMaintMsgDraft(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={togglingMaint}
+                  onClick={() => handleToggleMaintenance(!data.maintenanceMode)}
+                  className={`px-4 py-2 rounded-xl font-semibold text-white ${
+                    data.maintenanceMode
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
+                >
+                  {data.maintenanceMode ? 'Nonaktifkan Mode Pemeliharaan' : 'Aktifkan Mode Pemeliharaan'}
+                </button>
+              </div>
+            </GlassCard>
+          )}
 
           <GlassCard className="p-5 space-y-3 text-xs">
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -451,6 +587,8 @@ const MODULE_LABELS: Record<ModuleCode, string> = {
   perlindungan: 'Safeguarding',
   evaluasi: 'Evaluasi Kinerja',
   email: 'Pusat Email',
+  program: 'Program Unggulan',
+  persuratan: 'Persuratan & Disposisi',
   arsip: 'Arsip & Ekspor',
   sistem: 'Pusat Kendali Sistem',
   pengaturan: 'Pengaturan',
@@ -515,7 +653,11 @@ export function SettingsPage({
 
   // User modal & confirmation
   const [createUserOpen, setCreateUserOpen] = useState(false);
+  const [personnelList, setPersonnelList] = useState<PersonnelRecord[]>([]);
   const [userForm, setUserForm] = useState({
+    linkMode: 'create_both' as 'create_both' | 'link_existing' | 'operational_only',
+    personnelId: '',
+    allowMultipleAccounts: false,
     fullName: '',
     email: '',
     password: '',
@@ -546,6 +688,10 @@ export function SettingsPage({
       if (can('pengaturan', 'manage')) {
         const uRes = await apiGet<{ users: any[] }>('/api/settings/users');
         setUsers(uRes.users);
+        if (can('personalia', 'view')) {
+          const pRes = await apiGet<{ personnel: PersonnelRecord[] }>('/api/personnel').catch(() => ({ personnel: [] }));
+          setPersonnelList(pRes.personnel || []);
+        }
       }
       if (canManageCms) {
         const cmsRes = await apiGet<{ contents: any[]; helpArticles: any[] }>('/api/cms');
@@ -620,10 +766,23 @@ export function SettingsPage({
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiPost('/api/settings/users', userForm);
+      await apiPost('/api/settings/users', {
+        ...userForm,
+        personnelId: userForm.linkMode === 'link_existing' ? userForm.personnelId : undefined,
+      });
       notify('Akun pengguna baru berhasil dibuat.', 'success');
       setCreateUserOpen(false);
-      setUserForm({ fullName: '', email: '', password: '', role: 'duta', provinceCode: '32', bidang: 'Umum' });
+      setUserForm({
+        linkMode: 'create_both',
+        personnelId: '',
+        allowMultipleAccounts: false,
+        fullName: '',
+        email: '',
+        password: '',
+        role: 'duta',
+        provinceCode: '32',
+        bidang: 'Umum',
+      });
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal membuat akun.', 'error');
@@ -678,8 +837,22 @@ export function SettingsPage({
       notify('Masa berlaku sesi wajib berada di antara 1 hingga maksimal 24 jam.', 'error');
       return;
     }
+    const idleMin = Number(config.settings.idle_timeout_minutes || 45);
+    if (!Number.isFinite(idleMin) || idleMin < 5 || idleMin > 480) {
+      notify('Batas tidak aktif (idle) wajib berada di antara 5 hingga 480 menit.', 'error');
+      return;
+    }
     try {
-      await apiPatch('/api/system/settings', { settings: config.settings });
+      await apiPatch('/api/system/settings', {
+        settings: {
+          session_ttl_hours: String(Math.round(ttl)),
+          idle_timeout_minutes: String(Math.round(idleMin)),
+          public_stats_approved: config.settings.public_stats_approved || 'true',
+          ...(config.settings.public_show_duta_count !== undefined
+            ? { public_show_duta_count: config.settings.public_show_duta_count }
+            : {}),
+        },
+      });
       notify('Konfigurasi organisasi dan kebijakan sesi disimpan.', 'success');
       load();
     } catch (err) {
@@ -1123,7 +1296,7 @@ export function SettingsPage({
           <div>
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">Matriks Peran & Hak Akses RBAC Nasional</h2>
             <p className="text-xs text-slate-500">
-              Menampilkan hak akses dasar setiap peran pada 18 modul SATU DPBI. Perubahan otoritas sementara dapat diberikan melalui Delegasi di halaman Organisasi.
+              Menampilkan hak akses dasar setiap peran pada 22 modul SATU DPBI. Perubahan otoritas sementara dapat diberikan melalui Delegasi di halaman Organisasi.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -1166,10 +1339,10 @@ export function SettingsPage({
               <div>
                 <label className="block font-semibold mb-1">Nama Organisasi Resmi</label>
                 <input
-                  disabled={!can('sistem', 'configure')}
-                  value={config.settings.organization_name || 'Duta Pelajar Berbudaya Indonesia (DPBI)'}
-                  onChange={(e) => setConfig({ ...config, settings: { ...config.settings, organization_name: e.target.value } })}
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  disabled
+                  readOnly
+                  value="Duta Pelajar Berbudaya Indonesia (DPBI)"
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/60 px-3 py-2 text-slate-500"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -1191,10 +1364,10 @@ export function SettingsPage({
                   <input
                     type="number"
                     min={5}
-                    max={240}
+                    max={480}
                     disabled={!can('sistem', 'configure')}
-                    value={config.settings.session_idle_minutes || '45'}
-                    onChange={(e) => setConfig({ ...config, settings: { ...config.settings, session_idle_minutes: e.target.value } })}
+                    value={config.settings.idle_timeout_minutes || '45'}
+                    onChange={(e) => setConfig({ ...config, settings: { ...config.settings, idle_timeout_minutes: e.target.value } })}
                     className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 tabular-nums"
                   />
                 </div>
@@ -1495,9 +1668,67 @@ export function SettingsPage({
       <Modal open={createUserOpen} onClose={() => setCreateUserOpen(false)} title="Buat Akun Pengguna Langsung (Super Admin)">
         <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
           <div>
-            <label className="block font-semibold mb-1">Nama Lengkap *</label>
+            <label className="block font-semibold mb-1">Mode Pembuatan &amp; Penautan Personel</label>
+            <select
+              value={userForm.linkMode}
+              onChange={(e) =>
+                setUserForm({
+                  ...userForm,
+                  linkMode: e.target.value as 'create_both' | 'link_existing' | 'operational_only',
+                })
+              }
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            >
+              <option value="create_both">Buat Akun + Profil Personel Baru Sekaligus</option>
+              <option value="link_existing">Tautkan ke Data Personel yang Sudah Ada</option>
+              <option value="operational_only">Akun Operasional Saja (Tanpa Data Personel)</option>
+            </select>
+          </div>
+
+          {userForm.linkMode === 'link_existing' && (
+            <div className="space-y-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
+              <div>
+                <label className="block font-semibold mb-1">Pilih Personel *</label>
+                <select
+                  required
+                  value={userForm.personnelId}
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    const match = personnelList.find((p) => p.id === pid);
+                    setUserForm({
+                      ...userForm,
+                      personnelId: pid,
+                      fullName: match?.fullName || userForm.fullName,
+                      provinceCode: match?.provinceCode || userForm.provinceCode,
+                    });
+                  }}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                >
+                  <option value="">Pilih personel...</option>
+                  {personnelList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.memberNumber} — {p.fullName} ({p.provinceName})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={userForm.allowMultipleAccounts}
+                  onChange={(e) => setUserForm({ ...userForm, allowMultipleAccounts: e.target.checked })}
+                />
+                <span>Izinkan multi-akun aktif untuk personel ini (tercatat di Audit Log)</span>
+              </label>
+            </div>
+          )}
+
+          <div>
+            <label className="block font-semibold mb-1">
+              Nama Lengkap {userForm.linkMode === 'link_existing' ? '(Opsional, default nama personel)' : '*'}
+            </label>
             <input
-              required
+              required={userForm.linkMode !== 'link_existing'}
               value={userForm.fullName}
               onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })}
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"

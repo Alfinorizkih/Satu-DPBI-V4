@@ -13,7 +13,7 @@ import {
 import { ApiError, apiGet, apiPost } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { formatTanggalIndonesia } from '../lib/rbac';
-import type { ProvinceRecord, RegencyRecord, RoleCode } from '../lib/types';
+import type { FlagshipProgramRecord, ProvinceRecord, RegencyRecord, RoleCode } from '../lib/types';
 import { IndonesiaMap } from '../components/IndonesiaMap';
 import { PublicFooter, PublicNavbar } from '../components/public/PublicChrome';
 import { GlassCard, StatusIndicator } from '../components/ui/Primitives';
@@ -89,8 +89,26 @@ export function PublicPortalPage({
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [demoExpanded, setDemoExpanded] = useState(true);
 
+  const [publicPrograms, setPublicPrograms] = useState<FlagshipProgramRecord[]>([]);
+  const [invitePreview, setInvitePreview] = useState<{
+    valid: boolean;
+    fullName: string;
+    emailMasked: string;
+    roleLabel: string;
+    provinceName: string;
+    expiresAt: string;
+  } | null>(null);
+  const [verifyingInvite, setVerifyingInvite] = useState(false);
+
   useEffect(() => {
     setAuthTab(initialAuthTab);
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const qTok = sp.get('token');
+      if (qTok && initialAuthTab === 'invite') {
+        setToken(qTok);
+      }
+    }
   }, [initialAuthTab]);
 
   useEffect(() => {
@@ -102,7 +120,44 @@ export function PublicPortalPage({
         }
       })
       .catch(() => {});
-  }, []);
+    if (mode === 'home') {
+      apiGet<{ programs: FlagshipProgramRecord[] }>('/api/public/programs', true)
+        .then((d) => setPublicPrograms(d.programs || []))
+        .catch(() => {});
+    }
+  }, [mode]);
+
+  const handleVerifyInvitationToken = async (tokVal?: string) => {
+    const clean = (tokVal ?? token).trim();
+    if (!clean) {
+      setInvitePreview(null);
+      return;
+    }
+    setVerifyingInvite(true);
+    setError(null);
+    try {
+      const res = await apiGet<{
+        valid: boolean;
+        fullName: string;
+        emailMasked: string;
+        roleLabel: string;
+        provinceName: string;
+        expiresAt: string;
+      }>(`/api/invitations/verify-token/${encodeURIComponent(clean)}`, true);
+      setInvitePreview(res);
+    } catch (err) {
+      setInvitePreview(null);
+      setError(err instanceof Error ? err.message : 'Token undangan tidak valid atau kedaluwarsa.');
+    } finally {
+      setVerifyingInvite(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode === 'auth' && authTab === 'invite' && token.trim().length >= 16) {
+      handleVerifyInvitationToken(token);
+    }
+  }, [mode, authTab]);
 
   useEffect(() => {
     const code = drillCode || selectedCode;
@@ -436,6 +491,53 @@ export function PublicPortalPage({
               </GlassCard>
             </div>
           </section>
+
+          {/* 3 Flagship Programs Showcase */}
+          {publicPrograms.length > 0 && (
+            <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-12 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#0EA5E9]">Pilar Gerakan Nasional</p>
+                  <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-0.5">
+                    3 Program Unggulan DPBI
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/program')}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0EA5E9] hover:underline whitespace-nowrap shrink-0"
+                >
+                  <span>Jelajahi Semua Program</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {publicPrograms.map((prog) => (
+                  <GlassCard key={prog.id} className="p-5 flex flex-col justify-between gap-3">
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold text-[#0EA5E9]">{prog.bidang}</p>
+                      <h3 className="font-display text-lg font-bold text-slate-900 dark:text-white">{prog.name}</h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-3">
+                        {prog.tagline} — {prog.description}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-200/80 dark:border-slate-800 text-xs">
+                      <span className="text-slate-500 tabular-nums">
+                        {prog.metrics?.approvedLklCount ?? 0} kegiatan · {(prog.metrics as { totalParticipants?: number } | undefined)?.totalParticipants ?? 0} peserta
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/program/${prog.slug}`)}
+                        className="font-semibold text-[#0EA5E9] hover:underline"
+                      >
+                        Detail
+                      </button>
+                    </div>
+                  </GlassCard>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Two-Column Institutional About + Public Announcements */}
           <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-14 grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -791,20 +893,43 @@ export function PublicPortalPage({
                     <div>
                       <h2 className="text-base font-bold text-slate-900 dark:text-white">Verifikasi Undangan &amp; Aktivasi Akun</h2>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        Masukkan token undangan satu kali pakai yang diterbitkan setelah pengajuan Koordinator Wilayah disetujui.
+                        Masukkan token undangan satu kali pakai yang diterbitkan setelah pengajuan Koordinator Wilayah atau Admin disetujui.
                       </p>
                     </div>
                     <div>
                       <label htmlFor="inv-token" className="block text-xs font-semibold mb-1">Token Undangan</label>
-                      <input
-                        id="inv-token"
-                        type="text"
-                        required
-                        value={token}
-                        onChange={(e) => setToken(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm font-mono"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          id="inv-token"
+                          type="text"
+                          required
+                          value={token}
+                          onChange={(e) => setToken(e.target.value)}
+                          placeholder="Tempel token undangan..."
+                          className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleVerifyInvitationToken()}
+                          disabled={verifyingInvite || !token.trim()}
+                          className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold hover:border-[#0EA5E9] shrink-0"
+                        >
+                          {verifyingInvite ? 'Mengecek...' : 'Cek Token'}
+                        </button>
+                      </div>
                     </div>
+
+                    {invitePreview && (
+                      <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 p-3 text-xs space-y-1">
+                        <p className="font-bold text-emerald-900 dark:text-emerald-200">
+                          Undangan Terverifikasi: {invitePreview.fullName}
+                        </p>
+                        <p className="text-emerald-800 dark:text-emerald-300">
+                          Email: <span className="font-mono">{invitePreview.emailMasked}</span> · Peran: {invitePreview.roleLabel} · Wilayah: {invitePreview.provinceName}
+                        </p>
+                      </div>
+                    )}
+
                     <div>
                       <label htmlFor="inv-pass" className="block text-xs font-semibold mb-1">Buat Kata Sandi Pribadi (Min. 8 Karakter)</label>
                       <input
@@ -824,7 +949,7 @@ export function PublicPortalPage({
                       disabled={submitting}
                       className="w-full py-2.5 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold"
                     >
-                      Aktifkan Akun Duta
+                      Aktifkan Akun Resmi
                     </button>
                   </form>
                 )}

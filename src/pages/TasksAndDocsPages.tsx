@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckSquare,
   Download,
   Eye,
   FileText,
   FolderOpen,
+  Link2,
+  Lock,
   MessageSquare,
   Paperclip,
   Plus,
@@ -25,7 +28,7 @@ import {
   StatusIndicator,
 } from '../components/ui/Primitives';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
-import type { DocumentRecord, PersonnelRecord, TaskRecord, TaskStatus } from '../lib/types';
+import type { DocumentRecord, FlagshipProgramRecord, PersonnelRecord, TaskRecord, TaskStatus } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
 function getTaskProgress(t: TaskRecord): number {
@@ -49,6 +52,7 @@ const PRIORITY_STYLES: Record<string, string> = {
 export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'; initialId?: string }) {
   const { user, can, notify, navigate } = useAuth();
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [programs, setPrograms] = useState<FlagshipProgramRecord[]>([]);
   const [view, setView] = useState<'list' | 'kanban' | 'calendar'>('list');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -65,6 +69,8 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
     deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
     provinceCode: '32',
     recurrence: 'tidak',
+    programId: '',
+    dependsOnTaskId: '',
     attachmentFileId: null as string | null,
     attachmentFileName: null as string | null,
   });
@@ -78,9 +84,13 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
 
   const load = () => {
     setLoading(true);
-    apiGet<{ tasks: TaskRecord[] }>('/api/tasks')
-      .then((res) => {
+    Promise.all([
+      apiGet<{ tasks: TaskRecord[] }>('/api/tasks'),
+      apiGet<{ programs: FlagshipProgramRecord[] }>('/api/programs').catch(() => ({ programs: [] })),
+    ])
+      .then(([res, progRes]) => {
         setTasks(res.tasks);
+        setPrograms(progRes.programs || []);
         if (initialId) {
           const found = res.tasks.find((t) => t.id === initialId || t.referenceNumber === initialId);
           if (found) setActiveTask(found);
@@ -143,7 +153,11 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiPost('/api/tasks', form);
+      await apiPost('/api/tasks', {
+        ...form,
+        programId: form.programId || null,
+        dependsOnTaskId: form.dependsOnTaskId || null,
+      });
       notify('Tugas baru ditambahkan.', 'success');
       setCreateOpen(false);
       setForm({
@@ -153,6 +167,8 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
         deadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
         provinceCode: '32',
         recurrence: 'tidak',
+        programId: '',
+        dependsOnTaskId: '',
         attachmentFileId: null,
         attachmentFileName: null,
       });
@@ -184,6 +200,9 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
     { status: 'selesai', label: 'Selesai' },
   ];
 
+  const programNameById = new Map(programs.map((pr) => [pr.id, pr.name]));
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+
   const scopedTasks =
     scope === 'mine' && user
       ? tasks.filter(
@@ -204,7 +223,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {scope === 'mine'
               ? 'Daftar tugas pribadi, subtugas, komentar koordinasi, dan tenggat waktu yang menjadi tanggung jawab Anda.'
-              : 'Pantau tugas operasional, prioritas, progres subtugas, penugasan per provinsi, dan tenggat waktu.'}
+              : 'Pantau tugas operasional, prioritas, dependensi prasyarat, progres subtugas, dan tenggat waktu.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -233,7 +252,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
       <div className="grid grid-cols-3 gap-3 text-xs">
         <GlassCard className="p-4">
           <p className="text-slate-500">Total Tugas Aktif</p>
-          <p className="font-display text-xl font-bold tabular-nums text-slate-900 dark:text-white mt-0.5">{tasks.length}</p>
+          <p className="font-display text-xl font-bold tabular-nums text-slate-900 dark:text-white mt-0.5">{scopedTasks.length}</p>
         </GlassCard>
         <GlassCard className="p-4">
           <p className="text-slate-500">Mendesak / Perhatian</p>
@@ -300,6 +319,9 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                   <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
                     {visibleTasks.map((t) => {
                       const pct = getTaskProgress(t);
+                      const depTask = t.dependsOnTaskId ? taskById.get(t.dependsOnTaskId) : undefined;
+                      const isBlocked = Boolean(depTask && depTask.status !== 'selesai');
+                      const progName = t.programId ? programNameById.get(t.programId) : null;
                       return (
                         <tr key={t.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                           <td className="py-3 pr-4 font-mono tabular-nums text-[#0EA5E9] font-semibold">
@@ -311,6 +333,24 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                               Prioritas: <span className={PRIORITY_STYLES[t.priority] || ''}>{t.priority}</span>
                               {t.checklist.length > 0 && ` · ${t.checklist.filter((c) => c.done).length}/${t.checklist.length} subtugas`}
                             </p>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {progName && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-[#0EA5E9] text-[10px] font-semibold">
+                                  <Link2 className="w-3 h-3" /> {progName}
+                                </span>
+                              )}
+                              {depTask && (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    isBlocked
+                                      ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300'
+                                      : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
+                                  }`}
+                                >
+                                  <Lock className="w-3 h-3" /> Prasyarat {depTask.referenceNumber} ({isBlocked ? 'Terkunci' : 'Terpenuhi'})
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 pr-4">
                             <p>{t.assigneeName}</p>
@@ -357,6 +397,9 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
               <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
                 {visibleTasks.map((t) => {
                   const pct = getTaskProgress(t);
+                  const depTask = t.dependsOnTaskId ? taskById.get(t.dependsOnTaskId) : undefined;
+                  const isBlocked = Boolean(depTask && depTask.status !== 'selesai');
+                  const progName = t.programId ? programNameById.get(t.programId) : null;
                   return (
                     <div key={t.id} className="py-3.5 space-y-2.5">
                       <div className="flex items-start justify-between gap-2">
@@ -366,6 +409,20 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                           <p className="text-[11px] text-slate-500">
                             {t.assigneeName} ({t.provinceName || 'Nasional'}) · Prioritas <span className={PRIORITY_STYLES[t.priority]}>{t.priority}</span>
                           </p>
+                          {(progName || depTask) && (
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {progName && (
+                                <span className="px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-[#0EA5E9] text-[10px] font-semibold">
+                                  {progName}
+                                </span>
+                              )}
+                              {depTask && (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${isBlocked ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                                  Prasyarat {depTask.referenceNumber} ({isBlocked ? 'Terkunci' : 'Selesai'})
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <StatusIndicator status={t.status} />
                       </div>
@@ -405,7 +462,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
       {view === 'kanban' && (
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {kanbanColumns.map((col) => {
-            const items = tasks.filter((t) => t.status === col.status);
+            const items = visibleTasks.filter((t) => t.status === col.status);
             return (
               <GlassCard key={col.status} className="p-3.5 space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold pb-2 border-b border-slate-200 dark:border-slate-800">
@@ -415,6 +472,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                 <div className="space-y-2.5">
                   {items.map((t) => {
                     const pct = getTaskProgress(t);
+                    const depTask = t.dependsOnTaskId ? taskById.get(t.dependsOnTaskId) : undefined;
                     return (
                       <div key={t.id} className="rounded-xl bg-white/85 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 p-3 space-y-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
@@ -423,6 +481,11 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                         </div>
                         <p className="font-semibold text-slate-900 dark:text-white">{t.title}</p>
                         <p className="text-[11px] text-slate-500">{t.assigneeName}</p>
+                        {depTask && (
+                          <p className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold">
+                            Prasyarat: {depTask.referenceNumber} ({depTask.status === 'selesai' ? 'Selesai' : 'Menunggu'})
+                          </p>
+                        )}
                         <div className="w-full h-1 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                           <div className="h-full bg-[#0EA5E9]" style={{ width: `${pct}%` }} />
                         </div>
@@ -446,7 +509,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
         <GlassCard className="p-5 space-y-3">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">Jadwal Tenggat Tugas (Urut Kronologis)</h2>
           <div className="divide-y divide-slate-200/60 dark:divide-slate-800 text-xs">
-            {tasks.map((t) => (
+            {visibleTasks.map((t) => (
               <div key={t.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
@@ -490,6 +553,33 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
                 ))}
               </select>
             </div>
+            {(activeTask.programId || activeTask.dependsOnTaskId) && (
+              <div className="flex flex-wrap gap-2">
+                {activeTask.programId && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-[#0EA5E9] font-semibold">
+                    <Link2 className="w-3.5 h-3.5" /> Program: {programNameById.get(activeTask.programId) || activeTask.programId}
+                  </span>
+                )}
+                {activeTask.dependsOnTaskId && (() => {
+                  const dep = taskById.get(activeTask.dependsOnTaskId);
+                  if (!dep) return null;
+                  const blocked = dep.status !== 'selesai';
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => openTaskDetail(dep)}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold ${
+                        blocked
+                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                          : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                      }`}
+                    >
+                      <Lock className="w-3.5 h-3.5" /> Prasyarat: {dep.referenceNumber} — {dep.title} ({blocked ? 'Belum Selesai' : 'Selesai'})
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{activeTask.description || 'Tidak ada catatan tambahan.'}</p>
             {activeTask.attachmentFileId && (
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 flex items-center justify-between gap-3">
@@ -614,6 +704,36 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+              <select
+                value={form.programId}
+                onChange={(e) => setForm({ ...form, programId: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Umum / Lintas Program</option>
+                {programs.map((pr) => (
+                  <option key={pr.id} value={pr.id}>{pr.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Tugas Prasyarat / Depends On (Opsional)</label>
+              <select
+                value={form.dependsOnTaskId}
+                onChange={(e) => setForm({ ...form, dependsOnTaskId: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Tanpa prasyarat</option>
+                {tasks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.referenceNumber} — {t.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <FileDropzone
             label="Lampiran Berkas Pendukung Tugas (PDF / Gambar, Opsional)"
             accept=".pdf,image/jpeg,image/png,image/webp"
@@ -678,6 +798,7 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
   const [tab, setTab] = useState<'semua' | 'sop' | 'materi' | 'arsip' | 'generator'>('semua');
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
+  const [programs, setPrograms] = useState<FlagshipProgramRecord[]>([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -717,16 +838,20 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
     });
   };
 
-  const [docForm, setDocForm] = useState({
+  const defaultDocForm = {
     title: '',
     category: 'SK',
     version: '1.0',
     accessLevel: 'internal_semua',
+    programId: '',
+    parentDocumentId: '',
     notes: '',
     fileId: null as string | null,
     fileName: null as string | null,
     fileSizeBytes: 0,
-  });
+  };
+
+  const [docForm, setDocForm] = useState(defaultDocForm);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [tplTitle, setTplTitle] = useState('Sertifikat Penetapan & Pengabdian Duta Pelajar Berbudaya Indonesia');
@@ -738,12 +863,14 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
   const load = async () => {
     setLoading(true);
     try {
-      const [dRes, pRes] = await Promise.all([
+      const [dRes, pRes, progRes] = await Promise.all([
         apiGet<{ documents: DocumentRecord[] }>('/api/documents'),
         can('personalia', 'view') ? apiGet<{ personnel: PersonnelRecord[] }>('/api/personnel') : Promise.resolve({ personnel: [] }),
+        apiGet<{ programs: FlagshipProgramRecord[] }>('/api/programs').catch(() => ({ programs: [] })),
       ]);
       setDocs(dRes.documents);
       setPersonnel(pRes.personnel);
+      setPrograms(progRes.programs || []);
       if (initialId) {
         const match = dRes.documents.find((d) => d.id === initialId || d.documentNumber === initialId);
         if (match) setPreviewDoc(match);
@@ -762,9 +889,14 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
   const handleUploadDoc = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await apiPost<{ documentNumber: string }>('/api/documents', docForm);
+      const res = await apiPost<{ documentNumber: string }>('/api/documents', {
+        ...docForm,
+        programId: docForm.programId || null,
+        parentDocumentId: docForm.parentDocumentId || null,
+      });
       notify(`Dokumen ${res.documentNumber} berhasil diterbitkan.`, 'success');
       setUploadOpen(false);
+      setDocForm(defaultDocForm);
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menerbitkan dokumen.', 'error');
@@ -812,10 +944,12 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
   if (loading) return <LoadingSkeleton rows={5} />;
 
   const categories = Array.from(new Set(docs.map((d) => d.category)));
+  const docById = new Map(docs.map((d) => [d.id, d]));
+  const docProgramById = new Map(programs.map((pr) => [pr.id, pr.name]));
   const q = search.trim().toLowerCase();
 
   const filteredDocs = docs.filter((d) => {
-    if (tab === 'sop' && d.category !== 'SOP' && d.category !== 'Pedoman') return false;
+    if (tab === 'sop' && !['SOP', 'Pedoman', 'Pedoman Program', 'Juknis', 'AD/ART'].includes(d.category)) return false;
     if (tab === 'materi' && d.category !== 'Materi Pembekalan') return false;
     if (tab === 'arsip' && d.status !== 'diarsipkan') return false;
     if (catFilter && d.category !== catFilter) return false;
@@ -939,33 +1073,62 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
-                    {pagedDocs.map((d) => (
-                      <tr key={d.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                        <td className="py-3 pr-4 font-mono tabular-nums text-[#0EA5E9] font-semibold">{d.documentNumber}</td>
-                        <td className="py-3 pr-4">
-                          <p className="font-semibold text-slate-900 dark:text-white">{d.title}</p>
-                          <p className="text-[11px] text-slate-500">{d.notes || `Penerbit: ${d.issuerName}`}</p>
-                        </td>
-                        <td className="py-3 pr-4 font-mono">{d.category} · v{d.version}</td>
-                        <td className="py-3 pr-4 tabular-nums">{formatTanggalIndonesia(d.issuedDate)}</td>
-                        <td className="py-3 pr-4"><StatusIndicator status={d.status} /></td>
-                        <td className="py-3 text-right whitespace-nowrap space-x-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openDocumentA4Print(d)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
-                          >
-                            <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak A4
-                          </button>
-                          {d.fileId ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setPreviewDoc(d)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
-                              >
-                                <Eye className="w-3.5 h-3.5" /> Pratinjau
-                              </button>
+                    {pagedDocs.map((d) => {
+                      const replacement = d.replacedById ? docById.get(d.replacedById) : undefined;
+                      const parentDoc = d.parentDocumentId ? docById.get(d.parentDocumentId) : undefined;
+                      const progName = d.programId ? docProgramById.get(d.programId) : null;
+                      return (
+                        <tr key={d.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                          <td className="py-3 pr-4 font-mono tabular-nums text-[#0EA5E9] font-semibold">{d.documentNumber}</td>
+                          <td className="py-3 pr-4">
+                            <p className="font-semibold text-slate-900 dark:text-white">{d.title}</p>
+                            <p className="text-[11px] text-slate-500">{d.notes || `Penerbit: ${d.issuerName}`}</p>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {progName && (
+                                <span className="px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-[#0EA5E9] text-[10px] font-semibold">
+                                  Program: {progName}
+                                </span>
+                              )}
+                              {parentDoc && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewDoc(parentDoc)}
+                                  className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-semibold hover:underline"
+                                >
+                                  Menggantikan {parentDoc.documentNumber}
+                                </button>
+                              )}
+                              {(d.status === 'diarsipkan' || replacement) && (
+                                <button
+                                  type="button"
+                                  onClick={() => replacement && setPreviewDoc(replacement)}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-[10px] font-semibold"
+                                >
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {replacement ? `Digantikan → ${replacement.documentNumber}` : 'Versi Diarsipkan'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4 font-mono">{d.category} · v{d.version}</td>
+                          <td className="py-3 pr-4 tabular-nums">{formatTanggalIndonesia(d.issuedDate)}</td>
+                          <td className="py-3 pr-4"><StatusIndicator status={d.status} /></td>
+                          <td className="py-3 text-right whitespace-nowrap space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openDocumentA4Print(d)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak A4
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewDoc(d)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9]"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Detail
+                            </button>
+                            {d.fileId ? (
                               <a
                                 href={apiUrl(`/api/files/${d.fileId}?download=1`)}
                                 target="_blank"
@@ -974,49 +1137,55 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                               >
                                 <Download className="w-3.5 h-3.5" /> Unduh
                               </a>
-                            </>
-                          ) : (
-                            <span className="text-slate-400">Terarsip</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
-                {pagedDocs.map((d) => (
-                  <div key={d.id} className="py-3.5 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-mono text-[11px] text-[#0EA5E9]">{d.documentNumber} · v{d.version}</p>
-                        <p className="text-sm font-bold text-slate-900 dark:text-white">{d.title}</p>
-                        <p className="text-[11px] text-slate-500">{d.category} · {formatTanggalIndonesia(d.issuedDate)}</p>
+                {pagedDocs.map((d) => {
+                  const replacement = d.replacedById ? docById.get(d.replacedById) : undefined;
+                  return (
+                    <div key={d.id} className="py-3.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-mono text-[11px] text-[#0EA5E9]">{d.documentNumber} · v{d.version}</p>
+                          <p className="text-sm font-bold text-slate-900 dark:text-white">{d.title}</p>
+                          <p className="text-[11px] text-slate-500">{d.category} · {formatTanggalIndonesia(d.issuedDate)}</p>
+                          {replacement && (
+                            <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 mt-1">
+                              Digantikan versi baru: {replacement.documentNumber}
+                            </p>
+                          )}
+                        </div>
+                        <StatusIndicator status={d.status} />
                       </div>
-                      <StatusIndicator status={d.status} />
-                    </div>
-                    {d.fileId && (
                       <div className="flex gap-2">
                         <button
                           type="button"
                           onClick={() => setPreviewDoc(d)}
                           className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                         >
-                          <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> Pratinjau
+                          <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> Detail / Pratinjau
                         </button>
-                        <a
-                          href={apiUrl(`/api/files/${d.fileId}?download=1`)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Unduh
-                        </a>
+                        {d.fileId && (
+                          <a
+                            href={apiUrl(`/api/files/${d.fileId}?download=1`)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-sky-50 dark:bg-sky-950 text-[#0EA5E9] font-semibold"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Unduh
+                          </a>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
 
               <Pagination page={page} totalItems={filteredDocs.length} pageSize={DOC_PAGE_SIZE} onPageChange={setPage} />
@@ -1087,7 +1256,7 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
         </GlassCard>
       )}
 
-      {/* Inline PDF Preview Modal */}
+      {/* Inline PDF Preview & Lineage Modal */}
       <Modal
         open={Boolean(previewDoc)}
         onClose={() => {
@@ -1098,15 +1267,58 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
         subtitle={previewDoc ? `${previewDoc.documentNumber} · v${previewDoc.version} · ${previewDoc.category}` : ''}
         maxWidth="max-w-4xl"
       >
-        {previewDoc?.fileId && (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
-              <iframe
-                title={`Pratinjau ${previewDoc.title}`}
-                src={apiUrl(`/api/files/${previewDoc.fileId}/preview`)}
-                className="w-full h-[60vh]"
-              />
-            </div>
+        {previewDoc && (
+          <div className="space-y-3 text-xs">
+            {previewDoc.replacedById && (() => {
+              const rep = docById.get(previewDoc.replacedById);
+              return (
+                <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-amber-200">
+                  <span>
+                    Dokumen ini telah diarsipkan dan digantikan oleh versi terbaru
+                    {rep ? ` (${rep.documentNumber} — ${rep.title} v${rep.version})` : ''}.
+                  </span>
+                  {rep && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewDoc(rep)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-semibold"
+                    >
+                      Buka Versi Terbaru
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+            {previewDoc.parentDocumentId && (() => {
+              const par = docById.get(previewDoc.parentDocumentId);
+              if (!par) return null;
+              return (
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 flex flex-wrap items-center justify-between gap-2">
+                  <span>Dokumen ini merupakan pembaruan dari: <strong>{par.documentNumber} — {par.title} (v{par.version})</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewDoc(par)}
+                    className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 font-semibold"
+                  >
+                    Lihat Versi Sebelumnya
+                  </button>
+                </div>
+              );
+            })()}
+            {previewDoc.fileId ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">
+                <iframe
+                  title={`Pratinjau ${previewDoc.title}`}
+                  src={apiUrl(`/api/files/${previewDoc.fileId}/preview`)}
+                  className="w-full h-[60vh]"
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-1 text-slate-600 dark:text-slate-300">
+                <p><strong>Penerbit:</strong> {previewDoc.issuerName} · <strong>Tanggal Terbit:</strong> {formatTanggalIndonesia(previewDoc.issuedDate)}</p>
+                <p><strong>Catatan:</strong> {previewDoc.notes || 'Tidak ada catatan tambahan.'}</p>
+              </div>
+            )}
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
@@ -1115,14 +1327,16 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
               >
                 <Printer className="w-4 h-4 text-[#0EA5E9]" /> Cetak Ringkasan A4
               </button>
-              <a
-                href={apiUrl(`/api/files/${previewDoc.fileId}?download=1`)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold"
-              >
-                <Download className="w-4 h-4" /> Unduh Salinan Resmi
-              </a>
+              {previewDoc.fileId && (
+                <a
+                  href={apiUrl(`/api/files/${previewDoc.fileId}?download=1`)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold"
+                >
+                  <Download className="w-4 h-4" /> Unduh Salinan Resmi
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -1147,12 +1361,30 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                 onChange={(e) => setDocForm({ ...docForm, category: e.target.value })}
                 className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
               >
-                <option value="SK">SK</option>
-                <option value="Surat Tugas">Surat Tugas</option>
-                <option value="SOP">SOP</option>
-                <option value="Pedoman">Pedoman</option>
-                <option value="Materi Pembekalan">Materi Pembekalan</option>
-                <option value="Sertifikat">Sertifikat</option>
+                {[
+                  'SK',
+                  'Surat Tugas',
+                  'Surat Masuk',
+                  'Surat Keluar',
+                  'Rekomendasi',
+                  'Sertifikat',
+                  'Proposal',
+                  'LKL',
+                  'Laporan',
+                  'SOP',
+                  'Pedoman',
+                  'Pedoman Program',
+                  'Juknis',
+                  'AD/ART',
+                  'Identitas Visual',
+                  'Logo',
+                  'Template Resmi',
+                  'Materi Pembekalan',
+                  'Formulir',
+                  'Arsip',
+                ].map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -1173,8 +1405,50 @@ export function DocumentsPage({ initialId }: { initialId?: string }) {
                 <option value="internal_semua">Semua Anggota Aktif</option>
                 <option value="koordinator_ke_atas">Koordinator ke Atas</option>
                 <option value="nasional_saja">Pengurus Nasional</option>
+                <option value="pribadi">Pribadi</option>
               </select>
             </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+              <select
+                value={docForm.programId}
+                onChange={(e) => setDocForm({ ...docForm, programId: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Umum / Non-Program</option>
+                {programs.map((pr) => (
+                  <option key={pr.id} value={pr.id}>{pr.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Menggantikan Dokumen Sebelumnya (Opsional)</label>
+              <select
+                value={docForm.parentDocumentId}
+                onChange={(e) => setDocForm({ ...docForm, parentDocumentId: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Dokumen Baru (Tidak Menggantikan)</option>
+                {docs
+                  .filter((d) => d.status === 'berlaku')
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.documentNumber} — {d.title} (v{d.version})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Catatan / Keterangan Versi</label>
+            <input
+              value={docForm.notes}
+              onChange={(e) => setDocForm({ ...docForm, notes: e.target.value })}
+              placeholder="Ringkasan perubahan atau ruang lingkup keberlakuan dokumen..."
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            />
           </div>
           <FileDropzone
             label="Unggah Berkas PDF Dokumen"

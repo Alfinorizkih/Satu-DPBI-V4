@@ -21,6 +21,57 @@ function buildEventTimestamps(eventDate: string, eventTime: string | null): { st
   return { startAt, endAt };
 }
 
+export function computeObjectDiff(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  fields: string[]
+): Record<string, { before: unknown; after: unknown }> {
+  const diff: Record<string, { before: unknown; after: unknown }> = {};
+  for (const f of fields) {
+    const prev = before[f] ?? null;
+    const next = after[f] ?? null;
+    if (String(prev) !== String(next)) {
+      diff[f] = { before: prev, after: next };
+    }
+  }
+  return diff;
+}
+
+export function recordApprovalHistory(
+  db: DatabaseSync,
+  params: {
+    entityType: 'proposal' | 'lkl' | 'coordinator_report' | 'account_request' | 'handover';
+    entityId: string;
+    action: string;
+    fromStatus: string | null;
+    toStatus: string;
+    stageLabel: string;
+    actor: Pick<AuthUser, 'id' | 'fullName' | 'role'>;
+    note?: string;
+    diff?: Record<string, { before: unknown; after: unknown }> | null;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO approval_history
+     (id, entity_type, entity_id, action, from_status, to_status, stage_label, actor_user_id, actor_name, actor_role, note, diff_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    crypto.randomUUID(),
+    params.entityType,
+    params.entityId,
+    params.action,
+    params.fromStatus,
+    params.toStatus,
+    params.stageLabel,
+    params.actor.id,
+    params.actor.fullName,
+    params.actor.role,
+    params.note || '',
+    params.diff && Object.keys(params.diff).length > 0 ? JSON.stringify(params.diff) : null,
+    new Date().toISOString()
+  );
+}
+
 /**
  * Orkestrasi otomatis saat Proposal disetujui:
  * 1. Membuat agenda kalender resmi bertaut (idempoten via proposal_id)
@@ -142,11 +193,12 @@ export function onProposalApproved(
     },
   ];
 
+  const programId = propRow.program_id ? String(propRow.program_id) : null;
   const createdTaskIds: string[] = [];
   const taskInsert = db.prepare(
     `INSERT INTO tasks
-     (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, proposal_id, event_id, category, created_at)
-     VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'tidak', ?, ?, ?, ?)`
+     (id, reference_number, title, description, priority, status, deadline, province_code, batch_id, assignee_id, assignee_name, creator_id, creator_name, checklist_json, is_template, recurrence, proposal_id, event_id, program_id, category, created_at)
+     VALUES (?, ?, ?, ?, ?, 'belum_dimulai', ?, ?, ?, ?, ?, ?, ?, ?, 0, 'tidak', ?, ?, ?, ?, ?)`
   );
 
   for (const ph of phases) {
@@ -169,6 +221,7 @@ export function onProposalApproved(
       JSON.stringify(ph.checklist),
       proposalId,
       eventId,
+      programId,
       ph.category,
       now
     );

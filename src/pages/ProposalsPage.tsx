@@ -14,8 +14,9 @@ import {
   StatusIndicator,
 } from '../components/ui';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
-import type { ProposalRecord } from '../lib/types';
+import type { FlagshipProgramRecord, ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia, OFFICIAL_BIDANGS, ROLE_LABELS } from '../lib/rbac';
+import { clearOfflineDraft, loadOfflineDraft, saveOfflineDraft } from '../lib/offlineDraft';
 
 const PAGE_SIZE = 10;
 
@@ -72,9 +73,13 @@ export function ProposalsPage({
   >([]);
   const [pendingDecision, setPendingDecision] = useState<'disetujui' | 'ditolak' | null>(null);
 
+  const [programs, setPrograms] = useState<FlagshipProgramRecord[]>([]);
+  const [offlineDraftBanner, setOfflineDraftBanner] = useState<{ savedAt: string; data: typeof defaultForm } | null>(null);
+
   const defaultForm = {
     title: '',
     bidang: OFFICIAL_BIDANGS[3].id as string,
+    programId: '',
     category: 'Lokakarya / Literasi Pelajar',
     riskLevel: 'sedang' as 'rendah' | 'sedang' | 'tinggi',
     usesDpbiIdentity: true,
@@ -91,6 +96,12 @@ export function ProposalsPage({
   };
 
   const [form, setForm] = useState(defaultForm);
+
+  useEffect(() => {
+    apiGet<{ programs: FlagshipProgramRecord[] }>('/api/programs')
+      .then((res) => setPrograms(res.programs || []))
+      .catch(() => setPrograms([]));
+  }, []);
 
   const load = (onlyMyBidang = bidangOnly) => {
     setLoading(true);
@@ -146,9 +157,11 @@ export function ProposalsPage({
 
   const openEditDraft = (p: ProposalRecord) => {
     setEditingDraftId(p.id);
+    setOfflineDraftBanner(null);
     setForm({
       title: p.title,
       bidang: p.bidang,
+      programId: p.programId || '',
       category: p.category,
       riskLevel: p.riskLevel,
       usesDpbiIdentity: p.usesDpbiIdentity,
@@ -171,6 +184,14 @@ export function ProposalsPage({
     setFormDirty(true);
     setForm((prev) => ({ ...prev, ...patch }));
   };
+
+  useEffect(() => {
+    if (!createOpen || editingDraftId || !formDirty) return;
+    const t = window.setTimeout(() => {
+      saveOfflineDraft(user?.id, 'proposal_form', form);
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [createOpen, editingDraftId, formDirty, form, user?.id]);
 
   useEffect(() => {
     if (!createOpen) {
@@ -218,7 +239,11 @@ export function ProposalsPage({
     setSubmitting(true);
     try {
       if (editingDraftId) {
-        await apiPatch(`/api/proposals/${editingDraftId}`, { ...form, submitNow: !saveAsDraft });
+        await apiPatch(`/api/proposals/${editingDraftId}`, {
+          ...form,
+          programId: form.programId || null,
+          submitNow: !saveAsDraft,
+        });
         notify(
           saveAsDraft ? 'Draft proposal diperbarui.' : 'Draft proposal berhasil dikirim untuk pemeriksaan.',
           'success'
@@ -226,8 +251,11 @@ export function ProposalsPage({
       } else {
         const res = await apiPost<{ referenceNumber: string; assignedApproverRole: string }>('/api/proposals', {
           ...form,
+          programId: form.programId || null,
           saveAsDraft,
         });
+        clearOfflineDraft(user?.id, 'proposal_form');
+        setOfflineDraftBanner(null);
         notify(
           saveAsDraft
             ? `Draft ${res.referenceNumber} tersimpan. Anda dapat melengkapinya kapan saja.`
@@ -306,6 +334,8 @@ export function ProposalsPage({
                 setEditingDraftId(null);
                 setForm(defaultForm);
                 setFormDirty(false);
+                const saved = loadOfflineDraft<typeof defaultForm>(user?.id, 'proposal_form');
+                setOfflineDraftBanner(saved ? { savedAt: saved.savedAt, data: saved.data } : null);
                 setCreateOpen(true);
                 navigate('/proposal/baru');
               }}
@@ -479,6 +509,40 @@ export function ProposalsPage({
         title={editingDraftId ? 'Lanjutkan Draft Proposal' : 'Ajukan Proposal Kegiatan Baru'}
       >
         <div className="space-y-4 text-xs">
+          {offlineDraftBanner && !editingDraftId && (
+            <div className="rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/80 dark:bg-sky-950/40 p-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-semibold text-slate-900 dark:text-white">Draf Lokal Tersimpan Otomatis</p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                  Tersimpan pada {formatTanggalIndonesia(offlineDraftBanner.savedAt, true)}. Pulihkan isian sebelumnya?
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm({ ...defaultForm, ...offlineDraftBanner.data });
+                    setFormDirty(true);
+                    setOfflineDraftBanner(null);
+                    notify('Draf proposal lokal dipulihkan.', 'info');
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[#0EA5E9] text-white font-semibold"
+                >
+                  Pulihkan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearOfflineDraft(user?.id, 'proposal_form');
+                    setOfflineDraftBanner(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold"
+                >
+                  Hapus Draf
+                </button>
+              </div>
+            </div>
+          )}
           {duplicateMatches.length > 0 && (
             <div
               role="alert"
@@ -497,6 +561,21 @@ export function ProposalsPage({
           <div>
             <label className="block font-semibold mb-1">Judul Kegiatan *</label>
             <input type="text" required value={form.title} onChange={(e) => updateProposalForm({ title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+            <select
+              value={form.programId}
+              onChange={(e) => updateProposalForm({ programId: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            >
+              <option value="">-- Tidak Terkait Program Khusus / Reguler --</option>
+              {programs.map((prog) => (
+                <option key={prog.id} value={prog.id}>
+                  {prog.name} ({prog.periodLabel})
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -721,6 +800,14 @@ export function ProposalsPage({
               <p><strong>Jadwal:</strong> {formatTanggalIndonesia(selected.eventDate)} ({selected.eventTime})</p>
               <p><strong>Lokasi:</strong> {selected.location || '—'}</p>
               <p><strong>Estimasi Peserta:</strong> {selected.estimatedParticipants} ({selected.activityMode})</p>
+              {selected.programId && (
+                <p className="sm:col-span-2">
+                  <strong>Program Unggulan:</strong>{' '}
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/60 text-[#0EA5E9] font-semibold">
+                    {programs.find((pr) => pr.id === selected.programId)?.name || selected.programId}
+                  </span>
+                </p>
+              )}
             </div>
 
             <div>

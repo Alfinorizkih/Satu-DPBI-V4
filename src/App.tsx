@@ -25,6 +25,7 @@ import { MyActivityPage } from './pages/MyActivityPage';
 import { AlumniPage } from './pages/AlumniPage';
 import { ApprovalCenterPage } from './pages/ApprovalCenterPage';
 import { EmailCenterPage } from './pages/EmailCenterPage';
+import { ProgramsPage, CorrespondencePage } from './pages/ProgramsAndCorrespondencePages';
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -102,6 +103,10 @@ function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
       return <ApprovalCenterPage />;
     case 'email':
       return <EmailCenterPage />;
+    case 'programs':
+      return <ProgramsPage initialSlug={route.slug} />;
+    case 'correspondence':
+      return <CorrespondencePage />;
     case 'system':
       return <SystemAdminPage initialTab={route.initialTab} />;
     case 'settings':
@@ -242,6 +247,13 @@ function AppRouter() {
     if (normalizedPath.startsWith('/wilayah/')) {
       const code = decodeURIComponent(normalizedPath.slice('/wilayah/'.length)).replace(/[^0-9]/g, '');
       return <PublicRegionsPage initialCode={code || undefined} />;
+    }
+    if (normalizedPath === '/program') {
+      return <ProgramsPage isPublicMode />;
+    }
+    if (normalizedPath.startsWith('/program/')) {
+      const slug = decodeURIComponent(normalizedPath.slice('/program/'.length));
+      return <ProgramsPage initialSlug={slug} isPublicMode />;
     }
     if (normalizedPath === '/login') {
       return <PublicPortalPage mode="auth" initialAuthTab="login" />;

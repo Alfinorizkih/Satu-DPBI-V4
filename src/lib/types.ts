@@ -52,6 +52,8 @@ export type ModuleCode =
   | 'arsip'
   | 'persetujuan'
   | 'email'
+  | 'program'
+  | 'persuratan'
   | 'sistem'
   | 'pengaturan';
 
@@ -300,6 +302,7 @@ export interface ProposalRecord {
   escalatedTo?: string | null;
   escalatedAt?: string | null;
   cancelledReason?: string | null;
+  programId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -340,6 +343,7 @@ export interface LklRecord {
   reviewNote: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  programId?: string | null;
   createdAt: string;
 }
 
@@ -363,6 +367,8 @@ export interface TaskRecord {
   proposalId?: string | null;
   lklId?: string | null;
   eventId?: string | null;
+  programId?: string | null;
+  dependsOnTaskId?: string | null;
   category?: string | null;
   isTemplate: boolean;
   recurrence: 'tidak' | 'bulanan' | 'mingguan';
@@ -377,6 +383,8 @@ export interface DocumentRecord {
   category:
     | 'SK'
     | 'Surat Tugas'
+    | 'Surat Masuk'
+    | 'Surat Keluar'
     | 'Rekomendasi'
     | 'Sertifikat'
     | 'Proposal'
@@ -384,6 +392,12 @@ export interface DocumentRecord {
     | 'Laporan'
     | 'SOP'
     | 'Pedoman'
+    | 'Pedoman Program'
+    | 'Juknis'
+    | 'AD/ART'
+    | 'Identitas Visual'
+    | 'Logo'
+    | 'Template Resmi'
     | 'Materi Pembekalan'
     | 'Formulir'
     | 'Arsip';
@@ -398,6 +412,9 @@ export interface DocumentRecord {
   fileSizeBytes: number;
   notes: string;
   expiresAt: string | null;
+  parentDocumentId?: string | null;
+  replacedById?: string | null;
+  programId?: string | null;
 }
 
 export interface NotificationRecord {
@@ -459,6 +476,8 @@ export interface EmailTemplateRecord {
   category: string;
   subject: string;
   bodyText: string;
+  bodyHtml?: string | null;
+  version?: number;
   isActive: boolean;
   updatedAt: string;
 }
@@ -497,9 +516,331 @@ export interface EmailLogRecord {
   subjectRendered: string;
   status: 'terkirim' | 'terantre_outbox' | 'gagal' | 'dibatalkan';
   deliveryMode: 'smtp_live' | 'sandbox_outbox';
+  deliveryChannel?: string;
   errorMessage: string | null;
   providerMessageId: string | null;
   sentAt: string | null;
   createdAt: string;
 }
+
+export type InvitationStatus =
+  | 'draft'
+  | 'menunggu_persetujuan'
+  | 'siap_diundang'
+  | 'undangan_terkirim'
+  | 'aktivasi_dibuka'
+  | 'aktif'
+  | 'kedaluwarsa'
+  | 'dibatalkan'
+  | 'ditolak';
+
+export interface InvitationRecord {
+  id: string;
+  email: string;
+  fullName: string;
+  role: RoleCode;
+  provinceCode: string | null;
+  batchId: string | null;
+  personnelId: string | null;
+  status: InvitationStatus;
+  resendCount: number;
+  lastSentAt: string | null;
+  openedAt: string | null;
+  expiresAt: string;
+  usedAt: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ImportBatchRecord {
+  id: string;
+  fileName: string;
+  totalRows: number;
+  successCount: number;
+  skippedCount: number;
+  errorCount: number;
+  status: 'selesai' | 'sebagian' | 'dibatalkan_rollback';
+  importedByName: string;
+  notes: string;
+  createdAt: string;
+  rolledBackAt?: string | null;
+}
+
+export interface OrgPositionHistoryRecord {
+  id: string;
+  positionId: string;
+  positionTitle: string;
+  personnelId: string | null;
+  holderName: string;
+  bidang: string;
+  provinceCode: string | null;
+  skNumber: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  changeReason: string;
+  actorName: string;
+  createdAt: string;
+}
+
+export interface FlagshipProgramRecord {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  objectives: string;
+  bidang: string;
+  leadName: string;
+  status: 'aktif' | 'perencanaan' | 'evaluasi' | 'diarsipkan';
+  targetProvinces: number;
+  targetParticipants: number;
+  periodLabel: string;
+  isPublic: boolean;
+  metrics?: {
+    proposalsCount: number;
+    approvedProposalsCount: number;
+    lklCount: number;
+    approvedLklCount: number;
+    participantsTotal: number;
+    provincesCovered: number;
+    tasksCount: number;
+    evaluationsCount: number;
+  };
+  updatedAt: string;
+}
+
+export interface ApprovalHistoryRecord {
+  id: string;
+  entityType: 'proposal' | 'lkl' | 'coordinator_report' | 'account_request' | 'handover';
+  entityId: string;
+  action: string;
+  fromStatus: string | null;
+  toStatus: string;
+  stageLabel: string;
+  actorUserId: string;
+  actorName: string;
+  actorRole: string;
+  note: string;
+  diffJson?: string | null;
+  createdAt: string;
+}
+
+export interface CorrespondenceRecord {
+  id: string;
+  referenceNumber: string;
+  direction: 'masuk' | 'keluar';
+  letterType: string;
+  subject: string;
+  senderName: string;
+  recipientName: string;
+  letterDate: string;
+  receivedDate: string | null;
+  provinceCode: string | null;
+  programId: string | null;
+  urgency: 'biasa' | 'penting' | 'segera' | 'sangat_segera';
+  status: 'baru' | 'terkirim' | 'didisposisikan' | 'diteruskan' | 'ditindaklanjuti' | 'selesai' | 'diarsipkan';
+  fileId: string | null;
+  fileName: string | null;
+  summary: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface CorrespondenceDispositionRecord {
+  id: string;
+  correspondenceId: string;
+  fromUserName: string;
+  toUserId: string | null;
+  toUserName: string;
+  instruction: string;
+  dueDate: string | null;
+  status: 'belum_dibaca' | 'dibaca' | 'diproses' | 'ditindaklanjuti' | 'selesai';
+  responseNote: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export type DisplayScale = 'ringkas' | 'nyaman' | 'besar';
+
+export interface NotificationPreferenceSettings {
+  emailProposal: boolean;
+  emailTugas: boolean;
+  pengingatSesi: boolean;
+}
+
+export interface UserPreferences {
+  startPage: string;
+  displayScale: DisplayScale;
+  favoritePaths: string[];
+  notificationPrefs: NotificationPreferenceSettings;
+  tourCompletedRoles: string[];
+  updatedAt?: string;
+}
+
+export type SupportTicketCategory =
+  | 'bug_fungsional'
+  | 'kesalahan_akses'
+  | 'data_tidak_sesuai'
+  | 'kendala_unggah'
+  | 'kinerja_lambat'
+  | 'saran_perbaikan';
+
+export type SupportTicketPriority = 'rendah' | 'sedang' | 'tinggi' | 'kritis';
+export type SupportTicketStatus = 'baru' | 'ditinjau' | 'diproses' | 'selesai' | 'ditolak';
+
+export interface SupportTicketRecord {
+  id: string;
+  ticketNumber: string;
+  userId: string;
+  userName: string;
+  userRole: RoleCode | string;
+  provinceCode: string | null;
+  provinceName?: string | null;
+  pagePath: string;
+  moduleName: string;
+  category: SupportTicketCategory;
+  title: string;
+  description: string;
+  screenshotFileId: string | null;
+  screenshotFileName: string | null;
+  errorRefCode: string | null;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  assignedToId: string | null;
+  assignedToName: string | null;
+  adminNote: string;
+  resolutionNote: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
+export interface ProcessTrackerStep {
+  key: string;
+  label: string;
+  description: string;
+  state: 'selesai' | 'aktif' | 'menunggu' | 'revisi' | 'ditolak';
+  ownerRoleLabel?: string;
+}
+
+export interface ProcessTrackerPayload {
+  entityType: 'proposal' | 'lkl' | 'persuratan';
+  entityId: string;
+  referenceNumber: string;
+  title: string;
+  status: string;
+  currentStageLabel: string;
+  previousStageLabel: string | null;
+  currentReviewerLabel: string;
+  actionRequired: string;
+  actionOwner: string;
+  reviewerNote: string | null;
+  slaDueAt: string | null;
+  nextStageLabel: string | null;
+  steps: ProcessTrackerStep[];
+  history: {
+    id: string;
+    action: string;
+    fromStatus: string | null;
+    toStatus: string;
+    stageLabel: string;
+    actorName: string;
+    actorRole: string;
+    note: string;
+    createdAt: string;
+  }[];
+}
+
+export interface PersonalWorkspacePayload {
+  identity: {
+    fullName: string;
+    role: RoleCode;
+    roleLabel: string;
+    bidang: string | null;
+    provinceCode: string | null;
+    provinceName: string | null;
+    positionTitle: string;
+    memberNumber: string | null;
+    batchName: string | null;
+  };
+  tasksToDo: {
+    id: string;
+    referenceNumber: string;
+    title: string;
+    priority: string;
+    status: string;
+    deadline: string;
+  }[];
+  submissionsNeedingAction: {
+    id: string;
+    type: 'proposal' | 'lkl';
+    referenceNumber: string;
+    title: string;
+    status: string;
+    updatedAt: string;
+    targetPath: string;
+  }[];
+  pendingApprovals: {
+    id: string;
+    itemType: string;
+    referenceNumber: string;
+    title: string;
+    applicantName: string;
+    provinceName: string | null;
+    status: string;
+    slaDueAt: string | null;
+    isOverdue: boolean;
+    targetPath: string;
+  }[];
+  revisionsRequired: {
+    id: string;
+    type: 'proposal' | 'lkl';
+    referenceNumber: string;
+    title: string;
+    note: string;
+    updatedAt: string;
+    targetPath: string;
+  }[];
+  nearestDeadlines: {
+    id: string;
+    kind: string;
+    title: string;
+    dueAt: string;
+    targetPath: string;
+  }[];
+  upcomingEvents: {
+    id: string;
+    title: string;
+    category: string;
+    startAt: string;
+    location: string;
+  }[];
+  importantNotifications: {
+    id: string;
+    title: string;
+    message: string;
+    category: string;
+    targetPath: string;
+    isRead: boolean;
+    createdAt: string;
+  }[];
+  recentActivity: {
+    id: string;
+    action: string;
+    targetType: string;
+    targetId: string;
+    contextNote: string;
+    createdAt: string;
+  }[];
+  quickActions: {
+    label: string;
+    description: string;
+    path: string;
+    primary?: boolean;
+  }[];
+}
+
+
 

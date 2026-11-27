@@ -5,6 +5,7 @@ import { Modal } from '../ui/Primitives';
 
 const PUBLIC_LINKS = [
   { label: 'Beranda', path: '/' },
+  { label: 'Program Unggulan', path: '/program' },
   { label: 'Tentang DPBI', path: '/tentang' },
   { label: 'Persebaran Wilayah', path: '/wilayah' },
   { label: 'Bantuan', path: '/bantuan' },
@@ -138,7 +139,7 @@ export function PublicNavbar() {
 }
 
 export function PublicFooter() {
-  const { navigate } = useAuth();
+  const { navigate, appVersion } = useAuth();
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const currentYear = new Date().getFullYear();
 
@@ -263,10 +264,10 @@ export function PublicFooter() {
           <div className="pt-6 border-t border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-slate-400">
             <div className="space-y-1">
               <p className="font-semibold text-slate-700 dark:text-slate-300">
-                Hak Cipta © {currentYear} Duta Pelajar Berbudaya Indonesia (DPBI). Seluruh hak cipta dilindungi undang-undang.
+                Hak Cipta © {currentYear} Duta Pelajar Berbudaya Indonesia (DPBI) · SATU DPBI v{appVersion}. Seluruh hak cipta dilindungi undang-undang.
               </p>
               <p>
-                Nama, logo resmi DPBI, identitas SATU DPBI, serta materi dan dokumen resmi organisasi merupakan kekayaan intelektual DPBI (organisasi independen di bawah naungan yayasan).
+                Nama, logo resmi DPBI, identitas SATU DPBI, serta materi dan dokumen resmi organisasi merupakan kekayaan intelektual DPBI (organisasi independen di bawah naungan yayasan) · <em>Berbudaya, Bergerak, dan Berdampak Untuk Negeri.</em>
               </p>
             </div>
             <div className="lg:text-right shrink-0 space-y-0.5">

@@ -21,7 +21,13 @@ export function LocationVerifyModal({
 }) {
   const { notify } = useAuth();
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<{ matched: boolean; reason: string } | null>(null);
+  const [reportedLocationText, setReportedLocationText] = useState(provinceName);
+  const [result, setResult] = useState<{
+    matched: boolean;
+    reason: string;
+    reportedLocationText?: string;
+    verifiedLocationProof?: string;
+  } | null>(null);
   const [showExceptionForm, setShowExceptionForm] = useState(false);
   const [reason, setReason] = useState('');
   const [evidenceNote, setEvidenceNote] = useState('');
@@ -43,12 +49,18 @@ export function LocationVerifyModal({
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
-          const res = await apiPost<{ matched: boolean; reason: string }>('/api/location/verify', {
+          const res = await apiPost<{
+            matched: boolean;
+            reason: string;
+            reportedLocationText?: string;
+            verifiedLocationProof?: string;
+          }>('/api/location/verify', {
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
             provinceCode,
             actionType,
             mode: 'gps_browser',
+            reportedLocationText: reportedLocationText.trim() || provinceName,
           });
           setResult(res);
           if (res.matched) {
@@ -65,10 +77,16 @@ export function LocationVerifyModal({
       },
       async () => {
         try {
-          const res = await apiPost<{ matched: boolean; reason: string }>('/api/location/verify', {
+          const res = await apiPost<{
+            matched: boolean;
+            reason: string;
+            reportedLocationText?: string;
+            verifiedLocationProof?: string;
+          }>('/api/location/verify', {
             provinceCode,
             actionType,
             mode: 'gps_ditolak',
+            reportedLocationText: reportedLocationText.trim() || provinceName,
           });
           setResult(res);
         } catch {
@@ -85,11 +103,18 @@ export function LocationVerifyModal({
   const handleManualDaring = async () => {
     setChecking(true);
     try {
-      await apiPost('/api/location/verify', {
+      const res = await apiPost<{
+        matched: boolean;
+        reason: string;
+        reportedLocationText?: string;
+        verifiedLocationProof?: string;
+      }>('/api/location/verify', {
         provinceCode,
         actionType,
         mode: 'manual_daring',
+        reportedLocationText: reportedLocationText.trim() || provinceName,
       });
+      setResult(res);
       notify('Verifikasi manual/daring dicatat dalam log audit.', 'success');
       onVerified();
     } catch (err) {
@@ -135,6 +160,19 @@ export function LocationVerifyModal({
           </p>
         </div>
 
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            Lokasi Dilaporkan / Nama Tempat (Teks)
+          </label>
+          <input
+            type="text"
+            value={reportedLocationText}
+            onChange={(e) => setReportedLocationText(e.target.value)}
+            placeholder="Contoh: Aula SMAN 3 Bandung / Ruang Rapat Daring Provinsi"
+            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+          />
+        </div>
+
         <div className="flex flex-wrap gap-2.5">
           <button
             type="button"
@@ -157,13 +195,19 @@ export function LocationVerifyModal({
 
         {result && (
           <div
-            className={`rounded-xl p-3.5 text-xs border ${
+            className={`rounded-xl p-3.5 text-xs border space-y-1 ${
               result.matched
                 ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
                 : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
             }`}
           >
-            {result.reason}
+            <p className="font-semibold">{result.reason}</p>
+            {result.reportedLocationText && (
+              <p>Lokasi Dilaporkan: <strong>{result.reportedLocationText}</strong></p>
+            )}
+            {result.verifiedLocationProof && (
+              <p>Bukti Terverifikasi: <span className="font-mono">{result.verifiedLocationProof}</span></p>
+            )}
           </div>
         )}
 

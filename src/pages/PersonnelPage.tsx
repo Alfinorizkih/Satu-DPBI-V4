@@ -15,8 +15,8 @@ import {
   Pagination,
   StatusIndicator,
 } from '../components/ui';
-import { formatTanggalIndonesia } from '../lib/rbac';
-import type { PersonnelRecord } from '../lib/types';
+import { formatTanggalIndonesia, ROLE_LABELS } from '../lib/rbac';
+import type { ImportBatchRecord, InvitationRecord, OrgPositionHistoryRecord, PersonnelRecord, RoleCode } from '../lib/types';
 
 interface DuplicateMatch {
   id: string;
@@ -50,6 +50,16 @@ interface PersonnelHistory {
   proposals: { id: string; reference_number: string; title: string; status: string; event_date: string }[];
   lkl: { id: string; reference_number: string; activity_name: string; status: string; event_date: string; participant_count: number }[];
   evaluations: { id: string; total_score: number; coaching_recommendation: string; evaluator_name: string; created_at: string }[];
+  positionHistory?: {
+    id: string;
+    position_title: string;
+    bidang: string;
+    sk_number: string | null;
+    started_at: string;
+    ended_at: string | null;
+    change_reason: string;
+    actor_name: string;
+  }[];
 }
 
 type DetailTab = 'identitas' | 'pendidikan' | 'domisili' | 'penugasan' | 'dokumen' | 'riwayat';
@@ -64,9 +74,11 @@ export function PersonnelPage({
   initialId?: string;
 }) {
   const { user, can, notify, navigate } = useAuth();
-  const [tab, setTab] = useState<'direktori' | 'permintaan' | 'impor'>('direktori');
+  const [tab, setTab] = useState<'direktori' | 'permintaan' | 'undangan' | 'impor'>('direktori');
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
   const [requests, setRequests] = useState<AccountRequest[]>([]);
+  const [invitations, setInvitations] = useState<(InvitationRecord & { roleLabel?: string; provinceName?: string })[]>([]);
+  const [importBatches, setImportBatches] = useState<(ImportBatchRecord & { file_name?: string; total_rows?: number; success_count?: number; skipped_count?: number; imported_by_name?: string; created_at?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
@@ -138,20 +150,52 @@ export function PersonnelPage({
     fullName: '', email: '', phone: '', provinceCode: user?.provinceCode || '32', schoolName: '',
   });
 
-  // Bulk CSV Import state
-  const [csvText, setCsvText] = useState('Nama Lengkap,Email,Kode Provinsi,Nama Sekolah\nPutri Andini,putri.andini@simulasi.dpbi.or.id,32,SMAN 2 Bandung');
-  const [csvPreview, setCsvPreview] = useState<{ fullName: string; email: string; provinceCode: string; schoolName: string }[]>([]);
-  const [importResult, setImportResult] = useState<{ inserted: number; skipped: { email: string; reason: string }[] } | null>(null);
+  // Bulk CSV Import state & column mapping
+  const [csvFileName, setCsvFileName] = useState('impor-personel.csv');
+  const [csvText, setCsvText] = useState(
+    'fullName,email,provinceCode,schoolName,batchId,nisn,phone,regency\nPutri Andini,putri.andini@simulasi.dpbi.or.id,32,SMAN 2 Bandung,batch-3,0089112233,08123456789,Kota Bandung'
+  );
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvColumnMap, setCsvColumnMap] = useState<Record<string, number>>({
+    fullName: 0,
+    email: 1,
+    provinceCode: 2,
+    schoolName: 3,
+    batchId: 4,
+    nisn: 5,
+    phone: 6,
+    regency: 7,
+  });
+  const [csvPreview, setCsvPreview] = useState<
+    { fullName: string; email: string; provinceCode: string; schoolName: string; batchId?: string; nisn?: string; phone?: string; regency?: string }[]
+  >([]);
+  const [importResult, setImportResult] = useState<{ batchId?: string; inserted: number; skipped: { row?: number; email: string; reason: string }[] } | null>(null);
+
+  // Invitation lifecycle state
+  const [invModalOpen, setInvModalOpen] = useState(false);
+  const [invForm, setInvForm] = useState({
+    fullName: '',
+    email: '',
+    role: 'duta' as RoleCode,
+    provinceCode: user?.provinceCode || '32',
+    batchId: 'batch-3',
+    personnelId: '',
+  });
+  const [latestInviteLink, setLatestInviteLink] = useState<{ link?: string; token?: string; email: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [pRes, rRes] = await Promise.all([
+      const [pRes, rRes, invRes, batchRes] = await Promise.all([
         apiGet<{ personnel: PersonnelRecord[] }>('/api/personnel'),
         apiGet<{ requests: AccountRequest[] }>('/api/account-requests'),
+        apiGet<{ invitations: (InvitationRecord & { roleLabel?: string; provinceName?: string })[] }>('/api/invitations').catch(() => ({ invitations: [] })),
+        apiGet<{ batches: ImportBatchRecord[] }>('/api/personnel/import-batches').catch(() => ({ batches: [] })),
       ]);
       setPersonnel(pRes.personnel);
       setRequests(rRes.requests);
+      setInvitations(invRes.invitations || []);
+      setImportBatches(batchRes.batches || []);
     } finally {
       setLoading(false);
     }
@@ -176,9 +220,9 @@ export function PersonnelPage({
   useEffect(() => {
     if (!selected || detailTab !== 'riwayat') return;
     setHistoryLoading(true);
-    apiGet<PersonnelHistory>(`/api/personnel/${selected.id}/history`)
+    apiGet<PersonnelHistory>(`/api/personnel/${selected.id}/history?reveal=1`)
       .then(setHistory)
-      .catch(() => setHistory({ proposals: [], lkl: [], evaluations: [] }))
+      .catch(() => setHistory({ proposals: [], lkl: [], evaluations: [], positionHistory: [] }))
       .finally(() => setHistoryLoading(false));
   }, [selected, detailTab]);
 
@@ -413,29 +457,122 @@ export function PersonnelPage({
     }
   };
 
-  const parseCsvPreview = () => {
-    const lines = csvText.trim().split('\n').slice(1);
-    const parsed = lines
-      .map((line) => line.split(',').map((c) => c.trim()))
-      .filter((cols) => cols.length >= 2 && cols[0])
+  const parseCsvPreview = (rawInput?: string, customMap?: Record<string, number>) => {
+    const raw = (rawInput ?? csvText).trim();
+    const allLines = raw.split(/\r?\n/).filter((l) => l.trim());
+    if (allLines.length === 0) {
+      setCsvHeaders([]);
+      setCsvPreview([]);
+      return;
+    }
+    const splitRow = (line: string) => line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+    const headers = splitRow(allLines[0]);
+    setCsvHeaders(headers);
+    let colMap = customMap ?? csvColumnMap;
+    if (!customMap) {
+      const autoMap: Record<string, number> = { ...csvColumnMap };
+      headers.forEach((h, idx) => {
+        const hl = h.toLowerCase();
+        if (hl.includes('nama') || hl === 'fullname') autoMap.fullName = idx;
+        else if (hl.includes('email')) autoMap.email = idx;
+        else if (hl.includes('prov') || hl === 'provincecode') autoMap.provinceCode = idx;
+        else if (hl.includes('sekolah') || hl === 'schoolname') autoMap.schoolName = idx;
+        else if (hl.includes('batch')) autoMap.batchId = idx;
+        else if (hl.includes('nisn')) autoMap.nisn = idx;
+        else if (hl.includes('telp') || hl.includes('phone') || hl.includes('hp')) autoMap.phone = idx;
+        else if (hl.includes('kab') || hl.includes('regency')) autoMap.regency = idx;
+      });
+      colMap = autoMap;
+      setCsvColumnMap(autoMap);
+    }
+
+    const dataLines = allLines.slice(1);
+    const parsed = dataLines
+      .map((line) => splitRow(line))
+      .filter((cols) => cols.length >= 2 && (cols[colMap.fullName] || cols[colMap.email]))
       .map((cols) => ({
-        fullName: cols[0],
-        email: cols[1] || '',
-        provinceCode: cols[2] || '31',
-        schoolName: cols[3] || '',
+        fullName: cols[colMap.fullName] || '',
+        email: cols[colMap.email] || '',
+        provinceCode: cols[colMap.provinceCode] || user?.provinceCode || '31',
+        schoolName: cols[colMap.schoolName] || '',
+        batchId: colMap.batchId !== undefined ? cols[colMap.batchId] || 'batch-3' : 'batch-3',
+        nisn: colMap.nisn !== undefined ? cols[colMap.nisn] || '' : '',
+        phone: colMap.phone !== undefined ? cols[colMap.phone] || '' : '',
+        regency: colMap.regency !== undefined ? cols[colMap.regency] || '' : '',
       }));
     setCsvPreview(parsed);
     setImportResult(null);
   };
 
+  const handleCsvFileUpload = async (file: File) => {
+    setCsvFileName(file.name);
+    const text = await file.text();
+    setCsvText(text);
+    parseCsvPreview(text);
+  };
+
   const executeCsvImport = async () => {
     try {
-      const res = await apiPost<{ inserted: number; skipped: { email: string; reason: string }[] }>('/api/personnel/import', { rows: csvPreview });
+      const res = await apiPost<{ batchId?: string; inserted: number; skipped: { row?: number; email: string; reason: string }[] }>(
+        '/api/personnel/import',
+        { rows: csvPreview, fileName: csvFileName }
+      );
       setImportResult(res);
       notify(`Impor selesai: ${res.inserted} masuk, ${res.skipped.length} dilewati.`, 'success');
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal impor massal.', 'error');
+    }
+  };
+
+  const handleRollbackBatch = async (batchId: string) => {
+    try {
+      const res = await apiPost<{ deletedCount: number; retainedCount: number }>(
+        `/api/personnel/import-batches/${batchId}/rollback`
+      );
+      notify(`Rollback selesai: ${res.deletedCount} data baru dihapus, ${res.retainedCount} dipertahankan karena memiliki riwayat/akun.`, 'info');
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal melakukan rollback batch.', 'error');
+    }
+  };
+
+  const handleCreateInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiPost<{ activationLink?: string; inviteToken?: string }>('/api/invitations', invForm);
+      notify(`Undangan akun untuk ${invForm.fullName} berhasil diterbitkan.`, 'success');
+      setLatestInviteLink({ link: res.activationLink, token: res.inviteToken, email: invForm.email });
+      setInvModalOpen(false);
+      setInvForm({ fullName: '', email: '', role: 'duta', provinceCode: user?.provinceCode || '32', batchId: 'batch-3', personnelId: '' });
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menerbitkan undangan.', 'error');
+    }
+  };
+
+  const handleResendInvite = async (inv: InvitationRecord) => {
+    try {
+      const res = await apiPost<{ activationLink?: string; inviteToken?: string; resendCount: number }>(
+        `/api/invitations/${inv.id}/resend`
+      );
+      notify(`Undangan dikirim ulang (ke-${res.resendCount}).`, 'success');
+      if (res.inviteToken || res.activationLink) {
+        setLatestInviteLink({ link: res.activationLink, token: res.inviteToken, email: inv.email });
+      }
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengirim ulang undangan.', 'error');
+    }
+  };
+
+  const handleCancelInvite = async (inv: InvitationRecord) => {
+    try {
+      await apiPost(`/api/invitations/${inv.id}/cancel`);
+      notify(`Undangan untuk ${inv.email} dibatalkan.`, 'info');
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal membatalkan undangan.', 'error');
     }
   };
 
@@ -493,9 +630,12 @@ export function PersonnelPage({
           <button type="button" onClick={() => setTab('permintaan')} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${tab === 'permintaan' ? 'bg-white dark:bg-slate-900 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}>
             Permintaan Akun Duta ({requests.length})
           </button>
+          <button type="button" onClick={() => setTab('undangan')} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${tab === 'undangan' ? 'bg-white dark:bg-slate-900 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}>
+            Undangan Akun ({invitations.length})
+          </button>
           {can('personalia', 'create') && (
             <button type="button" onClick={() => setTab('impor')} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${tab === 'impor' ? 'bg-white dark:bg-slate-900 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}>
-              Impor CSV Massal
+              Impor CSV &amp; Rollback
             </button>
           )}
         </div>
@@ -692,41 +832,220 @@ export function PersonnelPage({
         </GlassCard>
       )}
 
-      {tab === 'impor' && (
+      {tab === 'undangan' && (
         <GlassCard className="p-5 space-y-4">
-          <h2 className="text-sm font-bold flex items-center gap-2">
-            <Upload className="w-4 h-4 text-[#0EA5E9]" /> Impor Personel CSV (Preview → Validasi → Konfirmasi → Transaksi)
-          </h2>
-          <textarea
-            rows={5}
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-3 font-mono text-xs"
-          />
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={parseCsvPreview} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold">
-              1. Preview & Deteksi Duplikat
-            </button>
-            {csvPreview.length > 0 && (
-              <button type="button" onClick={executeCsvImport} className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold">
-                2. Konfirmasi & Jalankan Impor ({csvPreview.length} Baris)
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Siklus Hidup Undangan Aktivasi Akun</h2>
+              <p className="text-xs text-slate-500">
+                Pantau status undangan (terkirim, dibuka, aktif, kedaluwarsa, dibatalkan), kirim ulang dengan jeda 60 detik, atau batalkan sebelum dipakai.
+              </p>
+            </div>
+            {can('personalia', 'create') && (
+              <button
+                type="button"
+                onClick={() => setInvModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold"
+              >
+                <Plus className="w-4 h-4" /> Kirim Undangan Baru
               </button>
             )}
           </div>
-          {csvPreview.length > 0 && (
-            <div className="text-xs border rounded-xl p-3 border-slate-200 dark:border-slate-800 space-y-1">
-              {csvPreview.map((row, idx) => (
-                <p key={idx}>{idx + 1}. {row.fullName} · {row.email} · Prov {row.provinceCode} · {row.schoolName}</p>
-              ))}
+
+          {latestInviteLink && (
+            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-xs space-y-1">
+              <p className="font-bold text-emerald-900 dark:text-emerald-200">
+                Tautan Aktivasi Undangan untuk {latestInviteLink.email} (Simulasi):
+              </p>
+              {latestInviteLink.link && <p className="font-mono select-all break-all">{latestInviteLink.link}</p>}
+              {latestInviteLink.token && <p className="font-mono select-all break-all">Token: {latestInviteLink.token}</p>}
             </div>
           )}
-          {importResult && (
-            <div className="text-xs rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
-              <p className="font-semibold">Hasil Impor: {importResult.inserted} personel berhasil masuk, {importResult.skipped.length} dilewati.</p>
-              {importResult.skipped.map((s, i) => <p key={i} className="text-amber-600">{s.email}: {s.reason}</p>)}
+
+          {invitations.length === 0 ? (
+            <EmptyState title="Belum ada undangan" description="Kirim undangan akun untuk personel yang telah disetujui." />
+          ) : (
+            <div className="divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
+              {invitations.map((inv) => {
+                const canModify = inv.status !== 'aktif' && inv.status !== 'dibatalkan';
+                return (
+                  <div key={inv.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="font-bold text-slate-900 dark:text-white">{inv.fullName}</p>
+                      <p className="text-slate-500">
+                        {inv.email} · {inv.roleLabel || ROLE_LABELS[inv.role]} · {inv.provinceName || 'Nasional'}
+                      </p>
+                      <p className="text-[11px] text-slate-400 tabular-nums">
+                        Kirim ulang: {inv.resendCount}x · Terakhir: {formatTanggalIndonesia(inv.lastSentAt || inv.createdAt, true)} · Kedaluwarsa:{' '}
+                        {formatTanggalIndonesia(inv.expiresAt, true)}
+                        {inv.openedAt ? ` · Dibuka: ${formatTanggalIndonesia(inv.openedAt, true)}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusIndicator status={inv.status} />
+                      {canModify && can('personalia', 'create') && (
+                        <button
+                          type="button"
+                          onClick={() => handleResendInvite(inv)}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
+                        >
+                          Kirim Ulang
+                        </button>
+                      )}
+                      {canModify && can('personalia', 'edit') && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelInvite(inv)}
+                          className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-semibold"
+                        >
+                          Batalkan
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </GlassCard>
+      )}
+
+      {tab === 'impor' && (
+        <div className="space-y-5">
+          <GlassCard className="p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <Upload className="w-4 h-4 text-[#0EA5E9]" /> Wizard Impor Personel CSV (Templat → Pemetaan → Validasi → Transaksi)
+              </h2>
+              <a
+                href={apiUrl('/api/personnel/import-template')}
+                download="template-impor-personel-satu-dpbi.csv"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-[#0EA5E9]"
+              >
+                <Download className="w-3.5 h-3.5 text-[#0EA5E9]" /> Unduh Templat CSV Resmi
+              </a>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 cursor-pointer hover:border-[#0EA5E9]">
+                <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                <span>Pilih File CSV ({csvFileName})</span>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleCsvFileUpload(f);
+                  }}
+                />
+              </label>
+              <span className="text-slate-500">atau tempel teks CSV di bawah ini:</span>
+            </div>
+
+            <textarea
+              rows={5}
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-3 font-mono text-xs"
+            />
+
+            {csvHeaders.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                {(
+                  [
+                    ['fullName', 'Kolom Nama *'],
+                    ['email', 'Kolom Email *'],
+                    ['provinceCode', 'Kolom Kode Prov'],
+                    ['schoolName', 'Kolom Sekolah'],
+                  ] as const
+                ).map(([field, label]) => (
+                  <div key={field}>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">{label}</label>
+                    <select
+                      value={csvColumnMap[field] ?? 0}
+                      onChange={(e) => {
+                        const next = { ...csvColumnMap, [field]: Number(e.target.value) };
+                        setCsvColumnMap(next);
+                        parseCsvPreview(csvText, next);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 text-xs"
+                    >
+                      {csvHeaders.map((h, idx) => (
+                        <option key={`${field}-${idx}`} value={idx}>
+                          {h || `Kolom ${idx + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => parseCsvPreview()} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold">
+                1. Preview &amp; Petakan Kolom
+              </button>
+              {csvPreview.length > 0 && (
+                <button type="button" onClick={executeCsvImport} className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold">
+                  2. Konfirmasi &amp; Jalankan Impor ({csvPreview.length} Baris)
+                </button>
+              )}
+            </div>
+            {csvPreview.length > 0 && (
+              <div className="text-xs border rounded-xl p-3 border-slate-200 dark:border-slate-800 space-y-1">
+                {csvPreview.map((row, idx) => (
+                  <p key={idx}>
+                    {idx + 1}. {row.fullName} · {row.email} · Prov {row.provinceCode} · {row.schoolName} {row.nisn ? `· NISN ${row.nisn}` : ''}
+                  </p>
+                ))}
+              </div>
+            )}
+            {importResult && (
+              <div className="text-xs rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1">
+                <p className="font-semibold">Hasil Impor: {importResult.inserted} personel berhasil masuk, {importResult.skipped.length} dilewati.</p>
+                {importResult.skipped.map((s, i) => (
+                  <p key={i} className="text-amber-600">
+                    {s.row ? `Baris ${s.row} · ` : ''}{s.email}: {s.reason}
+                  </p>
+                ))}
+              </div>
+            )}
+          </GlassCard>
+
+          <GlassCard className="p-5 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Riwayat Batch Impor &amp; Rollback Aman</h3>
+            {importBatches.length === 0 ? (
+              <p className="text-xs text-slate-500">Belum ada riwayat batch impor CSV.</p>
+            ) : (
+              <div className="divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
+                {importBatches.map((b) => (
+                  <div key={b.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-white">{b.file_name || b.fileName}</p>
+                      <p className="text-slate-500">
+                        Oleh {b.imported_by_name || b.importedByName} · Masuk: {b.success_count ?? b.successCount} · Dilewati: {b.skipped_count ?? b.skippedCount} ·{' '}
+                        {formatTanggalIndonesia(b.created_at || b.createdAt, true)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusIndicator status={b.status} />
+                      {b.status !== 'dibatalkan_rollback' && can('personalia', 'manage') && (
+                        <button
+                          type="button"
+                          onClick={() => handleRollbackBatch(b.id)}
+                          className="px-2.5 py-1 rounded-lg border border-rose-200 text-rose-600 font-semibold"
+                        >
+                          Rollback Batch
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </GlassCard>
+        </div>
       )}
 
       {/* Multi-Tab Detail & Verification Modal */}
@@ -992,6 +1311,32 @@ export function PersonnelPage({
                         ))}
                       </div>
                     )}
+                    <div>
+                      <p className="font-bold text-slate-900 dark:text-white mb-1">
+                        Riwayat Jabatan &amp; Mutasi Organisasi ({history.positionHistory?.length ?? 0})
+                      </p>
+                      {!history.positionHistory || history.positionHistory.length === 0 ? (
+                        <p className="text-slate-500">Belum ada catatan mutasi jabatan organisasi.</p>
+                      ) : (
+                        <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
+                          {history.positionHistory.map((ph) => (
+                            <div key={ph.id} className="py-1.5 flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="font-semibold text-slate-900 dark:text-white">
+                                  {ph.position_title} ({ph.bidang})
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {ph.change_reason} · {ph.sk_number ? `SK: ${ph.sk_number} · ` : ''}oleh {ph.actor_name}
+                                </p>
+                              </div>
+                              <span className="text-[11px] text-slate-500 tabular-nums">
+                                {formatTanggalIndonesia(ph.started_at)} – {ph.ended_at ? formatTanggalIndonesia(ph.ended_at) : 'Aktif'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -1347,6 +1692,64 @@ export function PersonnelPage({
         }}
         onCancel={() => setConfirmRejectReq(null)}
       />
+
+      <Modal open={invModalOpen} onClose={() => setInvModalOpen(false)} title="Kirim Undangan Aktivasi Akun Resmi">
+        <form onSubmit={handleCreateInvitation} className="space-y-3 text-xs">
+          <div>
+            <label className="block font-semibold mb-1">Tautkan ke Personel Induk (Opsional)</label>
+            <select
+              value={invForm.personnelId}
+              onChange={(e) => {
+                const p = personnel.find((item) => item.id === e.target.value);
+                setInvForm((f) => ({
+                  ...f,
+                  personnelId: e.target.value,
+                  fullName: p ? p.fullName : f.fullName,
+                  email: p ? p.email : f.email,
+                  provinceCode: p ? p.provinceCode : f.provinceCode,
+                }));
+              }}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            >
+              <option value="">-- Buat undangan mandiri --</option>
+              {personnel.filter((p) => !p.userId).map((p) => (
+                <option key={p.id} value={p.id}>{p.fullName} ({p.memberNumber})</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Nama Lengkap *</label>
+              <input required value={invForm.fullName} onChange={(e) => setInvForm({ ...invForm, fullName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Email Penerima *</label>
+              <input type="email" required value={invForm.email} onChange={(e) => setInvForm({ ...invForm, email: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Peran Sistem (RBAC)</label>
+              <select value={invForm.role} onChange={(e) => setInvForm({ ...invForm, role: e.target.value as RoleCode })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                <option value="duta">Duta Pelajar</option>
+                <option value="koordinator_wilayah">Koordinator Wilayah</option>
+                <option value="pengurus_nasional">Pengurus Nasional</option>
+                <option value="sekretariat_nasional">Sekretariat Nasional</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Provinsi</label>
+              <select value={invForm.provinceCode} onChange={(e) => setInvForm({ ...invForm, provinceCode: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                {INDONESIA_PROVINCES.map((pr) => <option key={pr.code} value={pr.code}>{pr.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setInvModalOpen(false)} className="px-4 py-2 rounded-xl border font-semibold">Batal</button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Terbitkan &amp; Kirim Undangan</button>
+          </div>
+        </form>
+      </Modal>
 
       <A4PrintModal open={Boolean(printConfig)} config={printConfig} onClose={() => setPrintConfig(null)} />
     </div>

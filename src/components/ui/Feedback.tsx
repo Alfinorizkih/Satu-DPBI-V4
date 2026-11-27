@@ -94,6 +94,7 @@ export function ErrorView({
   onBack,
   onLogin,
   onRetry,
+  onReportIssue,
 }: {
   code: HttpErrorCode;
   title?: string;
@@ -102,6 +103,7 @@ export function ErrorView({
   onBack: () => void;
   onLogin?: () => void;
   onRetry?: () => void;
+  onReportIssue?: () => void;
 }) {
   const defaults = ERROR_DEFAULTS[code];
   return (
@@ -130,6 +132,16 @@ export function ErrorView({
             Kode Referensi Kejadian: <span className="font-semibold text-slate-800 dark:text-slate-200">{referenceId}</span>
           </p>
         )}
+        <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 p-3 text-left text-xs text-slate-600 dark:text-slate-300 space-y-1">
+          <p className="font-semibold text-slate-800 dark:text-slate-100">Langkah Pemulihan yang Disarankan:</p>
+          <p>
+            {code === 401 || code === 419
+              ? 'Masuk kembali ke portal. Jika Anda sedang mengisi formulir Proposal atau LKL, draf lokal Anda tetap tersimpan otomatis.'
+              : code === 403
+              ? 'Pastikan Anda menggunakan akun dengan peran yang sesuai atau hubungi Koordinator/Sekretariat bila memerlukan delegasi akses.'
+              : 'Muat ulang halaman atau kembali ke Beranda. Bila kendala berulang, kirimkan laporan melalui Pusat Kendala.'}
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
           {(code === 401 || code === 419) && onLogin && (
             <button
@@ -160,6 +172,15 @@ export function ErrorView({
           >
             <ArrowLeft className="w-4 h-4" /> Kembali ke Halaman Utama
           </button>
+          {onReportIssue && (
+            <button
+              type="button"
+              onClick={onReportIssue}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-[#0EA5E9]"
+            >
+              Laporkan Kendala
+            </button>
+          )}
         </div>
       </GlassCard>
     </div>

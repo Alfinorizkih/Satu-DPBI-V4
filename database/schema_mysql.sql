@@ -849,5 +849,257 @@ ALTER TABLE `notifications`
   ADD COLUMN `event_key` VARCHAR(160) NULL,
   ADD UNIQUE KEY `uq_notifications_user_event` (`user_id`, `event_key`);
 
+-- Migrations 4-10 Parity for MySQL 8 (SATU DPBI v4.1.0)
+CREATE TABLE IF NOT EXISTS `org_position_history` (
+  `id` VARCHAR(64) NOT NULL,
+  `position_id` VARCHAR(64) NOT NULL,
+  `position_title` VARCHAR(191) NOT NULL,
+  `personnel_id` VARCHAR(64) NULL,
+  `holder_name` VARCHAR(191) NOT NULL,
+  `bidang` VARCHAR(120) NOT NULL,
+  `province_code` VARCHAR(16) NULL,
+  `sk_number` VARCHAR(120) NULL,
+  `started_at` VARCHAR(40) NOT NULL,
+  `ended_at` VARCHAR(40) NULL,
+  `change_reason` TEXT NOT NULL,
+  `actor_name` VARCHAR(191) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_org_pos_hist_pos` (`position_id`),
+  KEY `idx_org_pos_hist_pers` (`personnel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `import_batches` (
+  `id` VARCHAR(64) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `total_rows` INT NOT NULL DEFAULT 0,
+  `success_count` INT NOT NULL DEFAULT 0,
+  `skipped_count` INT NOT NULL DEFAULT 0,
+  `error_count` INT NOT NULL DEFAULT 0,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'selesai',
+  `imported_by` VARCHAR(64) NOT NULL,
+  `imported_by_name` VARCHAR(191) NOT NULL,
+  `notes` TEXT NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  `rolled_back_at` VARCHAR(40) NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `flagship_programs` (
+  `id` VARCHAR(64) NOT NULL,
+  `slug` VARCHAR(120) NOT NULL,
+  `name` VARCHAR(191) NOT NULL,
+  `tagline` VARCHAR(255) NOT NULL,
+  `description` LONGTEXT NOT NULL,
+  `objectives` LONGTEXT NOT NULL,
+  `bidang` VARCHAR(120) NOT NULL,
+  `lead_name` VARCHAR(191) NOT NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'aktif',
+  `target_provinces` INT NOT NULL DEFAULT 38,
+  `target_participants` INT NOT NULL DEFAULT 1000,
+  `period_label` VARCHAR(64) NOT NULL DEFAULT '2026',
+  `is_public` TINYINT(1) NOT NULL DEFAULT 1,
+  `updated_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_flagship_slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `approval_history` (
+  `id` VARCHAR(64) NOT NULL,
+  `entity_type` VARCHAR(48) NOT NULL,
+  `entity_id` VARCHAR(64) NOT NULL,
+  `action` VARCHAR(48) NOT NULL,
+  `from_status` VARCHAR(48) NULL,
+  `to_status` VARCHAR(48) NOT NULL,
+  `stage_label` VARCHAR(191) NOT NULL DEFAULT '',
+  `actor_user_id` VARCHAR(64) NOT NULL,
+  `actor_name` VARCHAR(191) NOT NULL,
+  `actor_role` VARCHAR(48) NOT NULL,
+  `note` TEXT NOT NULL,
+  `diff_json` LONGTEXT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_approval_hist_entity` (`entity_type`, `entity_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `email_template_history` (
+  `id` VARCHAR(64) NOT NULL,
+  `template_id` VARCHAR(64) NOT NULL,
+  `version` INT NOT NULL,
+  `subject` VARCHAR(255) NOT NULL,
+  `body_text` LONGTEXT NOT NULL,
+  `body_html` LONGTEXT NULL,
+  `updated_by` VARCHAR(191) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_email_tpl_hist_tpl` (`template_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `correspondence` (
+  `id` VARCHAR(64) NOT NULL,
+  `reference_number` VARCHAR(64) NOT NULL,
+  `direction` VARCHAR(16) NOT NULL DEFAULT 'keluar',
+  `letter_type` VARCHAR(64) NOT NULL,
+  `subject` VARCHAR(255) NOT NULL,
+  `sender_name` VARCHAR(191) NOT NULL,
+  `recipient_name` VARCHAR(191) NOT NULL,
+  `letter_date` VARCHAR(40) NOT NULL,
+  `received_date` VARCHAR(40) NULL,
+  `province_code` VARCHAR(16) NULL,
+  `program_id` VARCHAR(64) NULL,
+  `urgency` VARCHAR(24) NOT NULL DEFAULT 'biasa',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'baru',
+  `file_id` VARCHAR(64) NULL,
+  `file_name` VARCHAR(255) NULL,
+  `summary` TEXT NOT NULL,
+  `created_by` VARCHAR(64) NOT NULL,
+  `created_by_name` VARCHAR(191) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_correspondence_ref` (`reference_number`),
+  KEY `idx_correspondence_dir` (`direction`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `correspondence_dispositions` (
+  `id` VARCHAR(64) NOT NULL,
+  `correspondence_id` VARCHAR(64) NOT NULL,
+  `from_user_id` VARCHAR(64) NOT NULL,
+  `from_user_name` VARCHAR(191) NOT NULL,
+  `to_user_id` VARCHAR(64) NULL,
+  `to_user_name` VARCHAR(191) NOT NULL,
+  `instruction` TEXT NOT NULL,
+  `due_date` VARCHAR(40) NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'belum_dibaca',
+  `response_note` TEXT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  `completed_at` VARCHAR(40) NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_corr_disp_corr` (`correspondence_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE `invitations`
+  ADD COLUMN `personnel_id` VARCHAR(64) NULL,
+  ADD COLUMN `status` VARCHAR(32) NOT NULL DEFAULT 'undangan_terkirim',
+  ADD COLUMN `resend_count` INT NOT NULL DEFAULT 0,
+  ADD COLUMN `last_sent_at` VARCHAR(40) NULL,
+  ADD COLUMN `opened_at` VARCHAR(40) NULL,
+  ADD COLUMN `cancelled_at` VARCHAR(40) NULL,
+  ADD COLUMN `cancelled_by` VARCHAR(191) NULL;
+
+ALTER TABLE `personnel`
+  ADD COLUMN `import_batch_id` VARCHAR(64) NULL,
+  ADD COLUMN `nik_masked` VARCHAR(32) NULL;
+
+ALTER TABLE `organization_positions`
+  ADD COLUMN `parent_id` VARCHAR(64) NULL,
+  ADD COLUMN `category` VARCHAR(64) NOT NULL DEFAULT 'Bidang',
+  ADD COLUMN `sort_order` INT NOT NULL DEFAULT 10,
+  ADD COLUMN `is_vacant` TINYINT(1) NOT NULL DEFAULT 0,
+  ADD COLUMN `role_binding` VARCHAR(48) NULL;
+
+ALTER TABLE `proposals`
+  ADD COLUMN `program_id` VARCHAR(64) NULL;
+
+ALTER TABLE `lkl_reports`
+  ADD COLUMN `program_id` VARCHAR(64) NULL;
+
+ALTER TABLE `tasks`
+  ADD COLUMN `program_id` VARCHAR(64) NULL,
+  ADD COLUMN `depends_on_task_id` VARCHAR(64) NULL;
+
+ALTER TABLE `evaluations`
+  ADD COLUMN `program_id` VARCHAR(64) NULL,
+  ADD COLUMN `evaluator_type` VARCHAR(48) NOT NULL DEFAULT 'pengurus_nasional';
+
+ALTER TABLE `email_templates`
+  ADD COLUMN `body_html` LONGTEXT NULL,
+  ADD COLUMN `version` INT NOT NULL DEFAULT 1;
+
+ALTER TABLE `email_campaigns`
+  ADD COLUMN `body_html` LONGTEXT NULL;
+
+ALTER TABLE `email_logs`
+  ADD COLUMN `delivery_channel` VARCHAR(32) NOT NULL DEFAULT 'sandbox_outbox';
+
+ALTER TABLE `documents`
+  ADD COLUMN `parent_document_id` VARCHAR(64) NULL,
+  ADD COLUMN `replaced_by_id` VARCHAR(64) NULL,
+  ADD COLUMN `program_id` VARCHAR(64) NULL;
+
+ALTER TABLE `handovers`
+  ADD COLUMN `package_json` LONGTEXT NULL;
+
+ALTER TABLE `location_verifications`
+  ADD COLUMN `reported_location_text` VARCHAR(255) NULL,
+  ADD COLUMN `verified_location_proof` TEXT NULL;
+
+CREATE TABLE IF NOT EXISTS `support_tickets` (
+  `id` VARCHAR(64) NOT NULL,
+  `ticket_number` VARCHAR(64) NOT NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `user_name` VARCHAR(191) NOT NULL,
+  `user_role` VARCHAR(48) NOT NULL,
+  `province_code` VARCHAR(16) NULL,
+  `page_path` VARCHAR(191) NOT NULL,
+  `module_name` VARCHAR(64) NOT NULL DEFAULT 'umum',
+  `category` VARCHAR(64) NOT NULL DEFAULT 'bug_fungsional',
+  `title` VARCHAR(255) NOT NULL DEFAULT '',
+  `description` TEXT NOT NULL,
+  `screenshot_file_id` VARCHAR(64) NULL,
+  `screenshot_file_name` VARCHAR(255) NULL,
+  `error_ref_code` VARCHAR(64) NULL,
+  `priority` VARCHAR(24) NOT NULL DEFAULT 'sedang',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'baru',
+  `assigned_to_id` VARCHAR(64) NULL,
+  `assigned_to_name` VARCHAR(191) NULL,
+  `admin_note` TEXT NOT NULL,
+  `resolution_note` TEXT NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL,
+  `resolved_at` VARCHAR(40) NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_support_tickets_num` (`ticket_number`),
+  KEY `idx_support_tickets_user` (`user_id`),
+  KEY `idx_support_tickets_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `idempotency_keys` (
+  `idem_key` VARCHAR(128) NOT NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `method` VARCHAR(16) NOT NULL,
+  `path` VARCHAR(191) NOT NULL,
+  `status_code` INT NOT NULL,
+  `response_json` LONGTEXT NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`idem_key`, `user_id`, `method`, `path`),
+  KEY `idx_idem_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `user_preferences` (
+  `user_id` VARCHAR(64) NOT NULL,
+  `start_page` VARCHAR(120) NOT NULL DEFAULT '/beranda',
+  `display_scale` VARCHAR(24) NOT NULL DEFAULT 'nyaman',
+  `favorite_paths_json` LONGTEXT NOT NULL,
+  `notification_prefs_json` LONGTEXT NOT NULL,
+  `tour_completed_roles_json` LONGTEXT NOT NULL,
+  `updated_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE `proposals`
+  ADD COLUMN `soft_deleted_at` VARCHAR(40) NULL,
+  ADD COLUMN `soft_deleted_by` VARCHAR(191) NULL,
+  ADD COLUMN `pre_delete_status` VARCHAR(32) NULL;
+
+ALTER TABLE `lkl_reports`
+  ADD COLUMN `updated_at` VARCHAR(40) NULL,
+  ADD COLUMN `soft_deleted_at` VARCHAR(40) NULL;
+
+ALTER TABLE `tasks`
+  ADD COLUMN `version` INT NOT NULL DEFAULT 1,
+  ADD COLUMN `updated_at` VARCHAR(40) NULL,
+  ADD COLUMN `soft_deleted_at` VARCHAR(40) NULL;
+
 SET FOREIGN_KEY_CHECKS = 1;
+
 

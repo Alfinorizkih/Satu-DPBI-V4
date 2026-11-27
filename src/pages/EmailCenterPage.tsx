@@ -3,16 +3,20 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
+  Edit3,
+  Eye,
   FileText,
+  History,
   Mail,
   Plus,
   RefreshCw,
   Send,
+  Upload,
   Users,
   XCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { apiGet, apiPost, apiUrl } from '../lib/api';
+import { apiGet, apiPost, apiPut, apiUrl } from '../lib/api';
 import {
   ALLOWED_EMAIL_VARIABLES,
   formatTanggalIndonesia,
@@ -84,6 +88,11 @@ export function EmailCenterPage() {
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyText, setBodyText] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
+  const [composerView, setComposerView] = useState<'text' | 'html' | 'preview'>('text');
+  const [nomorSurat, setNomorSurat] = useState('');
+  const [tenggat, setTenggat] = useState('');
+  const [tautan, setTautan] = useState('');
   const [allActive, setAllActive] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<string[]>(['koordinator_wilayah']);
   const [bidang, setBidang] = useState('');
@@ -91,6 +100,7 @@ export function EmailCenterPage() {
   const [batchId, setBatchId] = useState('');
   const [manualEmailsText, setManualEmailsText] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [csvParsing, setCsvParsing] = useState(false);
 
   const [preview, setPreview] = useState<AudiencePreviewResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -101,13 +111,20 @@ export function EmailCenterPage() {
   const [logCampaignFilter, setLogCampaignFilter] = useState('');
   const [cancelCampaignId, setCancelCampaignId] = useState<string | null>(null);
 
-  // Template modal
+  // Template create / edit / history modals
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [tplName, setTplName] = useState('');
   const [tplCategory, setTplCategory] = useState('Koordinasi Nasional');
   const [tplSubject, setTplSubject] = useState('');
   const [tplBody, setTplBody] = useState('');
+  const [tplBodyHtml, setTplBodyHtml] = useState('');
   const [savingTpl, setSavingTpl] = useState(false);
+  const [historyModalTpl, setHistoryModalTpl] = useState<EmailTemplateRecord | null>(null);
+  const [tplHistory, setTplHistory] = useState<
+    { id: string; version: number; subject: string; body_text: string; body_html: string | null; updated_by: string; created_at: string }[]
+  >([]);
+  const [tplHistoryLoading, setTplHistoryLoading] = useState(false);
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -154,17 +171,52 @@ export function EmailCenterPage() {
       if (!title) setTitle(tpl.name);
       setSubject(tpl.subject);
       setBodyText(tpl.bodyText);
+      setBodyHtml(tpl.bodyHtml || '');
     }
   };
 
   const placeholderCheck = useMemo(() => {
     const s = validateEmailTemplatePlaceholders(subject);
     const b = validateEmailTemplatePlaceholders(bodyText);
+    const h = bodyHtml.trim() ? validateEmailTemplatePlaceholders(bodyHtml) : { valid: true, invalidVariables: [] as string[] };
     return {
-      valid: s.valid && b.valid,
-      invalid: [...s.invalidVariables, ...b.invalidVariables],
+      valid: s.valid && b.valid && h.valid,
+      invalid: [...s.invalidVariables, ...b.invalidVariables, ...h.invalidVariables],
     };
-  }, [subject, bodyText]);
+  }, [subject, bodyText, bodyHtml]);
+
+  const insertVariableIntoComposer = (varName: string) => {
+    const token = `{{${varName}}}`;
+    if (composerView === 'html') {
+      setBodyHtml((prev) => (prev ? `${prev} ${token}` : token));
+    } else {
+      setBodyText((prev) => (prev ? `${prev} ${token}` : token));
+    }
+  };
+
+  const handleCsvRecipientsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvParsing(true);
+    try {
+      const csvText = await file.text();
+      const res = await apiPost<{ emails: string[]; totalValid: number; ignoredCount: number }>('/api/email/parse-csv', {
+        csvText,
+      });
+      const existing = parsedManualEmails.map((em) => em.toLowerCase());
+      const merged = Array.from(new Set([...existing, ...res.emails]));
+      setManualEmailsText(merged.join('\n'));
+      notify(
+        `${res.totalValid} email valid diekstrak dari CSV${res.ignoredCount > 0 ? ` (${res.ignoredCount} baris diabaikan)` : ''}.`,
+        'success'
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memproses berkas CSV penerima.', 'error');
+    } finally {
+      setCsvParsing(false);
+      e.target.value = '';
+    }
+  };
 
   const handlePreviewAudience = async () => {
     setPreviewLoading(true);
@@ -208,6 +260,10 @@ export function EmailCenterPage() {
         templateId: selectedTemplateId || null,
         subject: subject.trim(),
         bodyText: bodyText.trim(),
+        bodyHtml: bodyHtml.trim() || null,
+        nomorSurat: nomorSurat.trim() || undefined,
+        tenggat: tenggat.trim() || undefined,
+        tautan: tautan.trim() || undefined,
         audienceFilter: buildAudienceFilter(),
         actionMode,
         scheduledAt: actionMode === 'schedule' ? new Date(scheduledAt).toISOString() : null,
@@ -258,21 +314,71 @@ export function EmailCenterPage() {
     }
   };
 
-  const handleCreateTemplate = async (e: React.FormEvent) => {
+  const openCreateTemplateModal = () => {
+    setEditingTemplateId(null);
+    setTplName('');
+    setTplCategory('Koordinasi Nasional');
+    setTplSubject('');
+    setTplBody('');
+    setTplBodyHtml('');
+    setTemplateModalOpen(true);
+  };
+
+  const openEditTemplateModal = (tpl: EmailTemplateRecord) => {
+    setEditingTemplateId(tpl.id);
+    setTplName(tpl.name);
+    setTplCategory(tpl.category);
+    setTplSubject(tpl.subject);
+    setTplBody(tpl.bodyText);
+    setTplBodyHtml(tpl.bodyHtml || '');
+    setTemplateModalOpen(true);
+  };
+
+  const openTemplateHistory = async (tpl: EmailTemplateRecord) => {
+    setHistoryModalTpl(tpl);
+    setTplHistory([]);
+    setTplHistoryLoading(true);
+    try {
+      const res = await apiGet<{
+        history: { id: string; version: number; subject: string; body_text: string; body_html: string | null; updated_by: string; created_at: string }[];
+      }>(`/api/email/templates/${tpl.id}/history`);
+      setTplHistory(res.history || []);
+    } catch {
+      setTplHistory([]);
+    } finally {
+      setTplHistoryLoading(false);
+    }
+  };
+
+  const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingTpl(true);
     try {
-      await apiPost('/api/email/templates', {
-        name: tplName,
-        category: tplCategory,
-        subject: tplSubject,
-        bodyText: tplBody,
-      });
-      notify('Templat email resmi berhasil ditambahkan.', 'success');
+      if (editingTemplateId) {
+        const res = await apiPut<{ version: number }>(`/api/email/templates/${editingTemplateId}`, {
+          name: tplName,
+          category: tplCategory,
+          subject: tplSubject,
+          bodyText: tplBody,
+          bodyHtml: tplBodyHtml.trim() || null,
+        });
+        notify(`Templat diperbarui ke Versi ${res.version} (versi lama disimpan di riwayat).`, 'success');
+      } else {
+        await apiPost('/api/email/templates', {
+          name: tplName,
+          category: tplCategory,
+          subject: tplSubject,
+          bodyText: tplBody,
+          bodyHtml: tplBodyHtml.trim() || null,
+        });
+        notify('Templat email resmi berhasil ditambahkan.', 'success');
+      }
       setTemplateModalOpen(false);
+      setEditingTemplateId(null);
       setTplName('');
       setTplSubject('');
       setTplBody('');
+      setTplBodyHtml('');
       await loadOverview();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menyimpan templat.', 'error');
@@ -314,7 +420,7 @@ export function EmailCenterPage() {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setTemplateModalOpen(true)}
+                onClick={openCreateTemplateModal}
               >
                 <Plus className="w-4 h-4" /> Templat Baru
               </Button>
@@ -428,19 +534,110 @@ export function EmailCenterPage() {
               placeholder="[SATU DPBI] Pengingat Batas Pengumpulan LKL {{provinsi}}"
             />
 
-            <Textarea
-              label="Isi Pesan *"
-              rows={7}
-              value={bodyText}
-              onChange={(e) => setBodyText(e.target.value)}
-              placeholder="Yth. {{nama}} ({{jabatan}} - {{provinsi}}), ..."
-            />
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Editor &amp; Pratinjau Isi Pesan *
+                </span>
+                <div className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-semibold">
+                  {[
+                    ['text', 'Teks Biasa'],
+                    ['html', 'HTML Email'],
+                    ['preview', 'Pratinjau'],
+                  ].map(([k, lbl]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setComposerView(k as typeof composerView)}
+                      className={`px-2.5 py-1 rounded-md ${
+                        composerView === k
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div className="rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 text-[11px] text-slate-600 dark:text-slate-400">
-              Variabel tersedia:{' '}
-              <span className="font-mono text-slate-800 dark:text-slate-200">
-                {ALLOWED_EMAIL_VARIABLES.map((v) => `{{${v}}}`).join(' · ')}
-              </span>
+              {composerView === 'text' && (
+                <Textarea
+                  rows={7}
+                  value={bodyText}
+                  onChange={(e) => setBodyText(e.target.value)}
+                  placeholder="Yth. {{nama}} ({{jabatan}} - {{provinsi}}), ..."
+                />
+              )}
+
+              {composerView === 'html' && (
+                <Textarea
+                  rows={7}
+                  value={bodyHtml}
+                  onChange={(e) => setBodyHtml(e.target.value)}
+                  placeholder="<p>Yth. <strong>{{nama}}</strong> ({{jabatan}} - {{provinsi}}),</p>"
+                />
+              )}
+
+              {composerView === 'preview' && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 p-4 space-y-2 text-xs min-h-[168px]">
+                  <p className="text-[11px] font-semibold text-slate-500 border-b border-slate-200 dark:border-slate-800 pb-2">
+                    Subjek Pratinjau:{' '}
+                    <span className="text-slate-900 dark:text-white">{subject || '(Belum ada subjek)'}</span>
+                  </p>
+                  {bodyHtml.trim() ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-[#0EA5E9] font-semibold">Pratinjau Konten HTML (Teks Terbersihkan Aman):</p>
+                      <pre className="whitespace-pre-wrap font-sans text-slate-700 dark:text-slate-200">
+                        {bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-line text-slate-700 dark:text-slate-200">
+                      {bodyText || 'Belum ada isi pesan.'}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 space-y-1.5 text-[11px] text-slate-600 dark:text-slate-400">
+              <p className="font-semibold text-slate-700 dark:text-slate-300">
+                Klik variabel untuk menyisipkan ke editor ({ALLOWED_EMAIL_VARIABLES.length} variabel resmi):
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {ALLOWED_EMAIL_VARIABLES.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => insertVariableIntoComposer(v)}
+                    className="px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono text-slate-800 dark:text-slate-200 hover:border-[#0EA5E9]"
+                  >
+                    {`{{${v}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Input
+                label="Variabel {{nomor_surat}} (Opsional)"
+                value={nomorSurat}
+                onChange={(e) => setNomorSurat(e.target.value)}
+                placeholder="DPBI/SURAT/2026/001"
+              />
+              <Input
+                label="Variabel {{tenggat}} (Opsional)"
+                value={tenggat}
+                onChange={(e) => setTenggat(e.target.value)}
+                placeholder="5 Desember 2026"
+              />
+              <Input
+                label="Variabel {{tautan}} (Opsional)"
+                value={tautan}
+                onChange={(e) => setTautan(e.target.value)}
+                placeholder="https://satu.dpbi.or.id/..."
+              />
             </div>
 
             {!placeholderCheck.valid && (
@@ -575,6 +772,19 @@ export function EmailCenterPage() {
               onChange={(e) => setManualEmailsText(e.target.value)}
               placeholder="duta@dpbi.id, koordinator@dpbi.id"
             />
+
+            {canCreate && (
+              <label className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-[#0EA5E9] cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                {csvParsing ? 'Membaca Berkas CSV...' : 'Unggah CSV Daftar Email Penerima'}
+                <input
+                  type="file"
+                  accept=".csv,.txt,text/csv,text/plain"
+                  onChange={handleCsvRecipientsUpload}
+                  className="hidden"
+                />
+              </label>
+            )}
 
             <Button
               variant="secondary"
@@ -712,6 +922,7 @@ export function EmailCenterPage() {
                     <th className="py-2.5 px-3">Penerima</th>
                     <th className="py-2.5 px-3">Subjek</th>
                     <th className="py-2.5 px-3">Mode</th>
+                    <th className="py-2.5 px-3">Kanal</th>
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3">Waktu / Catatan</th>
                   </tr>
@@ -726,6 +937,9 @@ export function EmailCenterPage() {
                       <td className="py-2.5 px-3 max-w-xs truncate">{l.subjectRendered}</td>
                       <td className="py-2.5 px-3 text-xs font-mono">
                         {l.deliveryMode === 'smtp_live' ? 'SMTP Live' : 'Sandbox Outbox'}
+                      </td>
+                      <td className="py-2.5 px-3 text-xs font-mono text-slate-600 dark:text-slate-300">
+                        {l.deliveryChannel || l.deliveryMode}
                       </td>
                       <td className="py-2.5 px-3">
                         <StatusIndicator status={l.status} />
@@ -744,42 +958,89 @@ export function EmailCenterPage() {
       )}
 
       {activeTab === 'templates' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {data.templates.map((t) => (
-            <Card key={t.id} className="p-4 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-[11px] text-[#0EA5E9] font-semibold">{t.category}</p>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-[#0EA5E9]" /> {t.name}
-                  </h3>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    handleSelectTemplate(t.id);
-                    setActiveTab('composer');
-                  }}
-                >
-                  Pakai Templat
-                </Button>
+        <div className="space-y-6">
+          {Object.entries(
+            data.templates.reduce<Record<string, EmailTemplateRecord[]>>((acc, t) => {
+              const cat = t.category || 'Umum';
+              if (!acc[cat]) acc[cat] = [];
+              acc[cat].push(t);
+              return acc;
+            }, {})
+          ).map(([cat, tpls]) => (
+            <div key={cat} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {cat} ({tpls.length})
+                </h3>
               </div>
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Subjek: {t.subject}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line line-clamp-4">{t.bodyText}</p>
-            </Card>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {tpls.map((t) => (
+                  <Card key={t.id} className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-[#0EA5E9] font-semibold">
+                          {t.category} · v{t.version || 1}
+                        </p>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-[#0EA5E9] shrink-0" />
+                          <span className="truncate">{t.name}</span>
+                        </h4>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openTemplateHistory(t)}
+                        >
+                          <History className="w-3.5 h-3.5" /> Versi
+                        </Button>
+                        {can('email', 'edit') && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openEditTemplateModal(t)}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> Ubah
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => {
+                            handleSelectTemplate(t.id);
+                            setActiveTab('composer');
+                          }}
+                        >
+                          Pakai
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Subjek: {t.subject}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line line-clamp-3">{t.bodyText}</p>
+                    {t.bodyHtml && (
+                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 font-medium">
+                        <Eye className="w-3 h-3" /> Mendukung format HTML Email
+                      </p>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* New Template Modal */}
+      {/* New / Edit Template Modal */}
       <Modal
         open={templateModalOpen}
-        onClose={() => setTemplateModalOpen(false)}
-        title="Buat Templat Email Resmi"
+        onClose={() => {
+          setTemplateModalOpen(false);
+          setEditingTemplateId(null);
+        }}
+        title={editingTemplateId ? 'Ubah Templat Email Resmi' : 'Buat Templat Email Resmi'}
         subtitle={`Variabel valid: ${ALLOWED_EMAIL_VARIABLES.map((v) => `{{${v}}}`).join(', ')}`}
       >
-        <form onSubmit={handleCreateTemplate} className="space-y-3.5">
+        <form onSubmit={handleSaveTemplate} className="space-y-3.5">
           <Input
             label="Nama Templat *"
             required
@@ -801,22 +1062,75 @@ export function EmailCenterPage() {
             placeholder="[SATU DPBI] Undangan Koordinasi {{provinsi}}"
           />
           <Textarea
-            label="Isi Templat *"
+            label="Isi Teks Templat *"
             required
-            rows={5}
+            rows={4}
             value={tplBody}
             onChange={(e) => setTplBody(e.target.value)}
             placeholder="Yth. {{nama}} ({{jabatan}}), ..."
           />
+          <Textarea
+            label="Isi HTML Templat (Opsional)"
+            rows={4}
+            value={tplBodyHtml}
+            onChange={(e) => setTplBodyHtml(e.target.value)}
+            placeholder="<p>Yth. <strong>{{nama}}</strong> ({{jabatan}}), ...</p>"
+          />
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setTemplateModalOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setTemplateModalOpen(false);
+                setEditingTemplateId(null);
+              }}
+            >
               Batal
             </Button>
             <Button type="submit" loading={savingTpl}>
-              Simpan Templat
+              {editingTemplateId ? 'Simpan Versi Baru' : 'Simpan Templat'}
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Template Version History Modal */}
+      <Modal
+        open={Boolean(historyModalTpl)}
+        onClose={() => setHistoryModalTpl(null)}
+        title={`Riwayat Versi Templat — ${historyModalTpl?.name || ''}`}
+        subtitle={`Versi aktif saat ini: v${historyModalTpl?.version || 1}`}
+        maxWidth="max-w-2xl"
+      >
+        {historyModalTpl && (
+          <div className="space-y-3 text-xs">
+            {tplHistoryLoading ? (
+              <p className="text-slate-500 py-4">Memuat riwayat versi templat...</p>
+            ) : tplHistory.length === 0 ? (
+              <p className="text-slate-500 py-4">
+                Templat ini masih berada pada versi awal (v{historyModalTpl.version || 1}) dan belum memiliki arsip revisi sebelumnya.
+              </p>
+            ) : (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {tplHistory.map((h) => (
+                  <div
+                    key={h.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-1.5 bg-slate-50/70 dark:bg-slate-900/50"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-mono font-bold text-[#0EA5E9]">Versi {h.version}</span>
+                      <span className="text-slate-500 tabular-nums">
+                        Diubah oleh {h.updated_by} · {formatTanggalIndonesia(h.created_at, true)}
+                      </span>
+                    </div>
+                    <p className="font-semibold text-slate-900 dark:text-white">Subjek: {h.subject}</p>
+                    <p className="text-slate-600 dark:text-slate-300 whitespace-pre-line">{h.body_text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <ConfirmDialog

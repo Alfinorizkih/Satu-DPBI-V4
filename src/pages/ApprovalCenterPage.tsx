@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowUpRight,
   CheckCircle2,
   Clock,
   FileWarning,
+  History,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -15,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { apiGet, apiPost } from '../lib/api';
 import { formatTanggalIndonesia, ROLE_LABELS } from '../lib/rbac';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
-import type { ApprovalQueueItem, RoleCode } from '../lib/types';
+import type { ApprovalHistoryRecord, ApprovalQueueItem, RoleCode } from '../lib/types';
 import {
   Button,
   Card,
@@ -49,21 +51,108 @@ const REASSIGNABLE_ROLES: { value: RoleCode; label: string }[] = [
   { value: 'super_admin', label: ROLE_LABELS.super_admin },
 ];
 
+interface ApprovalHistoryEntry extends ApprovalHistoryRecord {
+  diff?: Record<string, { before?: unknown; after?: unknown }> | null;
+}
+
+function getSlaCountdownLabel(slaDueAt: string | null, isOverdue: boolean, status: string): string {
+  if (['disetujui', 'diterima', 'ditolak', 'dibatalkan', 'diarsipkan'].includes(status)) {
+    return 'Selesai';
+  }
+  if (!slaDueAt) return 'Tanpa batas SLA';
+  const diffMs = Date.parse(slaDueAt) - Date.now();
+  if (Number.isNaN(diffMs)) return 'SLA aktif';
+  const absHours = Math.max(1, Math.round(Math.abs(diffMs) / 3600000));
+  if (diffMs < 0 || isOverdue) {
+    return absHours >= 24 ? `Lewat ${Math.floor(absHours / 24)}h ${absHours % 24}j` : `Lewat ${absHours} jam`;
+  }
+  return absHours >= 24 ? `Sisa ${Math.floor(absHours / 24)}h ${absHours % 24}j` : `Sisa ${absHours} jam`;
+}
+
+function getStagesForItem(item: ApprovalQueueItem): { labels: string[]; activeIdx: number; isRevision: boolean; isStopped: boolean } {
+  const s = item.status;
+  const isRevision = s === 'perlu_revisi' || s === 'perlu_kelengkapan';
+  const isStopped = s === 'ditolak' || s === 'dibatalkan';
+  if (item.itemType === 'proposal') {
+    const labels = ['Pengajuan', 'Wilayah', 'Nasional', 'Selesai'];
+    let activeIdx = 0;
+    if (s === 'pemeriksaan_administrasi' || s === 'pemeriksaan_wilayah' || isRevision) activeIdx = 1;
+    else if (s === 'menunggu_persetujuan_nasional') activeIdx = 2;
+    else if (s === 'disetujui' || isStopped) activeIdx = 3;
+    return { labels, activeIdx, isRevision, isStopped };
+  }
+  if (item.itemType === 'lkl' || item.itemType === 'coordinator_report') {
+    const labels = ['Terkirim', 'Pemeriksaan', 'Putusan'];
+    let activeIdx = 1;
+    if (s === 'diterima' || isStopped) activeIdx = 2;
+    else if (isRevision) activeIdx = 1;
+    return { labels, activeIdx, isRevision, isStopped };
+  }
+  const labels = ['Masuk', 'Keputusan'];
+  const activeIdx = s === 'disetujui' || isStopped ? 1 : 0;
+  return { labels, activeIdx, isRevision, isStopped };
+}
+
+function StageProgressBar({ item, compact = false }: { item: ApprovalQueueItem; compact?: boolean }) {
+  const { labels, activeIdx, isRevision, isStopped } = getStagesForItem(item);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1">
+        {labels.map((lbl, idx) => {
+          const passed = idx <= activeIdx;
+          const color =
+            isStopped && idx === activeIdx
+              ? 'bg-rose-500'
+              : isRevision && idx === activeIdx
+              ? 'bg-amber-500'
+              : passed
+              ? 'bg-[#0EA5E9]'
+              : 'bg-slate-200 dark:bg-slate-700';
+          return (
+            <div key={lbl} className="flex-1 min-w-0">
+              <div className={`h-1.5 rounded-full ${color}`} title={lbl} />
+              {!compact && (
+                <p
+                  className={`text-[10px] mt-1 truncate ${
+                    idx === activeIdx
+                      ? 'font-semibold text-slate-800 dark:text-slate-100'
+                      : 'text-slate-400 dark:text-slate-500'
+                  }`}
+                >
+                  {idx + 1}. {lbl}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {compact && (
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+          Tahap {activeIdx + 1}/{labels.length}: {labels[activeIdx]}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ApprovalCenterPage() {
   const { user, can, navigate, notify } = useAuth();
   const [items, setItems] = useState<ApprovalQueueItem[]>([]);
   const [summary, setSummary] = useState({
     totalCount: 0,
     overdueCount: 0,
+    revisionCount: 0,
     byType: { proposal: 0, lkl: 0, coordinator_report: 0, account_request: 0, handover: 0 },
   });
   const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState<'pending' | 'overdue' | 'all'>('pending');
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'overdue' | 'revisi' | 'all'>('pending');
   const [filterType, setFilterType] = useState<string>('semua');
   const [filterProv, setFilterProv] = useState<string>('');
   const [search, setSearch] = useState('');
 
   const [selected, setSelected] = useState<ApprovalQueueItem | null>(null);
+  const [history, setHistory] = useState<ApprovalHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [reason, setReason] = useState('');
   const [targetRole, setTargetRole] = useState<RoleCode>('pengurus_nasional');
   const [escalateTo, setEscalateTo] = useState('Super Admin & Penanggung Jawab');
@@ -112,12 +201,47 @@ export function ApprovalCenterPage() {
     );
   }, [items, search]);
 
+  const openReviewModal = useCallback(
+    async (item: ApprovalQueueItem) => {
+      setSelected(item);
+      setReason('');
+      setHistory([]);
+      setHistoryLoading(true);
+      try {
+        const res = await apiGet<{ history: ApprovalHistoryEntry[] }>(
+          `/api/approval-center/${item.itemType}/${item.id}/history`
+        );
+        setHistory(res.history || []);
+      } catch {
+        setHistory([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    []
+  );
+
   const executeAction = async (
-    action: 'approve' | 'reject' | 'request_revision' | 'request_completeness' | 'reassign' | 'escalate' | 'cancel'
+    action:
+      | 'approve'
+      | 'advance_stage'
+      | 'reject'
+      | 'request_revision'
+      | 'request_completeness'
+      | 'reassign'
+      | 'escalate'
+      | 'cancel'
   ) => {
     if (!selected) return;
-    if (['reject', 'request_revision', 'request_completeness', 'cancel', 'escalate'].includes(action) && reason.trim().length < 5) {
+    if (
+      ['reject', 'request_revision', 'request_completeness', 'cancel', 'escalate'].includes(action) &&
+      reason.trim().length < 5
+    ) {
       notify('Alasan atau catatan wajib diisi minimal 5 karakter.', 'warning');
+      return;
+    }
+    if (action === 'reassign' && reason.trim().length < 3) {
+      notify('Alasan pengalihan peninjau wajib diisi minimal 3 karakter.', 'warning');
       return;
     }
     setSubmitting(true);
@@ -202,12 +326,13 @@ export function ApprovalCenterPage() {
             {[
               { id: 'pending', label: 'Menunggu Tindakan' },
               { id: 'overdue', label: `Terlambat SLA (${summary.overdueCount})` },
+              { id: 'revisi', label: `Pusat Revisi (${summary.revisionCount ?? 0})` },
               { id: 'all', label: 'Semua Riwayat' },
             ].map((tab) => (
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setFilterStatus(tab.id as 'pending' | 'overdue' | 'all')}
+                onClick={() => setFilterStatus(tab.id as 'pending' | 'overdue' | 'revisi' | 'all')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                   filterStatus === tab.id
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
@@ -300,14 +425,14 @@ export function ApprovalCenterPage() {
                           {TYPE_LABELS[item.itemType]}
                         </p>
                       </td>
-                      <td className="py-3 px-4 align-top max-w-md">
+                      <td className="py-3 px-4 align-top max-w-md space-y-1.5">
                         <p className="font-semibold text-slate-900 dark:text-white leading-snug">{item.title}</p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {item.applicantName} · {item.provinceName || 'Nasional'}
                         </p>
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 line-clamp-1 mt-0.5">
-                          {item.summary}
-                        </p>
+                        <div className="max-w-[240px]">
+                          <StageProgressBar item={item} compact />
+                        </div>
                       </td>
                       <td className="py-3 px-4 align-top text-xs">
                         <p className="font-medium text-slate-800 dark:text-slate-200">
@@ -325,11 +450,16 @@ export function ApprovalCenterPage() {
                             <p className={item.isOverdue ? 'font-semibold text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-300'}>
                               {formatTanggalIndonesia(item.slaDueAt, true)}
                             </p>
-                            {item.isOverdue && (
-                              <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1 mt-0.5">
-                                <AlertTriangle className="w-3 h-3" /> Melewati SLA
-                              </p>
-                            )}
+                            <p
+                              className={`text-[11px] font-semibold inline-flex items-center gap-1 mt-0.5 ${
+                                item.isOverdue
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {item.isOverdue ? <AlertTriangle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                              {getSlaCountdownLabel(item.slaDueAt, item.isOverdue, item.status)}
+                            </p>
                           </div>
                         ) : (
                           '-'
@@ -342,10 +472,7 @@ export function ApprovalCenterPage() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => {
-                            setSelected(item);
-                            setReason('');
-                          }}
+                          onClick={() => openReviewModal(item)}
                         >
                           Tinjau
                         </Button>
@@ -373,9 +500,14 @@ export function ApprovalCenterPage() {
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {item.applicantName} · {item.provinceName || 'Nasional'}
                 </p>
-                {item.isOverdue && (
-                  <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" /> Melewati Batas SLA ({formatTanggalIndonesia(item.slaDueAt || '', true)})
+                <StageProgressBar item={item} compact />
+                {item.slaDueAt && (
+                  <p
+                    className={`text-xs font-semibold inline-flex items-center gap-1 ${
+                      item.isOverdue ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" /> {getSlaCountdownLabel(item.slaDueAt, item.isOverdue, item.status)} ({formatTanggalIndonesia(item.slaDueAt, true)})
                   </p>
                 )}
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -388,10 +520,7 @@ export function ApprovalCenterPage() {
                   </button>
                   <Button
                     size="sm"
-                    onClick={() => {
-                      setSelected(item);
-                      setReason('');
-                    }}
+                    onClick={() => openReviewModal(item)}
                   >
                     Tinjau &amp; Putuskan
                   </Button>
@@ -412,15 +541,20 @@ export function ApprovalCenterPage() {
       >
         {selected && (
           <div className="space-y-4">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-2 bg-slate-50/60 dark:bg-slate-950/50">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 bg-slate-50/60 dark:bg-slate-950/50">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">{selected.title}</h3>
                 <StatusIndicator status={selected.status} />
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-300">{selected.summary}</p>
+              <StageProgressBar item={selected} />
               <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 dark:text-slate-400 pt-1 tabular-nums">
                 <span>Diajukan: {formatTanggalIndonesia(selected.submittedAt, true)}</span>
-                {selected.slaDueAt && <span>Batas SLA: {formatTanggalIndonesia(selected.slaDueAt, true)}</span>}
+                {selected.slaDueAt && (
+                  <span className={selected.isOverdue ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
+                    Batas SLA: {formatTanggalIndonesia(selected.slaDueAt, true)} ({getSlaCountdownLabel(selected.slaDueAt, selected.isOverdue, selected.status)})
+                  </span>
+                )}
               </div>
             </div>
 
@@ -441,7 +575,7 @@ export function ApprovalCenterPage() {
             {canReview && !['disetujui', 'diterima', 'ditolak', 'dibatalkan', 'diarsipkan'].includes(selected.status) && (
               <div className="space-y-4 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <Textarea
-                  label="Catatan / Alasan Keputusan (wajib minimal 5 karakter untuk Revisi, Tolak, Eskalasi, atau Batalkan)"
+                  label="Catatan / Alasan Keputusan (wajib min. 5 karakter untuk Revisi, Tolak, Eskalasi, Batalkan; min. 3 karakter untuk Alihkan)"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   rows={3}
@@ -463,6 +597,15 @@ export function ApprovalCenterPage() {
                       }
                     >
                       <CheckCircle2 className="w-4 h-4" /> Setujui
+                    </Button>
+                  )}
+                  {selected.itemType === 'proposal' && selected.status !== 'menunggu_persetujuan_nasional' && (
+                    <Button
+                      variant="secondary"
+                      loading={submitting}
+                      onClick={() => executeAction('advance_stage')}
+                    >
+                      <ArrowRight className="w-4 h-4 text-[#0EA5E9]" /> Teruskan ke Nasional
                     </Button>
                   )}
                   <Button
@@ -554,6 +697,52 @@ export function ApprovalCenterPage() {
                 )}
               </div>
             )}
+
+            {/* Approval History & Diff Timeline */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+              <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <History className="w-4 h-4 text-[#0EA5E9]" /> Riwayat Tahapan &amp; Jejak Audit Keputusan
+              </p>
+              {historyLoading ? (
+                <p className="text-xs text-slate-500">Memuat riwayat persetujuan...</p>
+              ) : history.length === 0 ? (
+                <p className="text-xs text-slate-500">Belum ada catatan riwayat perubahan tahap untuk item ini.</p>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {history.map((h) => (
+                    <div
+                      key={h.id}
+                      className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-3 text-xs space-y-1"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {h.stageLabel || h.action}
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                          {formatTanggalIndonesia(h.createdAt, true)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                        Oleh <strong>{h.actorName}</strong> ({ROLE_LABELS[h.actorRole as RoleCode] || h.actorRole})
+                        {h.fromStatus ? ` · ${h.fromStatus.replace(/_/g, ' ')} → ${h.toStatus.replace(/_/g, ' ')}` : ` · Status: ${h.toStatus.replace(/_/g, ' ')}`}
+                      </p>
+                      {h.note && <p className="text-slate-700 dark:text-slate-200">{h.note}</p>}
+                      {h.diff && Object.keys(h.diff).length > 0 && (
+                        <div className="mt-1.5 rounded-lg bg-white/80 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800 px-2.5 py-1.5 font-mono text-[11px] space-y-0.5">
+                          {Object.entries(h.diff).map(([field, vals]) => (
+                            <p key={field} className="text-slate-600 dark:text-slate-300">
+                              <span className="font-semibold text-[#0EA5E9]">{field}:</span>{' '}
+                              <span className="line-through text-rose-500">{String(vals?.before ?? '—')}</span>{' '}
+                              → <span className="text-emerald-600 dark:text-emerald-400">{String(vals?.after ?? '—')}</span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </Modal>

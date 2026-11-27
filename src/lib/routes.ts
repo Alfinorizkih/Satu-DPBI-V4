@@ -1,6 +1,7 @@
 import type { HttpErrorCode, ModuleCode } from './types';
 
 export type MatchedPrivateRoute =
+  | { kind: 'beranda'; module: ModuleCode; title: string }
   | { kind: 'dashboard'; module: ModuleCode; title: string }
   | { kind: 'my_activity'; module: ModuleCode; title: string }
   | { kind: 'organization'; module: ModuleCode; title: string }
@@ -21,9 +22,12 @@ export type MatchedPrivateRoute =
   | { kind: 'archive'; module: ModuleCode; title: string }
   | { kind: 'approval_center'; module: ModuleCode; title: string }
   | { kind: 'email'; module: ModuleCode; title: string }
+  | { kind: 'programs'; module: ModuleCode; title: string; slug?: string }
+  | { kind: 'correspondence'; module: ModuleCode; title: string; id?: string }
   | { kind: 'system'; module: ModuleCode; title: string; initialTab: 'storage' | 'audit' | 'kesehatan' }
   | { kind: 'settings'; module: ModuleCode; title: string; initialTab: 'profil' | 'keamanan' | 'sesi' | 'preferensi' | 'pengguna' | 'hak_akses' | 'organisasi' | 'cms' }
   | { kind: 'help'; title: string }
+  | { kind: 'support'; title: string }
   | { kind: 'legal'; section: 'privasi' | 'ketentuan'; title: string };
 
 export const VALID_ERROR_CODES: HttpErrorCode[] = [400, 401, 403, 404, 419, 422, 429, 500, 502, 503];
@@ -43,6 +47,8 @@ export function isPublicWebsitePath(pathname: string): boolean {
     p === '/tentang' ||
     p === '/wilayah' ||
     p.startsWith('/wilayah/') ||
+    p === '/program' ||
+    p.startsWith('/program/') ||
     p === '/bantuan' ||
     p === '/pusat-bantuan' ||
     p === '/privasi' ||
@@ -69,6 +75,7 @@ function safeSegment(raw: string): string | null {
 export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null {
   const p = normalizePathname(pathname);
 
+  if (p === '/beranda') return { kind: 'beranda', module: 'dashboard', title: 'Beranda Saya' };
   if (p === '/dashboard') return { kind: 'dashboard', module: 'dashboard', title: 'Dashboard & Ringkasan' };
   if (p === '/aktivitas-saya') return { kind: 'my_activity', module: 'dashboard', title: 'Aktivitas Saya' };
   if (p === '/tugas-saya') return { kind: 'tasks', module: 'tugas', title: 'Tugas Saya', scope: 'mine' };
@@ -85,7 +92,18 @@ export function matchPrivateRoute(pathname: string): MatchedPrivateRoute | null 
   if (p === '/arsip') return { kind: 'archive', module: 'arsip', title: 'Arsip Organisasi' };
   if (p === '/persetujuan') return { kind: 'approval_center', module: 'persetujuan', title: 'Pusat Persetujuan Nasional' };
   if (p === '/email') return { kind: 'email', module: 'email', title: 'Pusat Email & Pengiriman Massal' };
+  if (p === '/program') return { kind: 'programs', module: 'program', title: 'Pusat Program Unggulan DPBI' };
+  if (p.startsWith('/program/')) {
+    const slug = safeSegment(p.slice('/program/'.length));
+    return slug ? { kind: 'programs', module: 'program', title: 'Detail Program Unggulan', slug } : null;
+  }
+  if (p === '/persuratan') return { kind: 'correspondence', module: 'persuratan', title: 'Persuratan & Disposisi Resmi' };
+  if (p.startsWith('/persuratan/')) {
+    const id = safeSegment(p.slice('/persuratan/'.length));
+    return id ? { kind: 'correspondence', module: 'persuratan', title: 'Detail Surat Resmi', id } : null;
+  }
   if (p === '/bantuan' || p === '/pusat-bantuan') return { kind: 'help', title: 'Pusat Bantuan & Panduan' };
+  if (p === '/kendala' || p === '/lapor-error') return { kind: 'support', title: 'Pusat Kendala & Laporan Error' };
   if (p === '/privasi') return { kind: 'legal', section: 'privasi', title: 'Kebijakan Privasi & Data Pelajar' };
   if (p === '/ketentuan' || p === '/hak-cipta') return { kind: 'legal', section: 'ketentuan', title: 'Hak Cipta & Ketentuan Penggunaan' };
 
@@ -173,11 +191,13 @@ export function getRouteTitle(pathname: string): string {
 
 export function resolveBaseNavPath(pathname: string): string {
   const p = normalizePathname(pathname);
+  if (p === '/beranda') return '/beranda';
   if (p === '/aktivitas-saya') return '/aktivitas-saya';
   if (p === '/tugas-saya') return '/tugas-saya';
   if (p === '/alumni') return '/alumni';
   if (p === '/audit-log') return '/audit-log';
   if (p === '/status-sistem') return '/status-sistem';
+  if (p === '/kendala' || p === '/lapor-error') return '/kendala';
   if (p === '/profil' || p === '/pengaturan' || p === '/pengaturan/profil' || p === '/pengaturan/keamanan' || p === '/pengaturan/sesi') return '/pengaturan';
   if (p === '/pengaturan/pengguna') return '/pengaturan/pengguna';
   if (p === '/pengaturan/hak-akses') return '/pengaturan/hak-akses';
@@ -191,5 +211,7 @@ export function resolveBaseNavPath(pathname: string): string {
   if (p === '/pusat-bantuan') return '/bantuan';
   if (p === '/hak-cipta') return '/ketentuan';
   if (p.startsWith('/dokumen')) return '/dokumen';
+  if (p.startsWith('/program')) return '/program';
+  if (p.startsWith('/persuratan')) return '/persuratan';
   return p;
 }

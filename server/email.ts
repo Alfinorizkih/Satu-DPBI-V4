@@ -20,6 +20,7 @@ export interface ResolvedRecipient {
   email: string;
   fullName: string;
   jabatan: string;
+  role?: string;
   provinsi: string;
   angkatan: string;
 }
@@ -158,7 +159,8 @@ export function resolveEmailAudience(db: DatabaseSync, filter: AudienceFilter): 
 async function dispatchSingleEmail(
   recipientEmail: string,
   subject: string,
-  bodyText: string
+  bodyText: string,
+  bodyHtml?: string | null
 ): Promise<{ ok: boolean; status: 'terkirim' | 'terantre_outbox' | 'gagal'; mode: 'smtp_live' | 'sandbox_outbox'; messageId?: string; error?: string }> {
   const runtime = getEmailRuntimeStatus();
   if (!runtime.smtpConfigured) {
@@ -185,6 +187,7 @@ async function dispatchSingleEmail(
       to: recipientEmail,
       subject,
       text: bodyText,
+      ...(bodyHtml ? { html: bodyHtml } : {}),
     });
     return {
       ok: true,
@@ -209,6 +212,7 @@ export async function executeEmailCampaign(
     templateId?: string | null;
     subject: string;
     bodyText: string;
+    bodyHtml?: string | null;
     audienceFilter: AudienceFilter;
     recipients: ResolvedRecipient[];
     actionMode: 'send_now' | 'save_draft' | 'schedule' | 'test_self';
@@ -216,6 +220,9 @@ export async function executeEmailCampaign(
     createdBy: string;
     createdByName: string;
     referenceCode?: string;
+    nomorSurat?: string;
+    tenggat?: string;
+    tautan?: string;
   }
 ): Promise<{
   campaignId: string;
@@ -227,8 +234,9 @@ export async function executeEmailCampaign(
 }> {
   const subCheck = validateEmailTemplatePlaceholders(input.subject);
   const bodyCheck = validateEmailTemplatePlaceholders(input.bodyText);
-  if (!subCheck.valid || !bodyCheck.valid) {
-    const bad = [...subCheck.invalidVariables, ...bodyCheck.invalidVariables];
+  const htmlCheck = input.bodyHtml ? validateEmailTemplatePlaceholders(input.bodyHtml) : { valid: true, invalidVariables: [], unclosedBraces: false };
+  if (!subCheck.valid || !bodyCheck.valid || !htmlCheck.valid) {
+    const bad = [...subCheck.invalidVariables, ...bodyCheck.invalidVariables, ...htmlCheck.invalidVariables];
     throw new Error(
       bad.length > 0
         ? `Variabel templat tidak valid: ${bad.map((v) => `{{${v}}}`).join(', ')}.`
@@ -250,14 +258,15 @@ export async function executeEmailCampaign(
     const status = input.actionMode === 'schedule' ? 'terjadwal' : 'draft';
     db.prepare(
       `INSERT INTO email_campaigns
-       (id, title, template_id, subject, body_text, audience_filter_json, delivery_mode, status, total_recipients, sent_count, failed_count, scheduled_at, sent_at, created_by, created_by_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?, ?)`
+       (id, title, template_id, subject, body_text, body_html, audience_filter_json, delivery_mode, status, total_recipients, sent_count, failed_count, scheduled_at, sent_at, created_by, created_by_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?, ?)`
     ).run(
       campaignId,
       input.title,
       input.templateId || null,
       input.subject,
       input.bodyText,
+      input.bodyHtml || null,
       JSON.stringify(input.audienceFilter),
       runtime.deliveryMode,
       status,
@@ -283,14 +292,15 @@ export async function executeEmailCampaign(
 
   db.prepare(
     `INSERT INTO email_campaigns
-     (id, title, template_id, subject, body_text, audience_filter_json, delivery_mode, status, total_recipients, sent_count, failed_count, scheduled_at, sent_at, created_by, created_by_name, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'terkirim', ?, 0, 0, NULL, ?, ?, ?, ?)`
+     (id, title, template_id, subject, body_text, body_html, audience_filter_json, delivery_mode, status, total_recipients, sent_count, failed_count, scheduled_at, sent_at, created_by, created_by_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'terkirim', ?, 0, 0, NULL, ?, ?, ?, ?)`
   ).run(
     campaignId,
     input.title,
     input.templateId || null,
     input.subject,
     input.bodyText,
+    input.bodyHtml || null,
     JSON.stringify(input.audienceFilter),
     runtime.deliveryMode,
     input.recipients.length,
@@ -302,8 +312,8 @@ export async function executeEmailCampaign(
 
   const logStmt = db.prepare(
     `INSERT INTO email_logs
-     (id, campaign_id, recipient_user_id, recipient_email, recipient_name, subject_rendered, body_rendered, status, delivery_mode, error_message, provider_message_id, sent_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, campaign_id, recipient_user_id, recipient_email, recipient_name, subject_rendered, body_rendered, status, delivery_mode, delivery_channel, error_message, provider_message_id, sent_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   for (const r of input.recipients) {
@@ -311,14 +321,19 @@ export async function executeEmailCampaign(
       nama: r.fullName,
       email: r.email,
       jabatan: r.jabatan,
+      role: r.role || r.jabatan,
       provinsi: r.provinsi,
       angkatan: r.angkatan,
+      nomor_surat: input.nomorSurat || input.referenceCode || `DPBI/MAIL/${new Date().getFullYear()}`,
       tanggal: tanggalLabel,
+      tenggat: input.tenggat || tanggalLabel,
+      tautan: input.tautan || process.env.APP_URL || 'https://satu.dpbi.or.id',
       referensi: input.referenceCode || campaignId.slice(0, 8).toUpperCase(),
     };
     const subjectRendered = renderEmailTemplate(input.subject, vars);
     const bodyRendered = renderEmailTemplate(input.bodyText, vars);
-    const result = await dispatchSingleEmail(r.email, subjectRendered, bodyRendered);
+    const htmlRendered = input.bodyHtml ? renderEmailTemplate(input.bodyHtml, vars) : null;
+    const result = await dispatchSingleEmail(r.email, subjectRendered, bodyRendered, htmlRendered);
 
     if (result.ok) sentCount += 1;
     else failedCount += 1;
@@ -332,6 +347,7 @@ export async function executeEmailCampaign(
       subjectRendered,
       bodyRendered,
       result.status,
+      result.mode,
       result.mode,
       result.error || null,
       result.messageId || null,

@@ -9,7 +9,9 @@ import { ensureSeeded } from './server/seed';
 import { registerCoreRoutes } from './server/routes';
 import { registerModuleRoutes } from './server/routes_modules';
 import { registerWorkflowAndEmailRoutes } from './server/routes_workflow_email';
-import { recordSystemError, requireSafeOrigin } from './server/security';
+import { registerProgramAndCorrespondenceRoutes } from './server/routes_programs_correspondence';
+import { registerAddendumRoutes } from './server/routes_addendum';
+import { readAppVersion, recordApiMetric, recordSystemError, requireNotInMaintenance, requireSafeOrigin } from './server/security';
 
 async function startServer() {
   const app = express();
@@ -31,12 +33,21 @@ async function startServer() {
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, Authorization, X-Idempotency-Key');
       if (req.method === 'OPTIONS') {
         res.status(204).end();
         return;
       }
     }
+    next();
+  });
+
+  // Lightweight non-PII API request latency & error counter
+  app.use('/api', (req, res, next) => {
+    const start = performance.now();
+    res.on('finish', () => {
+      recordApiMetric(req.method, req.path || '/', res.statusCode, performance.now() - start);
+    });
     next();
   });
 
@@ -69,18 +80,36 @@ async function startServer() {
     res.json({
       ok: true,
       service: 'SATU DPBI',
+      version: readAppVersion(),
       mode: IS_DEMO_MODE ? 'DEMO_SIMULASI' : 'PRODUKSI',
       timestamp: new Date().toISOString(),
     });
   });
 
-  // CSRF / Origin validation for state-changing API requests
+  app.get('/api/system/version', (_req, res) => {
+    const maint = db
+      .prepare("SELECT key, value FROM system_settings WHERE key IN ('maintenance_mode', 'maintenance_message')")
+      .all() as { key: string; value: string }[];
+    const map = new Map(maint.map((m) => [m.key, m.value]));
+    res.json({
+      version: readAppVersion(),
+      service: 'SATU DPBI',
+      mode: IS_DEMO_MODE ? 'DEMO_SIMULASI' : 'PRODUKSI',
+      maintenanceMode: map.get('maintenance_mode') === 'true',
+      maintenanceMessage: map.get('maintenance_message') || '',
+    });
+  });
+
+  // CSRF / Origin validation & Maintenance Mode write-lock for API requests
   app.use('/api', requireSafeOrigin);
+  app.use('/api', requireNotInMaintenance);
 
   // Register API Routes
   registerCoreRoutes(app);
   registerModuleRoutes(app);
   registerWorkflowAndEmailRoutes(app);
+  registerProgramAndCorrespondenceRoutes(app);
+  registerAddendumRoutes(app);
 
   // API 404 handler (prevent falling through to HTML for unknown /api/* calls)
   app.use('/api', (_req, res) => {

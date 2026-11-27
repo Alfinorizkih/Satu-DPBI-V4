@@ -25,6 +25,7 @@ import {
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import { formatTanggalIndonesia } from '../lib/rbac';
+import { clearOfflineDraft, loadOfflineDraft, saveOfflineDraft } from '../lib/offlineDraft';
 
 interface CoordReport {
   id: string;
@@ -91,7 +92,7 @@ export function CoordinatorReportsPage() {
   });
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
-  const [form, setForm] = useState({
+  const defaultForm = {
     reportType: 'bulanan' as 'bulanan' | 'akhir',
     periodLabel: 'November 2026',
     personnelCondition: '',
@@ -101,7 +102,36 @@ export function CoordinatorReportsPage() {
     followUpPlan: '',
     pdfFileId: null as string | null,
     pdfFileName: null as string | null,
-  });
+  };
+
+  const [form, setForm] = useState(defaultForm);
+  const [formDirty, setFormDirty] = useState(false);
+  const [offlineDraftBanner, setOfflineDraftBanner] = useState<{ savedAt: string; data: typeof defaultForm } | null>(null);
+
+  const updateCoordForm = (patch: Partial<typeof defaultForm>) => {
+    setFormDirty(true);
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const openCreateModal = () => {
+    setForm(defaultForm);
+    setFormDirty(false);
+    const saved = loadOfflineDraft<typeof defaultForm>(user?.id, 'coordinator_report_form');
+    if (saved && saved.data && (saved.data.personnelCondition || saved.data.activitiesSummary || saved.data.obstacles)) {
+      setOfflineDraftBanner(saved);
+    } else {
+      setOfflineDraftBanner(null);
+    }
+    setCreateOpen(true);
+  };
+
+  useEffect(() => {
+    if (!createOpen || !formDirty) return;
+    const t = window.setTimeout(() => {
+      saveOfflineDraft(user?.id, 'coordinator_report_form', form);
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [createOpen, formDirty, form, user?.id]);
 
   const load = () => {
     setLoading(true);
@@ -119,19 +149,12 @@ export function CoordinatorReportsPage() {
     e.preventDefault();
     try {
       const res = await apiPost<{ referenceNumber: string }>('/api/coordinator-reports', form);
+      clearOfflineDraft(user?.id, 'coordinator_report_form');
+      setOfflineDraftBanner(null);
+      setFormDirty(false);
       notify(`Laporan Koordinator ${res.referenceNumber} berhasil dikirim.`, 'success');
       setCreateOpen(false);
-      setForm({
-        reportType: 'bulanan',
-        periodLabel: 'November 2026',
-        personnelCondition: '',
-        activitiesSummary: '',
-        obstacles: '',
-        coachingNeeds: '',
-        followUpPlan: '',
-        pdfFileId: null,
-        pdfFileName: null,
-      });
+      setForm(defaultForm);
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal mengirim laporan koordinator.', 'error');
@@ -213,7 +236,7 @@ export function CoordinatorReportsPage() {
         {can('laporan_koordinator', 'create') && (
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
+            onClick={openCreateModal}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold whitespace-nowrap"
           >
             <Plus className="w-4 h-4" /> Kirim Laporan Wilayah
@@ -264,7 +287,7 @@ export function CoordinatorReportsPage() {
           title="Belum ada laporan koordinator pada kategori ini"
           description="Kirim laporan bulanan atau laporan akhir wilayah untuk rekapitulasi dan verifikasi tingkat nasional."
           actionLabel={can('laporan_koordinator', 'create') ? 'Kirim Laporan Wilayah' : undefined}
-          onAction={can('laporan_koordinator', 'create') ? () => setCreateOpen(true) : undefined}
+          onAction={can('laporan_koordinator', 'create') ? openCreateModal : undefined}
         />
       ) : (
         <div className="space-y-4">
@@ -437,6 +460,37 @@ export function CoordinatorReportsPage() {
       {/* Submit Coordinator Report Modal */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Kirim Laporan Koordinator Wilayah">
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+          {offlineDraftBanner && (
+            <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sky-900 dark:text-sky-100">
+                Draft laporan lokal tersedia ({formatTanggalIndonesia(offlineDraftBanner.savedAt, true)}).
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm({ ...defaultForm, ...offlineDraftBanner.data });
+                    setOfflineDraftBanner(null);
+                    setFormDirty(true);
+                    notify('Draft laporan lokal dipulihkan.', 'info');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#0EA5E9] text-white font-semibold"
+                >
+                  Pulihkan Draft
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearOfflineDraft(user?.id, 'coordinator_report_form');
+                    setOfflineDraftBanner(null);
+                  }}
+                  className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 font-semibold"
+                >
+                  Hapus
+                </button>
+              </div>
+            </div>
+          )}
           {user?.role === 'koordinator_wilayah' && (
             <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 flex flex-wrap items-center justify-between gap-3">
               <span>
@@ -458,7 +512,7 @@ export function CoordinatorReportsPage() {
               <label className="block font-semibold mb-1">Jenis Laporan</label>
               <select
                 value={form.reportType}
-                onChange={(e) => setForm({ ...form, reportType: e.target.value as 'bulanan' | 'akhir' })}
+                onChange={(e) => updateCoordForm({ reportType: e.target.value as 'bulanan' | 'akhir' })}
                 className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
               >
                 <option value="bulanan">Laporan Bulanan (Tenggat Tgl 5)</option>
@@ -470,7 +524,7 @@ export function CoordinatorReportsPage() {
               <input
                 required
                 value={form.periodLabel}
-                onChange={(e) => setForm({ ...form, periodLabel: e.target.value })}
+                onChange={(e) => updateCoordForm({ periodLabel: e.target.value })}
                 className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
               />
             </div>
@@ -481,7 +535,7 @@ export function CoordinatorReportsPage() {
               rows={2}
               required
               value={form.personnelCondition}
-              onChange={(e) => setForm({ ...form, personnelCondition: e.target.value })}
+              onChange={(e) => updateCoordForm({ personnelCondition: e.target.value })}
               placeholder="Keaktifan Duta, keterlibatan sekolah mitra, dan kehadiran pembekalan..."
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
             />
@@ -492,7 +546,7 @@ export function CoordinatorReportsPage() {
               rows={2}
               required
               value={form.activitiesSummary}
-              onChange={(e) => setForm({ ...form, activitiesSummary: e.target.value })}
+              onChange={(e) => updateCoordForm({ activitiesSummary: e.target.value })}
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
             />
           </div>
@@ -501,7 +555,7 @@ export function CoordinatorReportsPage() {
               <label className="block font-semibold mb-1">Kendala Lapangan</label>
               <input
                 value={form.obstacles}
-                onChange={(e) => setForm({ ...form, obstacles: e.target.value })}
+                onChange={(e) => updateCoordForm({ obstacles: e.target.value })}
                 className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
               />
             </div>
@@ -509,7 +563,7 @@ export function CoordinatorReportsPage() {
               <label className="block font-semibold mb-1">Kebutuhan Pembinaan</label>
               <input
                 value={form.coachingNeeds}
-                onChange={(e) => setForm({ ...form, coachingNeeds: e.target.value })}
+                onChange={(e) => updateCoordForm({ coachingNeeds: e.target.value })}
                 className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
               />
             </div>
@@ -518,7 +572,7 @@ export function CoordinatorReportsPage() {
             <label className="block font-semibold mb-1">Rencana Tindak Lanjut Bulan Berikutnya</label>
             <input
               value={form.followUpPlan}
-              onChange={(e) => setForm({ ...form, followUpPlan: e.target.value })}
+              onChange={(e) => updateCoordForm({ followUpPlan: e.target.value })}
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
             />
           </div>
@@ -527,7 +581,7 @@ export function CoordinatorReportsPage() {
             accept=".pdf,application/pdf"
             moduleName="laporan_koordinator"
             uploadedFileName={form.pdfFileName}
-            onUploaded={(res) => setForm({ ...form, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+            onUploaded={(res) => updateCoordForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
           />
           <div className="flex justify-end pt-2">
             <button type="submit" className="px-4 py-2.5 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white font-semibold">

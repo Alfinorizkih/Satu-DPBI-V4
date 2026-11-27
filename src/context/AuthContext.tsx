@@ -4,6 +4,7 @@ import { apiGet, apiPost, setApiHandlers } from '../lib/api';
 import type { AuthUser, ModuleCode, PermissionAction, ToastVariant } from '../lib/types';
 import { hasPermission } from '../lib/rbac';
 import { getRouteTitle, matchPrivateRoute, normalizePathname } from '../lib/routes';
+import { clearAllUserDrafts } from '../lib/offlineDraft';
 
 interface ToastItem {
   id: string;
@@ -49,6 +50,8 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/pengaturan/cms': 'CMS Portal Publik & Bantuan',
   '/persetujuan': 'Pusat Persetujuan Nasional',
   '/email': 'Pusat Email & Pengiriman Massal',
+  '/program': 'Program Unggulan Nasional',
+  '/persuratan': 'Persuratan & Disposisi',
   '/bantuan': 'Pusat Bantuan Internal',
 };
 
@@ -66,6 +69,10 @@ interface AuthContextValue {
   recentlyViewed: RecentRouteItem[];
   onboardingDone: boolean;
   pendingRedirectPath: string | null;
+  appVersion: string;
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+  refreshSystemMeta: () => Promise<void>;
   setPendingRedirectPath: (path: string | null) => void;
   navigate: (path: string) => void;
   toggleTheme: () => void;
@@ -104,6 +111,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const p = normalizePathname(window.location.pathname || '/');
     return matchPrivateRoute(p) ? p : null;
   });
+  const [appVersion, setAppVersion] = useState('4.1.0');
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const lastActivityRef = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -236,9 +246,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshSystemMeta = useCallback(async () => {
+    try {
+      const meta = await apiGet<{
+        version: string;
+        maintenanceMode: boolean;
+        maintenanceMessage: string;
+      }>('/api/system/version', true);
+      if (meta.version) setAppVersion(meta.version);
+      setMaintenanceMode(Boolean(meta.maintenanceMode));
+      setMaintenanceMessage(meta.maintenanceMessage || '');
+    } catch {
+      // ignore if offline
+    }
+  }, []);
+
   useEffect(() => {
     refreshUser();
-  }, [refreshUser]);
+    refreshSystemMeta();
+  }, [refreshUser, refreshSystemMeta]);
 
   // Activity tracking & pre-expiry idle warning (shows 120s before backend idle timeout)
   useEffect(() => {
@@ -329,17 +355,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    const currentId = user?.id;
     try {
       await apiPost('/api/auth/logout', undefined, true);
     } catch {
       // ignore
+    }
+    if (currentId) {
+      clearAllUserDrafts(currentId);
     }
     setUser(null);
     setSessionExpiredReason(null);
     setIdleWarningSecondsLeft(null);
     navigate('/');
     notify('Anda telah keluar dari portal SATU DPBI.', 'info');
-  }, [navigate, notify]);
+  }, [user?.id, navigate, notify]);
 
   const can = useCallback(
     (module: ModuleCode, action: PermissionAction = 'view') => {
@@ -365,6 +395,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         recentlyViewed,
         onboardingDone,
         pendingRedirectPath,
+        appVersion,
+        maintenanceMode,
+        maintenanceMessage,
+        refreshSystemMeta,
         setPendingRedirectPath,
         navigate,
         toggleTheme,

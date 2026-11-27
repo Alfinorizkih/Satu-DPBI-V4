@@ -12,7 +12,7 @@ import {
   writeActivityTimeline,
   writeAuditLog,
 } from './security';
-import { onLklApproved, onProposalApproved } from './workflow';
+import { computeObjectDiff, onLklApproved, onProposalApproved, recordApprovalHistory } from './workflow';
 import {
   executeEmailCampaign,
   exportCampaignLogsCsv,
@@ -55,6 +55,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         const pParams: string[] = [];
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           pConds.push("status IN ('diajukan', 'pemeriksaan_administrasi', 'pemeriksaan_wilayah', 'menunggu_persetujuan_nasional', 'perlu_revisi')");
+        } else if (filterStatus === 'revisi') {
+          pConds.push("status IN ('perlu_revisi', 'perlu_kelengkapan')");
         }
         if (isKorwil && user.provinceCode) {
           pConds.push('province_code = ?');
@@ -103,6 +105,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         const lParams: string[] = [];
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           lConds.push("status IN ('diajukan', 'menunggu_pemeriksaan', 'perlu_revisi')");
+        } else if (filterStatus === 'revisi') {
+          lConds.push("status = 'perlu_revisi'");
         }
         if (isKorwil && user.provinceCode) {
           lConds.push('province_code = ?');
@@ -155,6 +159,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         const cParams: string[] = [];
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           cConds.push("status IN ('dikirim', 'perlu_revisi')");
+        } else if (filterStatus === 'revisi') {
+          cConds.push("status = 'perlu_revisi'");
         }
         if (isKorwil && user.provinceCode) {
           cConds.push('province_code = ?');
@@ -201,6 +207,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         const aParams: string[] = [];
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           aConds.push("status = 'menunggu'");
+        } else if (filterStatus === 'revisi') {
+          aConds.push('1 = 0');
         }
         if (isKorwil && user.provinceCode) {
           aConds.push('province_code = ?');
@@ -246,6 +254,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         const hParams: string[] = [];
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           hConds.push("status = 'menunggu_persetujuan'");
+        } else if (filterStatus === 'revisi') {
+          hConds.push('1 = 0');
         }
         if (isKorwil && user.provinceCode) {
           hConds.push('province_code = ?');
@@ -293,6 +303,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
       const summary = {
         totalCount: items.length,
         overdueCount: items.filter((i) => i.isOverdue).length,
+        revisionCount: items.filter((i) => i.status === 'perlu_revisi' || i.status === 'perlu_kelengkapan').length,
         byType: {
           proposal: items.filter((i) => i.itemType === 'proposal').length,
           lkl: items.filter((i) => i.itemType === 'lkl').length,
@@ -315,6 +326,37 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
     }
   );
 
+  app.get(
+    '/api/approval-center/:type/:id/history',
+    requireAuth,
+    requirePermission('persetujuan', 'view'),
+    (req: AuthenticatedRequest, res) => {
+      const db = getDb();
+      const itemType = String(req.params.type);
+      const itemId = String(req.params.id);
+      const rows = db
+        .prepare('SELECT * FROM approval_history WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC')
+        .all(itemType, itemId) as Record<string, unknown>[];
+      res.json({
+        history: rows.map((r) => ({
+          id: String(r.id),
+          entityType: String(r.entity_type),
+          entityId: String(r.entity_id),
+          action: String(r.action),
+          fromStatus: r.from_status ? String(r.from_status) : null,
+          toStatus: String(r.to_status),
+          stageLabel: String(r.stage_label || ''),
+          actorUserId: String(r.actor_user_id),
+          actorName: String(r.actor_name),
+          actorRole: String(r.actor_role),
+          note: String(r.note || ''),
+          diff: r.diff_json ? (() => { try { return JSON.parse(String(r.diff_json)); } catch { return null; } })() : null,
+          createdAt: String(r.created_at),
+        })),
+      });
+    }
+  );
+
   app.post(
     '/api/approval-center/:type/:id/action',
     requireAuth,
@@ -332,6 +374,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
 
       const allowedActions = [
         'approve',
+        'advance_stage',
         'reject',
         'request_revision',
         'request_completeness',
@@ -370,7 +413,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           res.status(403).json({ error: 'Akses ditolak: proposal berada di luar cakupan wilayah Anda.', code: 403 });
           return;
         }
-        if (['approve', 'reject'].includes(action) && prop.applicant_personnel_id === user.personnelId) {
+        if (['approve', 'reject', 'advance_stage'].includes(action) && (prop.applicant_personnel_id === user.personnelId || prop.applicant_personnel_id === user.id)) {
           res.status(403).json({ error: 'Self-approval dilarang: pengaju tidak boleh menyetujui proposalnya sendiri.', code: 403 });
           return;
         }
@@ -380,10 +423,26 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         }
 
         if (action === 'reassign') {
+          if (reason.length < 3) {
+            res.status(400).json({ error: 'Alasan pengalihan peninjau wajib diisi minimal 3 karakter.', code: 400 });
+            return;
+          }
           const validRoles: RoleCode[] = ['super_admin', 'wakil_super_admin', 'penanggung_jawab', 'pengurus_nasional', 'sekretariat_nasional', 'koordinator_wilayah'];
           const nextRole = targetRole && validRoles.includes(targetRole) ? targetRole : 'pengurus_nasional';
+          const prevRole = prop.assigned_approver_role ? String(prop.assigned_approver_role) : null;
           db.prepare('UPDATE proposals SET assigned_approver_role = ?, updated_at = ? WHERE id = ?').run(nextRole, now, itemId);
-          writeAuditLog(db, user, 'REASSIGN_REVIEWER', 'proposal', String(prop.reference_number), 'berhasil', `Dialihkan ke ${nextRole}: ${reason || 'Penyeimbangan antrean'}`);
+          recordApprovalHistory(db, {
+            entityType: 'proposal',
+            entityId: itemId,
+            action: 'reassign',
+            fromStatus: String(prop.status),
+            toStatus: String(prop.status),
+            stageLabel: `Alih Peninjau -> ${nextRole}`,
+            actor: user,
+            note: reason,
+            diff: { assigned_approver_role: { before: prevRole, after: nextRole } },
+          });
+          writeAuditLog(db, user, 'REASSIGN_REVIEWER', 'proposal', String(prop.reference_number), 'berhasil', `Dialihkan ke ${nextRole}: ${reason}`);
           res.json({ ok: true, message: `Peninjau proposal dialihkan ke ${nextRole}.` });
           return;
         }
@@ -395,6 +454,16 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
             now,
             itemId
           );
+          recordApprovalHistory(db, {
+            entityType: 'proposal',
+            entityId: itemId,
+            action: 'escalate',
+            fromStatus: String(prop.status),
+            toStatus: String(prop.status),
+            stageLabel: `Eskalasi -> ${escalateTarget}`,
+            actor: user,
+            note: reason,
+          });
           const admins = db
             .prepare("SELECT id FROM users WHERE role IN ('super_admin', 'penanggung_jawab') AND account_status = 'aktif'")
             .all() as { id: string }[];
@@ -413,6 +482,30 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           return;
         }
 
+        if (action === 'advance_stage') {
+          const prevStatus = String(prop.status);
+          const nextStageStatus = 'menunggu_persetujuan_nasional';
+          db.prepare('UPDATE proposals SET status = ?, decision_note = ?, updated_at = ? WHERE id = ?').run(
+            nextStageStatus,
+            reason || `Diteruskan oleh ${user.fullName} ke tahap persetujuan nasional.`,
+            now,
+            itemId
+          );
+          recordApprovalHistory(db, {
+            entityType: 'proposal',
+            entityId: itemId,
+            action: 'advance_stage',
+            fromStatus: prevStatus,
+            toStatus: nextStageStatus,
+            stageLabel: 'Verifikasi Wilayah -> Persetujuan Nasional',
+            actor: user,
+            note: reason || 'Memenuhi verifikasi tahap wilayah',
+          });
+          writeAuditLog(db, user, 'ADVANCE_PROPOSAL_STAGE', 'proposal', String(prop.reference_number), 'berhasil', `${prevStatus} -> ${nextStageStatus}`);
+          res.json({ ok: true, status: nextStageStatus, message: 'Proposal diteruskan ke tahap Persetujuan Nasional.' });
+          return;
+        }
+
         if (action === 'cancel') {
           db.prepare("UPDATE proposals SET status = 'dibatalkan', cancelled_reason = ?, decision_note = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ?").run(
             reason,
@@ -422,6 +515,16 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
             now,
             itemId
           );
+          recordApprovalHistory(db, {
+            entityType: 'proposal',
+            entityId: itemId,
+            action: 'cancel',
+            fromStatus: String(prop.status),
+            toStatus: 'dibatalkan',
+            stageLabel: 'Pembatalan Proposal',
+            actor: user,
+            note: reason,
+          });
           writeAuditLog(db, user, 'CANCEL_PROPOSAL', 'proposal', String(prop.reference_number), 'berhasil', reason);
           res.json({ ok: true, message: 'Proposal dibatalkan dengan alasan tercatat.' });
           return;
@@ -439,6 +542,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           return;
         }
 
+        const prevStatus = String(prop.status);
         db.prepare('UPDATE proposals SET status = ?, decision_note = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ?').run(
           nextStatus,
           reason || (action === 'approve' ? 'Disetujui melalui Pusat Persetujuan Nasional.' : ''),
@@ -447,6 +551,18 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           now,
           itemId
         );
+
+        recordApprovalHistory(db, {
+          entityType: 'proposal',
+          entityId: itemId,
+          action,
+          fromStatus: prevStatus,
+          toStatus: nextStatus,
+          stageLabel: nextStatus === 'disetujui' ? 'Keputusan Akhir (Disetujui)' : nextStatus === 'ditolak' ? 'Keputusan Akhir (Ditolak)' : 'Pengembalian Revisi',
+          actor: user,
+          note: reason || (action === 'approve' ? 'Disetujui melalui Pusat Persetujuan Nasional.' : ''),
+          diff: computeObjectDiff(prop, { ...prop, status: nextStatus }, ['status']),
+        });
 
         let workflowInfo = null;
         if (nextStatus === 'disetujui') {
@@ -483,10 +599,11 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           res.status(403).json({ error: 'Akses ditolak: LKL berada di luar wilayah Anda.', code: 403 });
           return;
         }
-        if (['approve', 'reject'].includes(action) && lkl.submitter_personnel_id === user.personnelId) {
+        if (['approve', 'reject'].includes(action) && (lkl.submitter_personnel_id === user.personnelId || lkl.submitter_personnel_id === user.id)) {
           res.status(403).json({ error: 'Self-approval dilarang: pengirim LKL tidak boleh menyetujui laporannya sendiri.', code: 403 });
           return;
         }
+        const prevStatus = String(lkl.status);
         const nextStatus = action === 'approve' ? 'diterima' : action === 'reject' ? 'ditolak' : 'perlu_revisi';
         db.prepare('UPDATE lkl_reports SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?').run(
           nextStatus,
@@ -495,6 +612,16 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           now,
           itemId
         );
+        recordApprovalHistory(db, {
+          entityType: 'lkl',
+          entityId: itemId,
+          action,
+          fromStatus: prevStatus,
+          toStatus: nextStatus,
+          stageLabel: nextStatus === 'diterima' ? 'Verifikasi LKL Selesai' : 'Pengembalian / Penolakan LKL',
+          actor: user,
+          note: reason || 'Diterima melalui Pusat Persetujuan.',
+        });
         if (nextStatus === 'diterima') {
           onLklApproved(db, lkl, user);
         }
@@ -654,6 +781,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         category: String(t.category),
         subject: String(t.subject),
         bodyText: String(t.body_text),
+        bodyHtml: t.body_html ? String(t.body_html) : null,
+        version: Number(t.version || 1),
         isActive: Boolean(t.is_active),
         updatedAt: String(t.updated_at),
       })),
@@ -663,6 +792,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         templateId: c.template_id ? String(c.template_id) : null,
         subject: String(c.subject),
         bodyText: String(c.body_text),
+        bodyHtml: c.body_html ? String(c.body_html) : null,
         audienceFilter: (() => {
           try {
             return JSON.parse(String(c.audience_filter_json || '{}'));
@@ -688,6 +818,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         subjectRendered: String(l.subject_rendered),
         status: l.status,
         deliveryMode: l.delivery_mode,
+        deliveryChannel: l.delivery_channel ? String(l.delivery_channel) : String(l.delivery_mode),
         errorMessage: l.error_message ? String(l.error_message) : null,
         providerMessageId: l.provider_message_id ? String(l.provider_message_id) : null,
         sentAt: l.sent_at ? String(l.sent_at) : null,
@@ -704,6 +835,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
     const category = String(req.body?.category || 'Umum').trim();
     const subject = String(req.body?.subject || '').trim();
     const bodyText = String(req.body?.bodyText || '').trim();
+    const bodyHtml = req.body?.bodyHtml ? String(req.body.bodyHtml).trim() : null;
 
     if (!name || !subject || !bodyText) {
       res.status(400).json({ error: 'Nama templat, subjek, dan isi email wajib diisi.', code: 400 });
@@ -712,10 +844,11 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
 
     const subVal = validateEmailTemplatePlaceholders(subject);
     const bodyVal = validateEmailTemplatePlaceholders(bodyText);
-    if (!subVal.valid || !bodyVal.valid) {
+    const htmlVal = bodyHtml ? validateEmailTemplatePlaceholders(bodyHtml) : { valid: true, invalidVariables: [], unclosedBraces: false };
+    if (!subVal.valid || !bodyVal.valid || !htmlVal.valid) {
       res.status(400).json({
         error: 'Templat mengandung variabel tidak dikenal atau tanda kurung {{...}} yang belum tertutup.',
-        invalidVariables: [...subVal.invalidVariables, ...bodyVal.invalidVariables],
+        invalidVariables: [...subVal.invalidVariables, ...bodyVal.invalidVariables, ...htmlVal.invalidVariables],
         code: 400,
       });
       return;
@@ -725,9 +858,9 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
     const now = new Date().toISOString();
     try {
       db.prepare(
-        `INSERT INTO email_templates (id, code, name, category, subject, body_text, is_active, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, code, name, category, subject, bodyText, now);
+        `INSERT INTO email_templates (id, code, name, category, subject, body_text, body_html, version, is_active, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)`
+      ).run(id, code, name, category, subject, bodyText, bodyHtml, now);
     } catch {
       res.status(409).json({ error: 'Kode templat sudah digunakan. Gunakan nama/kode berbeda.', code: 409 });
       return;
@@ -735,6 +868,88 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
 
     writeAuditLog(db, user, 'CREATE_EMAIL_TEMPLATE', 'email_template', id, 'berhasil', name);
     res.status(201).json({ ok: true, id });
+  });
+
+  app.put('/api/email/templates/:id', requireAuth, requirePermission('email', 'edit'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const id = String(req.params.id);
+    const existing = db.prepare('SELECT * FROM email_templates WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Templat email tidak ditemukan.', code: 404 });
+      return;
+    }
+    const subject = String(req.body?.subject ?? existing.subject).trim();
+    const bodyText = String(req.body?.bodyText ?? existing.body_text).trim();
+    const bodyHtml = req.body?.bodyHtml !== undefined ? (req.body.bodyHtml ? String(req.body.bodyHtml) : null) : (existing.body_html ? String(existing.body_html) : null);
+    const name = String(req.body?.name ?? existing.name).trim();
+    const category = String(req.body?.category ?? existing.category).trim();
+
+    const subVal = validateEmailTemplatePlaceholders(subject);
+    const bodyVal = validateEmailTemplatePlaceholders(bodyText);
+    const htmlVal = bodyHtml ? validateEmailTemplatePlaceholders(bodyHtml) : { valid: true, invalidVariables: [], unclosedBraces: false };
+    if (!subVal.valid || !bodyVal.valid || !htmlVal.valid) {
+      res.status(400).json({
+        error: 'Templat mengandung variabel tidak dikenal atau tanda kurung {{...}} yang belum tertutup.',
+        invalidVariables: [...subVal.invalidVariables, ...bodyVal.invalidVariables, ...htmlVal.invalidVariables],
+        code: 400,
+      });
+      return;
+    }
+
+    const prevVersion = Number(existing.version || 1);
+    const nextVersion = prevVersion + 1;
+    const now = new Date().toISOString();
+
+    db.prepare(
+      `INSERT INTO email_template_history (id, template_id, version, subject, body_text, body_html, updated_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      crypto.randomUUID(),
+      id,
+      prevVersion,
+      String(existing.subject),
+      String(existing.body_text),
+      existing.body_html ? String(existing.body_html) : null,
+      user.fullName,
+      now
+    );
+
+    db.prepare(
+      'UPDATE email_templates SET name = ?, category = ?, subject = ?, body_text = ?, body_html = ?, version = ?, updated_at = ? WHERE id = ?'
+    ).run(name, category, subject, bodyText, bodyHtml, nextVersion, now, id);
+
+    writeAuditLog(db, user, 'UPDATE_EMAIL_TEMPLATE', 'email_template', id, 'berhasil', `v${prevVersion} -> v${nextVersion}`);
+    res.json({ ok: true, version: nextVersion });
+  });
+
+  app.get('/api/email/templates/:id/history', requireAuth, requirePermission('email', 'view'), (req, res) => {
+    const db = getDb();
+    const id = String(req.params.id);
+    const history = db
+      .prepare('SELECT * FROM email_template_history WHERE template_id = ? ORDER BY version DESC')
+      .all(id);
+    res.json({ history });
+  });
+
+  app.post('/api/email/parse-csv', requireAuth, requirePermission('email', 'create'), (req, res) => {
+    const csvText = String(req.body?.csvText || '').trim();
+    if (!csvText) {
+      res.status(400).json({ error: 'Konten CSV penerima kosong.', code: 400 });
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const tokens = csvText
+      .split(/[\r\n,;]+/)
+      .map((s) => s.trim().replace(/^["']|["']$/g, '').toLowerCase())
+      .filter(Boolean);
+    const validEmails = Array.from(new Set(tokens.filter((t) => emailRegex.test(t))));
+    const ignoredCount = tokens.filter((t) => !emailRegex.test(t) && t !== 'email').length;
+    res.json({
+      emails: validEmails.slice(0, 500),
+      totalValid: validEmails.length,
+      ignoredCount,
+    });
   });
 
   app.post('/api/email/audience-preview', requireAuth, requirePermission('email', 'view'), (req, res) => {
@@ -841,11 +1056,16 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
       }
 
       try {
+        const bodyHtml = req.body?.bodyHtml ? String(req.body.bodyHtml) : null;
         const result = await executeEmailCampaign(db, {
           title: title || (actionMode === 'test_self' ? `[Uji Diri] ${subject}` : subject),
           templateId,
           subject,
           bodyText,
+          bodyHtml,
+          nomorSurat: req.body?.nomorSurat ? String(req.body.nomorSurat) : undefined,
+          tenggat: req.body?.tenggat ? String(req.body.tenggat) : undefined,
+          tautan: req.body?.tautan ? String(req.body.tautan) : undefined,
           audienceFilter: {
             mode: resolved.recipients.length > 1 ? 'bulk' : 'single',
             allActive: Boolean(filter.allActive),

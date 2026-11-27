@@ -1,20 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Building2, Eye, Plus, ShieldCheck } from 'lucide-react';
+import { Award, Building2, Eye, GitBranch, Info, Plus, Printer, ShieldCheck, Table2, UserCog } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { ConfirmDialog } from '../components/ui';
 import { GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
-import type { BatchRecord, BatchStatus, ModuleCode, PermissionAction } from '../lib/types';
+import type { BatchRecord, BatchStatus, ModuleCode, OrgPositionHistoryRecord, PermissionAction } from '../lib/types';
 import { formatTanggalIndonesia, isRecordRelevantToBidang, OFFICIAL_BIDANGS } from '../lib/rbac';
 
 export function OrganizationPage() {
   const { user, can, notify } = useAuth();
   const [positions, setPositions] = useState<Record<string, unknown>[]>([]);
   const [delegations, setDelegations] = useState<Record<string, unknown>[]>([]);
+  const [positionHistory, setPositionHistory] = useState<Record<string, unknown>[]>([]);
   const [users, setUsers] = useState<{ id: string; fullName: string; roleLabel: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
+  const [vacantOnly, setVacantOnly] = useState(false);
   const [posOpen, setPosOpen] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<Record<string, unknown> | null>(null);
+  const [assignForm, setAssignForm] = useState({ holderName: '', skNumber: '', isVacant: false, changeReason: 'Penetapan pejabat posisi organisasi' });
   const [confirmRevokeDel, setConfirmRevokeDel] = useState<{ id: string; name: string } | null>(null);
 
   const [posForm, setPosForm] = useState<{ title: string; bidang: string; level: string; holderName: string; skNumber: string }>({
@@ -36,9 +41,14 @@ export function OrganizationPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await apiGet<{ positions: Record<string, unknown>[]; delegations: Record<string, unknown>[] }>('/api/organization');
+      const res = await apiGet<{
+        positions: Record<string, unknown>[];
+        delegations: Record<string, unknown>[];
+        positionHistory?: Record<string, unknown>[];
+      }>('/api/organization');
       setPositions(res.positions);
       setDelegations(res.delegations);
+      setPositionHistory(res.positionHistory || []);
       if (can('pengaturan', 'manage')) {
         const uRes = await apiGet<{ users: { id: string; fullName: string; roleLabel: string }[] }>('/api/settings/users');
         setUsers(uRes.users);
@@ -93,18 +103,48 @@ export function OrganizationPage() {
     }
   };
 
+  const handleAssignPosition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignTarget) return;
+    try {
+      await apiPatch(`/api/organization/positions/${String(assignTarget.id)}`, assignForm);
+      notify(assignForm.isVacant ? 'Posisi jabatan dikosongkan.' : 'Pejabat posisi organisasi diperbarui.', 'success');
+      setAssignTarget(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memperbarui jabatan.', 'error');
+    }
+  };
+
   if (loading) return <LoadingSkeleton rows={5} />;
+
+  const filteredPositions = vacantOnly
+    ? positions.filter((p) => Boolean(p.is_vacant) || !String(p.holder_name || '').trim())
+    : positions;
+  const vacantCount = positions.filter((p) => Boolean(p.is_vacant) || !String(p.holder_name || '').trim()).length;
+
+  const groupedByLevel = [
+    { label: 'Dewan Pembina & Penanggung Jawab', items: filteredPositions.filter((p) => !p.parent_id || String(p.category) === 'Pembina' || String(p.category) === 'Pimpinan') },
+    { label: 'Sekretariat & Bidang Nasional', items: filteredPositions.filter((p) => p.parent_id && String(p.category) !== 'Pembina' && String(p.category) !== 'Pimpinan') },
+  ];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Struktur Organisasi & Delegasi</h1>
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Struktur Organisasi &amp; Delegasi</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Pemisahan tegas antara jabatan organisasi dengan hak akses sistem (RBAC + Delegasi Terbatas Waktu).
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 no-print">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+          >
+            <Printer className="w-3.5 h-3.5 text-[#0EA5E9]" /> Cetak A4
+          </button>
           {can('organisasi', 'edit') && (
             <button type="button" onClick={() => setPosOpen(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white text-xs font-semibold">
               <Plus className="w-4 h-4" /> Tambah Jabatan
@@ -115,6 +155,17 @@ export function OrganizationPage() {
               <ShieldCheck className="w-4 h-4 text-[#0EA5E9]" /> Beri Delegasi
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Role Sistem vs Jabatan Organisasi Banner */}
+      <div className="rounded-2xl border border-sky-200 dark:border-sky-800 bg-sky-50/80 dark:bg-sky-950/40 p-4 flex items-start gap-3 text-xs text-slate-700 dark:text-slate-300">
+        <Info className="w-4 h-4 text-[#0EA5E9] shrink-0 mt-0.5" />
+        <div>
+          <p className="font-bold text-slate-900 dark:text-white">Pemisahan Role Sistem (RBAC) vs Jabatan Organisasi</p>
+          <p className="mt-0.5 leading-relaxed">
+            <strong>Jabatan Organisasi</strong> menunjukkan posisi struktural pada bagan DPBI (dapat lowong/kosong dan berpindah SK), sedangkan <strong>Role Sistem</strong> menentukan hak akses teknis pengguna di portal. Pergantian pejabat di bagan tidak otomatis mengubah role admin kecuali didelegasikan atau diperbarui resmi.
+          </p>
         </div>
       </div>
 
@@ -158,79 +209,250 @@ export function OrganizationPage() {
       </GlassCard>
 
       <GlassCard className="p-5 space-y-4">
-        <h2 className="text-sm font-bold flex items-center gap-2">
-          <Building2 className="w-4 h-4 text-[#0EA5E9]" /> Struktur Kepengurusan Nasional
-        </h2>
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
-              <tr>
-                <th className="py-2.5 pr-4">Jabatan</th>
-                <th className="py-2.5 pr-4">Bidang</th>
-                <th className="py-2.5 pr-4">Pemegang Jabatan</th>
-                <th className="py-2.5 pr-4">Nomor SK</th>
-                <th className="py-2.5">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
-              {positions.map((p) => (
-                <tr key={String(p.id)}>
-                  <td className="py-3 pr-4 font-semibold text-slate-900 dark:text-white">{String(p.title)}</td>
-                  <td className="py-3 pr-4 text-slate-600 dark:text-slate-300">{String(p.bidang)}</td>
-                  <td className="py-3 pr-4">{String(p.holder_name || 'Belum diisi')}</td>
-                  <td className="py-3 pr-4 font-mono tabular-nums">{String(p.sk_number || '—')}</td>
-                  <td className="py-3"><StatusIndicator status={String(p.status)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800 text-xs">
-          {positions.map((p) => (
-            <div key={String(p.id)} className="py-3 space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-bold text-slate-900 dark:text-white">{String(p.title)}</p>
-                <StatusIndicator status={String(p.status)} />
-              </div>
-              <p className="text-slate-500">{String(p.bidang)} · {String(p.holder_name || 'Belum diisi')}</p>
-              <p className="font-mono text-[11px] text-slate-400">SK: {String(p.sk_number || '—')}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-bold flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-[#0EA5E9]" /> Bagan &amp; Daftar Jabatan Nasional ({vacantCount} Posisi Kosong)
+          </h2>
+          <div className="flex flex-wrap items-center gap-2 no-print">
+            <label className="inline-flex items-center gap-1.5 text-xs font-medium cursor-pointer px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+              <input type="checkbox" checked={vacantOnly} onChange={(e) => setVacantOnly(e.target.checked)} />
+              <span>Hanya Posisi Lowong ({vacantCount})</span>
+            </label>
+            <div className="inline-flex p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800">
+              <button
+                type="button"
+                onClick={() => setViewMode('chart')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${viewMode === 'chart' ? 'bg-white dark:bg-slate-900 shadow-xs' : 'text-slate-500'}`}
+              >
+                <GitBranch className="w-3.5 h-3.5" /> Bagan Hierarkis
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${viewMode === 'table' ? 'bg-white dark:bg-slate-900 shadow-xs' : 'text-slate-500'}`}
+              >
+                <Table2 className="w-3.5 h-3.5" /> Tabel
+              </button>
             </div>
-          ))}
+          </div>
         </div>
+
+        {viewMode === 'chart' ? (
+          <div className="space-y-5">
+            {groupedByLevel.map((grp) => (
+              <div key={grp.label} className="space-y-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{grp.label}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {grp.items.map((p) => {
+                    const vacant = Boolean(p.is_vacant) || !String(p.holder_name || '').trim();
+                    return (
+                      <div
+                        key={String(p.id)}
+                        className={`p-4 rounded-xl border text-xs space-y-2 ${
+                          vacant
+                            ? 'border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-950/20'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-[10px] font-semibold text-[#0EA5E9] uppercase">{String(p.category || p.level)}</p>
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{String(p.title)}</h3>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${vacant ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'}`}>
+                            {vacant ? 'Lowong' : 'Terisi'}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 dark:text-slate-300">{String(p.bidang)}</p>
+                        <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 dark:text-white truncate">
+                              {vacant ? 'Belum ada pejabat' : String(p.holder_name)}
+                            </p>
+                            {Boolean(p.sk_number) && <p className="font-mono text-[10px] text-slate-400">SK: {String(p.sk_number)}</p>}
+                          </div>
+                          {can('organisasi', 'assign') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAssignTarget(p);
+                                setAssignForm({
+                                  holderName: String(p.holder_name || ''),
+                                  skNumber: String(p.sk_number || ''),
+                                  isVacant: vacant,
+                                  changeReason: 'Penetapan / rotasi pejabat organisasi',
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold shrink-0 no-print"
+                            >
+                              <UserCog className="w-3 h-3" /> Kelola
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
+                <tr>
+                  <th className="py-2.5 pr-4">Jabatan</th>
+                  <th className="py-2.5 pr-4">Bidang</th>
+                  <th className="py-2.5 pr-4">Pemegang Jabatan</th>
+                  <th className="py-2.5 pr-4">Nomor SK</th>
+                  <th className="py-2.5 pr-4">Status</th>
+                  {can('organisasi', 'assign') && <th className="py-2.5 text-right no-print">Aksi</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
+                {filteredPositions.map((p) => {
+                  const vacant = Boolean(p.is_vacant) || !String(p.holder_name || '').trim();
+                  return (
+                    <tr key={String(p.id)}>
+                      <td className="py-3 pr-4 font-semibold text-slate-900 dark:text-white">{String(p.title)}</td>
+                      <td className="py-3 pr-4 text-slate-600 dark:text-slate-300">{String(p.bidang)}</td>
+                      <td className="py-3 pr-4">{vacant ? <span className="text-amber-600 font-semibold">Lowong / Kosong</span> : String(p.holder_name)}</td>
+                      <td className="py-3 pr-4 font-mono tabular-nums">{String(p.sk_number || '—')}</td>
+                      <td className="py-3"><StatusIndicator status={vacant ? 'perlu_perhatian' : String(p.status)} customLabel={vacant ? 'Lowong' : 'Aktif'} /></td>
+                      {can('organisasi', 'assign') && (
+                        <td className="py-3 text-right no-print">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssignTarget(p);
+                              setAssignForm({
+                                holderName: String(p.holder_name || ''),
+                                skNumber: String(p.sk_number || ''),
+                                isVacant: vacant,
+                                changeReason: 'Penetapan / rotasi pejabat organisasi',
+                              });
+                            }}
+                            className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
+                          >
+                            Atur Pejabat
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </GlassCard>
 
-      <GlassCard className="p-5 space-y-4">
-        <h2 className="text-sm font-bold">Riwayat Delegasi Kewenangan</h2>
-        <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
-          {delegations.map((d) => (
-            <div key={String(d.id)} className="py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
-              <div className="space-y-1">
-                <p className="font-semibold text-slate-900 dark:text-white">
-                  {String(d.delegate_name)} · Izin: <span className="font-mono">{String(d.module)}:{String(d.action)}</span>
-                </p>
-                <p className="text-slate-500 dark:text-slate-400">
-                  Pemberi: {String(d.grantor_name)} · Alasan: {String(d.reason)}
-                </p>
-                <p className="text-[11px] text-slate-400 tabular-nums">
-                  Berlaku: {formatTanggalIndonesia(String(d.starts_at))} s/d {formatTanggalIndonesia(String(d.ends_at))}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <StatusIndicator status={String(d.status) === 'aktif' ? 'aktif' : 'nonaktif'} customLabel={String(d.status)} />
-                {String(d.status) === 'aktif' && can('organisasi', 'assign') && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRevokeDel({ id: String(d.id), name: String(d.delegate_name) })}
-                    className="px-2.5 py-1 rounded-lg border border-rose-200 text-rose-600 text-[11px] font-semibold"
-                  >
-                    Cabut
-                  </button>
-                )}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <GlassCard className="p-5 space-y-4">
+          <h2 className="text-sm font-bold">Riwayat Jabatan &amp; Pergantian Pejabat</h2>
+          {positionHistory.length === 0 ? (
+            <p className="text-xs text-slate-500">Belum ada catatan pergantian jabatan.</p>
+          ) : (
+            <div className="divide-y divide-slate-200/60 dark:divide-slate-800 max-h-80 overflow-y-auto text-xs">
+              {positionHistory.map((h) => (
+                <div key={String(h.id)} className="py-2.5 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">
+                      {String(h.position_title)} — {String(h.holder_name)}
+                    </p>
+                    <p className="text-slate-500">
+                      {String(h.change_reason)} {h.sk_number ? `· SK ${String(h.sk_number)}` : ''} · oleh {String(h.actor_name)}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-slate-400 tabular-nums shrink-0">
+                    {formatTanggalIndonesia(String(h.started_at))} – {h.ended_at ? formatTanggalIndonesia(String(h.ended_at)) : 'Aktif'}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </GlassCard>
+          )}
+        </GlassCard>
+
+        <GlassCard className="p-5 space-y-4">
+          <h2 className="text-sm font-bold">Riwayat Delegasi Kewenangan</h2>
+          <div className="divide-y divide-slate-200/60 dark:divide-slate-800 max-h-80 overflow-y-auto">
+            {delegations.map((d) => (
+              <div key={String(d.id)} className="py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-900 dark:text-white">
+                    {String(d.delegate_name)} · Izin: <span className="font-mono">{String(d.module)}:{String(d.action)}</span>
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400">
+                    Pemberi: {String(d.grantor_name)} · Alasan: {String(d.reason)}
+                  </p>
+                  <p className="text-[11px] text-slate-400 tabular-nums">
+                    Berlaku: {formatTanggalIndonesia(String(d.starts_at))} s/d {formatTanggalIndonesia(String(d.ends_at))}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <StatusIndicator status={String(d.status) === 'aktif' ? 'aktif' : 'nonaktif'} customLabel={String(d.status)} />
+                  {String(d.status) === 'aktif' && can('organisasi', 'assign') && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRevokeDel({ id: String(d.id), name: String(d.delegate_name) })}
+                      className="px-2.5 py-1 rounded-lg border border-rose-200 text-rose-600 text-[11px] font-semibold"
+                    >
+                      Cabut
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      </div>
+
+      <Modal open={Boolean(assignTarget)} onClose={() => setAssignTarget(null)} title={`Kelola Pejabat — ${String(assignTarget?.title || '')}`}>
+        <form onSubmit={handleAssignPosition} className="space-y-3 text-xs">
+          <label className="flex items-center gap-2 font-semibold text-amber-700 dark:text-amber-300">
+            <input
+              type="checkbox"
+              checked={assignForm.isVacant}
+              onChange={(e) => setAssignForm((f) => ({ ...f, isVacant: e.target.checked }))}
+            />
+            Kosongkan posisi jabatan ini (tandai Lowong)
+          </label>
+          {!assignForm.isVacant && (
+            <>
+              <div>
+                <label className="block font-semibold mb-1">Nama Pemegang Jabatan *</label>
+                <input
+                  required={!assignForm.isVacant}
+                  value={assignForm.holderName}
+                  onChange={(e) => setAssignForm((f) => ({ ...f, holderName: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Nomor SK Penetapan</label>
+                <input
+                  value={assignForm.skNumber}
+                  onChange={(e) => setAssignForm((f) => ({ ...f, skNumber: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
+                />
+              </div>
+            </>
+          )}
+          <div>
+            <label className="block font-semibold mb-1">Alasan Perubahan / Catatan Riwayat</label>
+            <input
+              required
+              value={assignForm.changeReason}
+              onChange={(e) => setAssignForm((f) => ({ ...f, changeReason: e.target.value }))}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setAssignTarget(null)} className="px-4 py-2 rounded-xl border font-semibold">Batal</button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Simpan Perubahan Posisi</button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal open={posOpen} onClose={() => setPosOpen(false)} title="Tambah Jabatan Organisasi">
         <form onSubmit={handleCreatePos} className="space-y-3">

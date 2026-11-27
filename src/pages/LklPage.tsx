@@ -15,8 +15,9 @@ import {
 } from '../components/ui';
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
-import type { LklRecord, ProposalRecord } from '../lib/types';
+import type { FlagshipProgramRecord, LklRecord, ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia } from '../lib/rbac';
+import { clearOfflineDraft, loadOfflineDraft, saveOfflineDraft } from '../lib/offlineDraft';
 
 const PAGE_SIZE = 10;
 
@@ -51,11 +52,13 @@ export function LklPage({
     pdfFileName: string | null;
   } | null>(null);
 
-  const draftKey = user ? `satu_dpbi_lkl_draft_${user.id}` : 'satu_dpbi_lkl_draft';
+  const [programs, setPrograms] = useState<FlagshipProgramRecord[]>([]);
+  const [offlineDraftBanner, setOfflineDraftBanner] = useState<{ savedAt: string; data: typeof defaultForm } | null>(null);
 
   const defaultForm = {
     activityName: '',
     proposalId: '',
+    programId: '',
     activityMode: 'luring' as 'luring' | 'daring',
     regency: '',
     district: '',
@@ -84,12 +87,14 @@ export function LklPage({
   const load = async () => {
     setLoading(true);
     try {
-      const [lRes, pRes] = await Promise.all([
+      const [lRes, pRes, progRes] = await Promise.all([
         apiGet<{ reports: LklRecord[] }>('/api/lkl'),
         can('proposal', 'view') ? apiGet<{ proposals: ProposalRecord[] }>('/api/proposals') : Promise.resolve({ proposals: [] }),
+        apiGet<{ programs: FlagshipProgramRecord[] }>('/api/programs').catch(() => ({ programs: [] })),
       ]);
       setReports(lRes.reports);
       setProposals(pRes.proposals);
+      setPrograms(progRes.programs || []);
     } finally {
       setLoading(false);
     }
@@ -100,15 +105,12 @@ export function LklPage({
   }, []);
 
   const openCreateModal = (updateUrl = true) => {
-    try {
-      const saved = localStorage.getItem(draftKey);
-      if (saved) {
-        setForm({ ...defaultForm, ...JSON.parse(saved) });
-      } else {
-        setForm(defaultForm);
-      }
-    } catch {
-      setForm(defaultForm);
+    setForm(defaultForm);
+    const saved = loadOfflineDraft<typeof defaultForm>(user?.id, 'lkl_form');
+    if (saved && saved.data && (saved.data.activityName || saved.data.summary || saved.data.outcomes)) {
+      setOfflineDraftBanner(saved);
+    } else {
+      setOfflineDraftBanner(null);
     }
     setFormDirty(false);
     setCreateOpen(true);
@@ -120,6 +122,14 @@ export function LklPage({
       openCreateModal(false);
     }
   }, [initialMode]);
+
+  useEffect(() => {
+    if (!createOpen || !formDirty) return;
+    const t = window.setTimeout(() => {
+      saveOfflineDraft(user?.id, 'lkl_form', form);
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [createOpen, formDirty, form, user?.id]);
 
   useEffect(() => {
     if (!loading && initialMode === 'detail' && initialId && reports.length > 0) {
@@ -157,11 +167,11 @@ export function LklPage({
   };
 
   const saveLocalDraft = () => {
-    try {
-      localStorage.setItem(draftKey, JSON.stringify(form));
+    const savedAt = saveOfflineDraft(user?.id, 'lkl_form', form);
+    if (savedAt) {
       setFormDirty(false);
       notify('Draft LKL tersimpan di perangkat Anda dan akan dipulihkan saat formulir dibuka lagi.', 'info');
-    } catch {
+    } else {
       notify('Tidak dapat menyimpan draft lokal.', 'error');
     }
   };
@@ -171,8 +181,12 @@ export function LklPage({
     if (submitting) return;
     setSubmitting(true);
     try {
-      const res = await apiPost<{ referenceNumber: string }>('/api/lkl', form);
-      localStorage.removeItem(draftKey);
+      const res = await apiPost<{ referenceNumber: string }>('/api/lkl', {
+        ...form,
+        programId: form.programId || null,
+      });
+      clearOfflineDraft(user?.id, 'lkl_form');
+      setOfflineDraftBanner(null);
       setFormDirty(false);
       notify(`LKL ${res.referenceNumber} berhasil dikirim untuk pemeriksaan Koordinator Wilayah.`, 'success');
       setCreateOpen(false);
@@ -360,6 +374,38 @@ export function LklPage({
       {/* Create LKL Modal */}
       <Modal open={createOpen} onClose={closeCreateModal} title="Kirim Laporan Kegiatan Lapangan (LKL)">
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {offlineDraftBanner && (
+            <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sky-900 dark:text-sky-100">
+                Tersimpan draft LKL lokal ({formatTanggalIndonesia(offlineDraftBanner.savedAt, true)}). Pulihkan isian sebelumnya?
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm({ ...defaultForm, ...offlineDraftBanner.data });
+                    setOfflineDraftBanner(null);
+                    setFormDirty(true);
+                    notify('Draft LKL lokal dipulihkan.', 'info');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#0EA5E9] text-white font-semibold"
+                >
+                  Pulihkan Draft
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearOfflineDraft(user?.id, 'lkl_form');
+                    setOfflineDraftBanner(null);
+                  }}
+                  className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 font-semibold"
+                >
+                  Hapus Draft
+                </button>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block font-semibold mb-1">Nama Kegiatan</label>
             <input type="text" required value={form.activityName} onChange={(e) => updateLklForm({ activityName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
@@ -375,6 +421,7 @@ export function LklPage({
                   if (prop) {
                     updateLklForm({
                       proposalId: chosenId,
+                      programId: prop.programId || form.programId,
                       activityName: form.activityName || prop.title,
                       eventDate: prop.eventDate || form.eventDate,
                       category: prop.category || form.category,
@@ -409,30 +456,46 @@ export function LklPage({
             </div>
           </div>
 
+          <div>
+            <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+            <select
+              value={form.programId}
+              onChange={(e) => updateLklForm({ programId: e.target.value })}
+              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+            >
+              <option value="">Kegiatan Umum / Non-Program Unggulan</option>
+              {programs.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  {pr.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {form.activityMode === 'luring' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40">
               <div>
                 <label className="block font-semibold mb-1">Kabupaten / Kota</label>
-                <input required value={form.regency} onChange={(e) => setForm({ ...form, regency: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <input required value={form.regency} onChange={(e) => updateLklForm({ regency: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
               <div>
                 <label className="block font-semibold mb-1">Nama Tempat</label>
-                <input required value={form.venueName} onChange={(e) => setForm({ ...form, venueName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <input required value={form.venueName} onChange={(e) => updateLklForm({ venueName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-semibold mb-1">Alamat Lengkap Tempat Kegiatan</label>
-                <input required value={form.venueAddress} onChange={(e) => setForm({ ...form, venueAddress: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <input required value={form.venueAddress} onChange={(e) => updateLklForm({ venueAddress: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-sky-50/60 dark:bg-sky-950/30">
               <div>
                 <label className="block font-semibold mb-1">Platform Daring</label>
-                <input required value={form.platformName} onChange={(e) => setForm({ ...form, platformName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <input required value={form.platformName} onChange={(e) => updateLklForm({ platformName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
               <div>
                 <label className="block font-semibold mb-1">Tautan Kegiatan (Opsional)</label>
-                <input value={form.platformLink} onChange={(e) => setForm({ ...form, platformLink: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                <input value={form.platformLink} onChange={(e) => updateLklForm({ platformLink: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
               </div>
             </div>
           )}
@@ -440,25 +503,25 @@ export function LklPage({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold mb-1">Tanggal</label>
-              <input type="date" required value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="date" required value={form.eventDate} onChange={(e) => updateLklForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
             <div>
               <label className="block font-semibold mb-1">Waktu Mulai</label>
-              <input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="time" value={form.startTime} onChange={(e) => updateLklForm({ startTime: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
             <div>
               <label className="block font-semibold mb-1">Jumlah Peserta</label>
-              <input type="number" min={1} required value={form.participantCount} onChange={(e) => setForm({ ...form, participantCount: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <input type="number" min={1} required value={form.participantCount} onChange={(e) => updateLklForm({ participantCount: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
           </div>
 
           <div>
             <label className="block font-semibold mb-1">Ringkasan Pelaksanaan</label>
-            <textarea rows={3} required value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            <textarea rows={3} required value={form.summary} onChange={(e) => updateLklForm({ summary: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
           </div>
           <div>
             <label className="block font-semibold mb-1">Hasil & Capaian Kegiatan</label>
-            <textarea rows={2} required value={form.outcomes} onChange={(e) => setForm({ ...form, outcomes: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            <textarea rows={2} required value={form.outcomes} onChange={(e) => updateLklForm({ outcomes: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -467,7 +530,7 @@ export function LklPage({
               accept=".pdf,application/pdf"
               moduleName="lkl"
               uploadedFileName={form.pdfFileName}
-              onUploaded={(res) => setForm({ ...form, pdfFileId: res.fileId, pdfFileName: res.fileName })}
+              onUploaded={(res) => updateLklForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
             />
             <FileDropzone
               label="Foto Dokumentasi (JPG/PNG/WebP)"
@@ -475,8 +538,7 @@ export function LklPage({
               moduleName="lkl"
               uploadedFileName={form.photoNames.join(', ')}
               onUploaded={(res) =>
-                setForm({
-                  ...form,
+                updateLklForm({
                   photoFileIds: [...form.photoFileIds, res.fileId],
                   photoNames: [...form.photoNames, res.fileName],
                 })

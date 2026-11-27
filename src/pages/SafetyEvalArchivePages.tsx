@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Award, Download, FileSpreadsheet, Lock, Plus, Printer } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { apiGet, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { EmptyState, GlassCard, LoadingSkeleton, Modal, StatusIndicator } from '../components/ui/Primitives';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import { formatTanggalIndonesia } from '../lib/rbac';
-import type { PersonnelRecord } from '../lib/types';
+import type { FlagshipProgramRecord, PersonnelRecord } from '../lib/types';
 
 export function SafeguardingPage() {
   const { can, notify } = useAuth();
@@ -385,14 +386,27 @@ export function SafeguardingPage() {
   );
 }
 
+const EVALUATOR_TYPE_LABELS: Record<string, string> = {
+  pengurus_nasional: 'Pengurus Nasional',
+  koordinator_wilayah: 'Koordinator Wilayah',
+  rekan_duta: 'Rekan Duta (Peer)',
+  peserta_kegiatan: 'Peserta Kegiatan',
+  guru_pembina: 'Guru Pembina / Sekolah',
+  penilaian_mandiri: 'Penilaian Mandiri',
+};
+
 export function EvaluationsPage() {
   const { can, notify } = useAuth();
   const [evaluations, setEvaluations] = useState<Record<string, unknown>[]>([]);
   const [personnel, setPersonnel] = useState<PersonnelRecord[]>([]);
+  const [programs, setPrograms] = useState<FlagshipProgramRecord[]>([]);
+  const [evaluatorFilter, setEvaluatorFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     personnelId: '',
+    evaluatorType: 'pengurus_nasional',
+    programId: '',
     taskCompletionScore: 90,
     reportTimelinessScore: 88,
     reportQualityScore: 90,
@@ -403,12 +417,14 @@ export function EvaluationsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [eRes, pRes] = await Promise.all([
+      const [eRes, pRes, progRes] = await Promise.all([
         apiGet<{ evaluations: Record<string, unknown>[] }>('/api/evaluations'),
         can('personalia', 'view') ? apiGet<{ personnel: PersonnelRecord[] }>('/api/personnel') : Promise.resolve({ personnel: [] }),
+        apiGet<{ programs: FlagshipProgramRecord[] }>('/api/programs').catch(() => ({ programs: [] })),
       ]);
       setEvaluations(eRes.evaluations);
       setPersonnel(pRes.personnel);
+      setPrograms(progRes.programs || []);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal memuat evaluasi.', 'error');
     } finally {
@@ -422,9 +438,22 @@ export function EvaluationsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiPost('/api/evaluations', form);
+      await apiPost('/api/evaluations', {
+        ...form,
+        programId: form.programId || null,
+      });
       notify('Evaluasi kinerja berhasil disimpan.', 'success');
       setOpen(false);
+      setForm({
+        personnelId: '',
+        evaluatorType: 'pengurus_nasional',
+        programId: '',
+        taskCompletionScore: 90,
+        reportTimelinessScore: 88,
+        reportQualityScore: 90,
+        coordinationScore: 85,
+        coachingRecommendation: '',
+      });
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menyimpan evaluasi.', 'error');
@@ -433,28 +462,84 @@ export function EvaluationsPage() {
 
   if (loading) return <LoadingSkeleton rows={4} />;
 
+  const programNameById = new Map(programs.map((pr) => [pr.id, pr.name]));
+  const filteredEvaluations = evaluatorFilter
+    ? evaluations.filter((ev) => String(ev.evaluator_type || 'pengurus_nasional') === evaluatorFilter)
+    : evaluations;
+
+  const avg = (key: string) =>
+    filteredEvaluations.length > 0
+      ? Math.round((filteredEvaluations.reduce((sum, ev) => sum + Number(ev[key] || 0), 0) / filteredEvaluations.length) * 10) / 10
+      : 0;
+
+  const chartData = [
+    { dimensi: 'Tugas (30%)', rataRata: avg('task_completion_score') },
+    { dimensi: 'Ketepatan (25%)', rataRata: avg('report_timeliness_score') },
+    { dimensi: 'Kualitas (25%)', rataRata: avg('report_quality_score') },
+    { dimensi: 'Koordinasi (20%)', rataRata: avg('coordination_score') },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Pusat Evaluasi Kinerja</h1>
+          <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">Pusat Evaluasi Kinerja 360°</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Penilaian berbasis penyelesaian tugas (30%), ketepatan laporan (25%), kualitas laporan (25%), dan koordinasi (20%) disertai tinjauan manusia.
+            Penilaian berbasis 6 perspektif penilai, penyelesaian tugas (30%), ketepatan (25%), kualitas (25%), dan koordinasi (20%).
           </p>
         </div>
-        {can('evaluasi', 'create') && (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Filter tipe penilai"
+            value={evaluatorFilter}
+            onChange={(e) => setEvaluatorFilter(e.target.value)}
+            className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-medium"
           >
-            <Plus className="w-4 h-4" /> Input Evaluasi
-          </button>
-        )}
+            <option value="">Semua Tipe Penilai ({evaluations.length})</option>
+            {Object.entries(EVALUATOR_TYPE_LABELS).map(([k, lbl]) => (
+              <option key={k} value={k}>
+                {lbl}
+              </option>
+            ))}
+          </select>
+          {can('evaluasi', 'create') && (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0EA5E9] hover:bg-sky-600 text-white text-xs font-semibold"
+            >
+              <Plus className="w-4 h-4" /> Input Evaluasi
+            </button>
+          )}
+        </div>
       </div>
 
+      {filteredEvaluations.length > 0 && (
+        <GlassCard className="p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Rata-Rata Skor per Dimensi ({filteredEvaluations.length} Evaluasi)
+            </h2>
+            <span className="font-mono text-xs font-semibold text-[#0EA5E9] tabular-nums">
+              Rata-Rata Total: {avg('total_score')}
+            </span>
+          </div>
+          <div className="h-52 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 16, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.25} />
+                <XAxis dataKey="dimensi" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="rataRata" name="Skor Rata-Rata" fill="#0EA5E9" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </GlassCard>
+      )}
+
       <GlassCard className="p-5">
-        {evaluations.length === 0 ? (
+        {filteredEvaluations.length === 0 ? (
           <EmptyState title="Belum ada evaluasi" description="Catatan evaluasi kinerja periode berjalan akan muncul di sini." />
         ) : (
           <>
@@ -462,7 +547,7 @@ export function EvaluationsPage() {
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-slate-200 dark:border-slate-800 text-slate-500">
                   <tr>
-                    <th className="py-2.5 pr-4">Personel</th>
+                    <th className="py-2.5 pr-4">Personel &amp; Perspektif Penilai</th>
                     <th className="py-2.5 pr-4 text-right">Tugas</th>
                     <th className="py-2.5 pr-4 text-right">Ketepatan</th>
                     <th className="py-2.5 pr-4 text-right">Kualitas</th>
@@ -472,34 +557,60 @@ export function EvaluationsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800 tabular-nums">
-                  {evaluations.map((ev) => (
-                    <tr key={String(ev.id)}>
-                      <td className="py-3 pr-4 font-semibold text-slate-900 dark:text-white">{String(ev.personnel_name)}</td>
-                      <td className="py-3 pr-4 text-right">{Number(ev.task_completion_score)}</td>
-                      <td className="py-3 pr-4 text-right">{Number(ev.report_timeliness_score)}</td>
-                      <td className="py-3 pr-4 text-right">{Number(ev.report_quality_score)}</td>
-                      <td className="py-3 pr-4 text-right">{Number(ev.coordination_score)}</td>
-                      <td className="py-3 pr-4 text-right font-mono font-bold text-[#0EA5E9]">{Number(ev.total_score)}</td>
-                      <td className="py-3 text-slate-600 dark:text-slate-300">{String(ev.coaching_recommendation)}</td>
-                    </tr>
-                  ))}
+                  {filteredEvaluations.map((ev) => {
+                    const evalTypeKey = String(ev.evaluator_type || 'pengurus_nasional');
+                    const progName = ev.program_id ? programNameById.get(String(ev.program_id)) : null;
+                    return (
+                      <tr key={String(ev.id)}>
+                        <td className="py-3 pr-4">
+                          <p className="font-semibold text-slate-900 dark:text-white">{String(ev.personnel_name)}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {EVALUATOR_TYPE_LABELS[evalTypeKey] || evalTypeKey.replace(/_/g, ' ')} · {String(ev.evaluator_name)}
+                          </p>
+                          {progName && (
+                            <span className="inline-block mt-1 px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-[#0EA5E9] text-[10px] font-semibold">
+                              Program: {progName}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 text-right">{Number(ev.task_completion_score)}</td>
+                        <td className="py-3 pr-4 text-right">{Number(ev.report_timeliness_score)}</td>
+                        <td className="py-3 pr-4 text-right">{Number(ev.report_quality_score)}</td>
+                        <td className="py-3 pr-4 text-right">{Number(ev.coordination_score)}</td>
+                        <td className="py-3 pr-4 text-right font-mono font-bold text-[#0EA5E9]">{Number(ev.total_score)}</td>
+                        <td className="py-3 text-slate-600 dark:text-slate-300">{String(ev.coaching_recommendation)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800 text-xs tabular-nums">
-              {evaluations.map((ev) => (
-                <div key={String(ev.id)} className="py-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-bold text-slate-900 dark:text-white">{String(ev.personnel_name)}</p>
-                    <span className="font-mono font-bold text-[#0EA5E9]">Skor {Number(ev.total_score)}</span>
+              {filteredEvaluations.map((ev) => {
+                const evalTypeKey = String(ev.evaluator_type || 'pengurus_nasional');
+                const progName = ev.program_id ? programNameById.get(String(ev.program_id)) : null;
+                return (
+                  <div key={String(ev.id)} className="py-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">{String(ev.personnel_name)}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {EVALUATOR_TYPE_LABELS[evalTypeKey] || evalTypeKey} · {String(ev.evaluator_name)}
+                        </p>
+                      </div>
+                      <span className="font-mono font-bold text-[#0EA5E9]">Skor {Number(ev.total_score)}</span>
+                    </div>
+                    {progName && (
+                      <p className="text-[11px] font-semibold text-[#0EA5E9]">Program: {progName}</p>
+                    )}
+                    <p className="text-[11px] text-slate-500">
+                      Tugas {Number(ev.task_completion_score)} · Ketepatan {Number(ev.report_timeliness_score)} · Kualitas {Number(ev.report_quality_score)} · Koordinasi {Number(ev.coordination_score)}
+                    </p>
+                    <p className="text-slate-600 dark:text-slate-300">{String(ev.coaching_recommendation)}</p>
                   </div>
-                  <p className="text-[11px] text-slate-500">
-                    Tugas {Number(ev.task_completion_score)} · Ketepatan {Number(ev.report_timeliness_score)} · Kualitas {Number(ev.report_quality_score)} · Koordinasi {Number(ev.coordination_score)}
-                  </p>
-                  <p className="text-slate-600 dark:text-slate-300">{String(ev.coaching_recommendation)}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -520,6 +631,37 @@ export function EvaluationsPage() {
                 <option key={p.id} value={p.id}>{p.fullName} ({p.provinceName})</option>
               ))}
             </select>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Jenis Penilai (Perspektif 360°)</label>
+              <select
+                value={form.evaluatorType}
+                onChange={(e) => setForm({ ...form, evaluatorType: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                {Object.entries(EVALUATOR_TYPE_LABELS).map(([k, lbl]) => (
+                  <option key={k} value={k}>
+                    {lbl}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+              <select
+                value={form.programId}
+                onChange={(e) => setForm({ ...form, programId: e.target.value })}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              >
+                <option value="">Lintas Program / Umum</option>
+                {programs.map((pr) => (
+                  <option key={pr.id} value={pr.id}>
+                    {pr.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div><label className="block font-semibold mb-1">Tugas (30%)</label><input type="number" min={0} max={100} value={form.taskCompletionScore} onChange={(e) => setForm({ ...form, taskCompletionScore: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" /></div>

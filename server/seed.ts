@@ -311,8 +311,8 @@ export function ensureSeeded(db: DatabaseSync): void {
     for (const j of jobs) jStmt.run(...j);
   }
 
-  // Seed the official email template library in both production and demo databases.
-  // INSERT OR IGNORE keeps this safe for existing installations and preserves custom templates.
+  // Always ensure flagship programs & 18 official email templates exist in both Prod & Demo
+  seedFlagshipPrograms(db, now);
   seedDefaultEmailTemplates(db, now);
 
   // Stop here if NOT in Demo Mode — production starts clean with zero demo accounts!
@@ -335,7 +335,14 @@ export function ensureSeeded(db: DatabaseSync): void {
     ];
     const rUpd = db.prepare("UPDATE regencies SET status = ?, coordinator_name = COALESCE(coordinator_name, ?) WHERE code = ? AND status = 'belum_terbentuk'");
     for (const [rc, st, cn] of activeRegs) rUpd.run(st, cn, rc);
-    seedDefaultEmailTemplates(db, now);
+    seedOrgHierarchyPositions(db, now);
+    // Link seeded proposals/LKL/tasks to Flagship Programs idempotently
+    db.prepare("UPDATE proposals SET program_id = 'prog-btc' WHERE id = 'prop-1' AND program_id IS NULL").run();
+    db.prepare("UPDATE proposals SET program_id = 'prog-bms' WHERE id = 'prop-2' AND program_id IS NULL").run();
+    db.prepare("UPDATE proposals SET program_id = 'prog-sw' WHERE id = 'prop-3' AND program_id IS NULL").run();
+    db.prepare("UPDATE lkl_reports SET program_id = 'prog-btc' WHERE id = 'lkl-1' AND program_id IS NULL").run();
+    db.prepare("UPDATE lkl_reports SET program_id = 'prog-bms' WHERE id = 'lkl-2' AND program_id IS NULL").run();
+    db.prepare("UPDATE tasks SET program_id = 'prog-btc' WHERE id = 'tgs-4' AND program_id IS NULL").run();
     return;
   }
 
@@ -882,107 +889,222 @@ export function ensureSeeded(db: DatabaseSync): void {
      SELECT 'fg-' || id, id, uploaded_by, NULL, module, created_at FROM stored_files`
   ).run();
 
+  seedOrgHierarchyPositions(db, now);
+  db.prepare("UPDATE proposals SET program_id = 'prog-btc' WHERE id = 'prop-1'").run();
+  db.prepare("UPDATE proposals SET program_id = 'prog-bms' WHERE id = 'prop-2'").run();
+  db.prepare("UPDATE proposals SET program_id = 'prog-sw' WHERE id = 'prop-3'").run();
+  db.prepare("UPDATE lkl_reports SET program_id = 'prog-btc' WHERE id = 'lkl-1'").run();
+  db.prepare("UPDATE lkl_reports SET program_id = 'prog-bms' WHERE id = 'lkl-2'").run();
+  db.prepare("UPDATE tasks SET program_id = 'prog-btc' WHERE id = 'tgs-4'").run();
   seedDefaultEmailTemplates(db, now);
 }
 
-function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO email_templates (id, code, name, category, subject, body_text, is_active, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
+function seedFlagshipPrograms(db: DatabaseSync, now: string) {
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO flagship_programs
+     (id, slug, name, tagline, description, objectives, bidang, lead_name, status, target_provinces, target_participants, period_label, is_public, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
   );
+  stmt.run(
+    'prog-btc',
+    'behind-the-culture',
+    'Behind The Culture',
+    'Eksplorasi Riset, Narasi, dan Dokumentasi Warisan Budaya Pelajar Nusantara',
+    'Program unggulan dokumentasi dan literasi riset budaya daerah berbasis karya tulis, arsip lisan, dan pameran pelajar lintas provinsi.',
+    'Menghasilkan dokumentasi terverifikasi atas aksara, sastra lisan, seni kriya, dan tradisi lokal di 38 provinsi dengan keterlibatan aktif Duta Pelajar.',
+    'Bidang Pendidikan & Kebudayaan',
+    'Niken Larasati',
+    'aktif',
+    38,
+    2500,
+    '2026–2027',
+    now
+  );
+  stmt.run(
+    'prog-sw',
+    'sedapnya-warisanku',
+    'Sedapnya Warisanku',
+    'Pelestarian Gastronomi Tradisional & Kuliner Warisan Nusantara di Kalangan Pelajar',
+    'Program eksplorasi sejarah pangan lokal, resep warisan keluarga, dan festival edukasi gastronomi tradisional oleh Duta Pelajar Berbudaya.',
+    'Mendokumentasikan kekayaan kuliner daerah, nilai filosofi bahan pangan Nusantara, dan menggelar lokakarya edukatif di sekolah maupun komunitas.',
+    'Bidang Program & Operasional',
+    'Ayu Lestari Kusuma',
+    'aktif',
+    38,
+    1800,
+    '2026–2027',
+    now
+  );
+  stmt.run(
+    'prog-bms',
+    'budaya-masuk-sekolah',
+    'Budaya Masuk Sekolah',
+    'Gerakan Ekosistem Budaya Nusantara & Literasi Karakter di Satuan Pendidikan',
+    'Program kolaborasi Duta Pelajar bersama OSIS, guru pembina, dan satuan pendidikan untuk menghadirkan ruang ekspresi budaya di lingkungan sekolah.',
+    'Menjangkau sekolah menengah di seluruh Indonesia melalui simposium, klinik aksara/bahasa daerah, dan kelas literasi budaya terstruktur.',
+    'Bidang Hubungan & Kemitraan',
+    'Fajar Ramadhan',
+    'aktif',
+    38,
+    4000,
+    '2026–2027',
+    now
+  );
+}
 
+function seedOrgHierarchyPositions(db: DatabaseSync, now: string) {
+  const updExisting = db.prepare(
+    `UPDATE organization_positions
+     SET parent_id = COALESCE(parent_id, ?), category = ?, sort_order = ?, role_binding = ?
+     WHERE id = ?`
+  );
+  updExisting.run('pos-root-pembina', 'Pengawasan & Perlindungan', 3, 'penanggung_jawab', 'pos-1');
+  updExisting.run('pos-pimpinan-sekretariat', 'Bidang Nasional', 11, 'sekretariat_nasional', 'pos-2');
+  updExisting.run('pos-pimpinan-wakil', 'Bidang Nasional', 12, 'wakil_super_admin', 'pos-3');
+  updExisting.run('pos-pimpinan-wakil', 'Bidang Nasional', 13, 'pengurus_nasional', 'pos-4');
+  updExisting.run('pos-pimpinan-wakil', 'Bidang Nasional', 14, 'pengurus_nasional', 'pos-5');
+  updExisting.run('pos-pimpinan-wakil', 'Bidang Nasional', 15, 'pengurus_nasional', 'pos-6');
+  updExisting.run('pos-pimpinan-super', 'Bidang Nasional', 16, 'super_admin', 'pos-7');
+
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO organization_positions
+     (id, title, bidang, level, holder_personnel_id, holder_name, sk_number, term_starts_at, term_ends_at, status, parent_id, category, sort_order, is_vacant, role_binding, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, '2026-09-15', '2027-01-15', 'aktif', ?, ?, ?, ?, ?, ?)`
+  );
+  ins.run('pos-root-pembina', 'Dewan Pembina Nasional DPBI', 'Tata Kelola & Pembinaan', 'Pembina', null, 'Dewan Pembina Organisasi', 'DPBI/DOC/2026/0000', null, 'Pembina', 1, 0, 'penanggung_jawab', now);
+  ins.run('pos-pimpinan-super', 'Pimpinan Sistem & Tata Kelola (Super Admin)', 'Tata Kelola Nasional', 'Pimpinan Nasional', 'pers-1', 'Raden Bagus Prasetyo (Simulasi)', 'DPBI/DOC/2026/0007', 'pos-root-pembina', 'Pimpinan Nasional', 2, 0, 'super_admin', now);
+  ins.run('pos-pimpinan-wakil', 'Wakil Pimpinan Operasional (Wakil Super Admin)', 'Koordinasi Wilayah & Sistem', 'Pimpinan Nasional', 'pers-2', 'Ayu Lestari Kusuma (Simulasi)', 'DPBI/DOC/2026/0003', 'pos-pimpinan-super', 'Pimpinan Nasional', 4, 0, 'wakil_super_admin', now);
+  ins.run('pos-pimpinan-sekretariat', 'Sekretariat Nasional DPBI', 'Bidang Administrasi & Organisasi', 'Sekretariat', 'pers-5', 'Fajar Ramadhan (Simulasi)', 'DPBI/DOC/2026/0002', 'pos-pimpinan-super', 'Sekretariat', 5, 0, 'sekretariat_nasional', now);
+  ins.run('pos-korwil-jabar', 'Koordinator Wilayah Jawa Barat', 'Bidang Pengembangan Wilayah', 'Wilayah', 'pers-6', 'Siti Nurhaliza Putri (Simulasi)', 'DPBI/DOC/2026/0011', 'pos-4', 'Koordinator Wilayah', 21, 0, 'koordinator_wilayah', now);
+  ins.run('pos-korwil-bali', 'Koordinator Wilayah Bali', 'Bidang Pengembangan Wilayah', 'Wilayah', 'pers-7', 'I Made Arya Putra (Simulasi)', 'DPBI/DOC/2026/0012', 'pos-4', 'Koordinator Wilayah', 22, 0, 'koordinator_wilayah', now);
+  ins.run('pos-vacant-kaltim', 'Koordinator Wilayah Kalimantan Timur', 'Bidang Pengembangan Wilayah', 'Wilayah', null, null, null, 'pos-4', 'Koordinator Wilayah', 23, 1, 'koordinator_wilayah', now);
+  ins.run('pos-vacant-sekbid', 'Sekretaris Bidang Media, Publikasi & Teknologi', 'Bidang Media, Publikasi & Teknologi', 'Bidang', null, null, null, 'pos-7', 'Tim Bidang', 24, 1, 'pengurus_nasional', now);
+}
+
+function wrapOfficialEmailHtml(heading: string, bodyParagraphs: string): string {
+  const htmlBody = bodyParagraphs
+    .split('\n\n')
+    .map((p) => `<p style="margin:0 0 12px 0;line-height:1.6;color:#334155;">${p.replace(/\n/g, '<br/>')}</p>`)
+    .join('');
+  return `<!DOCTYPE html>
+<html lang="id"><body style="margin:0;padding:24px;background:#F1F5F9;font-family:Inter,Segoe UI,Arial,sans-serif;">
+<div style="max-width:600px;margin:0 auto;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden;">
+  <div style="background:#1E293B;color:#FFFFFF;padding:18px 24px;">
+    <p style="margin:0;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#38BDF8;font-weight:700;">SATU DPBI · RESMI</p>
+    <h1 style="margin:6px 0 0 0;font-size:18px;font-weight:700;">${heading}</h1>
+  </div>
+  <div style="padding:24px;">${htmlBody}</div>
+  <div style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:14px 24px;font-size:11px;color:#64748B;">
+    <strong>SATU DPBI</strong> — Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia · Satu Sistem, Satu Data, Satu Koordinasi.
+  </div>
+</div></body></html>`;
+}
+
+function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
   const templates: [string, string, string, string, string, string][] = [
     [
-      'etpl-1',
-      'undangan_akun',
-      'Undangan Aktivasi Akun Resmi SATU DPBI',
-      'Akun & Aktivasi',
-      '[SATU DPBI] Undangan Aktivasi Akun {{jabatan}} - {{provinsi}}',
-      'Yth. {{nama}},\n\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi yang diberikan oleh admin sebelum {{tanggal}}.\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
+      'etpl-1', 'undangan_akun', 'Undangan Aktivasi Akun Resmi SATU DPBI', 'Akun & Aktivasi',
+      '[SATU DPBI] Undangan Aktivasi Akun {{jabatan}} — {{provinsi}}',
+      'Yth. {{nama}},\n\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} · {{role}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi berikut sebelum {{tenggat}}:\n{{tautan}}\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
     ],
     [
-      'etpl-2',
-      'pengingat_laporan_bulanan',
-      'Pengingat Batas Laporan Bulanan Wilayah',
-      'Koordinasi Wilayah',
-      '[Pengingat] Laporan Bulanan Wilayah {{provinsi}} — Batas {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon lengkapi rekap LKL dan unggah Laporan Bulanan Koordinator Wilayah melalui modul Laporan Koordinator sebelum {{tanggal}}.\n\nReferensi: {{referensi}}',
+      'etpl-2', 'kirim_ulang_undangan', 'Kirim Ulang Undangan Aktivasi Akun', 'Akun & Aktivasi',
+      '[SATU DPBI] Pengingat & Tautan Baru Aktivasi Akun — {{nama}}',
+      'Yth. {{nama}},\n\nBerikut tautan undangan aktivasi terbaru untuk akun SATU DPBI Anda ({{jabatan}} — {{provinsi}}). Tautan sebelumnya otomatis dinonaktifkan demi keamanan.\nTautan aktivasi: {{tautan}}\nBerlaku hingga: {{tenggat}}\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-3',
-      'informasi_kegiatan',
-      'Informasi Resmi Kegiatan Nasional / Wilayah',
-      'Kegiatan',
-      '[Informasi Kegiatan] Pemberitahuan Program {{angkatan}} — {{provinsi}}',
-      'Yth. {{nama}},\n\nDengan hormat,\n\nKami menyampaikan informasi kegiatan/program DPBI untuk wilayah {{provinsi}}. Mohon memperhatikan jadwal dan ketentuan kegiatan yang tercantum pada kanal koordinasi resmi.\n\nTanggal pelaksanaan: {{tanggal}}\nReferensi: {{referensi}}\n\nDemikian informasi ini disampaikan. Terima kasih atas perhatian dan kerja sama Anda.\n\nHormat kami,\nSekretariat Nasional\nDuta Pelajar Berbudaya Indonesia',
+      'etpl-3', 'aktivasi_berhasil', 'Konfirmasi Aktivasi Akun Berhasil', 'Akun & Aktivasi',
+      '[SATU DPBI] Akun Resmi Anda Telah Aktif — {{nama}}',
+      'Halo {{nama}},\n\nAktivasi akun SATU DPBI Anda ({{jabatan}} · {{role}} — {{provinsi}}) berhasil diselesaikan pada {{tanggal}}.\nAnda kini dapat masuk ke portal melalui {{tautan}} untuk mengakses tugas, proposal, dan koordinasi wilayah.\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-4',
-      'transisi_alumni',
-      'Pengingat Masa Transisi Alumni (30 Hari)',
-      'Alumni',
-      '[SATU DPBI] Pengingat Jendela Arsip Alumni — {{nama}}',
-      'Yth. {{nama}},\n\nMasa tugas {{angkatan}} telah berakhir dan akun Anda berada pada jendela akses arsip alumni 30 hari hingga {{tanggal}}. Mohon unduh sertifikat dan portofolio kegiatan Anda melalui menu Arsip.\n\nReferensi: {{referensi}}',
+      'etpl-4', 'reset_password', 'Tautan Reset Kata Sandi Akun', 'Keamanan Akun',
+      '[SATU DPBI] Permintaan Reset Kata Sandi — {{nama}}',
+      'Yth. {{nama}},\n\nKami menerima permintaan pengaturan ulang kata sandi untuk akun {{email}} pada {{tanggal}}.\nGunakan tautan satu kali pakai berikut (kedaluwarsa {{tenggat}}):\n{{tautan}}\n\nJika Anda tidak merasa meminta reset sandi, abaikan pesan ini dan hubungi Sekretariat Nasional.',
     ],
     [
-      'etpl-5',
-      'pengumuman_resmi',
-      'Pengumuman Resmi Organisasi',
-      'Informasi & Pengumuman',
-      '[PENGUMUMAN RESMI DPBI] {{referensi}}',
-      'Yth. {{nama}},\n\nDengan hormat,\n\nMelalui email ini, Duta Pelajar Berbudaya Indonesia menyampaikan pengumuman resmi terkait {{referensi}}. Mohon membaca informasi yang disampaikan dan memperhatikan ketentuan serta jadwal yang berlaku mulai {{tanggal}}.\n\nApabila diperlukan tindak lanjut, silakan berkoordinasi melalui kanal resmi organisasi.\n\nTerima kasih atas perhatian dan kerja sama Anda.\n\nHormat kami,\nSekretariat Nasional\nDuta Pelajar Berbudaya Indonesia',
+      'etpl-5', 'konfirmasi_reset_password', 'Konfirmasi Perubahan Kata Sandi', 'Keamanan Akun',
+      '[SATU DPBI] Kata Sandi Berhasil Diperbarui',
+      'Yth. {{nama}},\n\nKata sandi untuk akun {{email}} telah diperbarui pada {{tanggal}} dan seluruh sesi perangkat sebelumnya telah dirotasi.\nJika bukan Anda yang melakukan perubahan ini, segera hubungi Super Admin SATU DPBI.\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-6',
-      'undangan_rapat_koordinasi',
-      'Undangan Rapat / Koordinasi',
-      'Undangan & Koordinasi',
-      '[UNDANGAN] Rapat Koordinasi DPBI — {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}}),\n\nDengan hormat,\n\nDalam rangka memperkuat koordinasi dan kelancaran pelaksanaan program Duta Pelajar Berbudaya Indonesia, kami mengundang Anda untuk mengikuti rapat/koordinasi yang akan dilaksanakan pada:\n\nHari/Tanggal: {{tanggal}}\nAgenda: {{referensi}}\nMedia/Tempat: Akan diinformasikan melalui kanal koordinasi resmi.\n\nMohon memberikan konfirmasi kehadiran kepada sekretariat melalui kanal komunikasi yang telah ditetapkan.\n\nAtas perhatian dan kesediaannya, kami ucapkan terima kasih.\n\nHormat kami,\nSekretariat DPBI',
+      'etpl-6', 'notifikasi_pengajuan', 'Notifikasi Pengajuan Proposal / Permohonan Baru', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Pengajuan Baru Menunggu Tinjauan ({{referensi}})',
+      'Yth. {{nama}},\n\nTerdapat pengajuan baru bernomor {{referensi}} dari wilayah {{provinsi}} ({{angkatan}}) yang memerlukan peninjauan Anda sebelum {{tenggat}}.\nBuka antrean persetujuan pada: {{tautan}}\n\nSatu Sistem, Satu Data, Satu Koordinasi.',
     ],
     [
-      'etpl-7',
-      'pengingat_tugas_tenggat',
-      'Pengingat Tugas dan Tenggat Waktu',
-      'Tugas & Administrasi',
-      '[PENGINGAT TUGAS] {{referensi}} — Batas {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}}),\n\nKami mengingatkan bahwa terdapat tugas/administrasi yang perlu ditindaklanjuti dengan rincian:\n\nUraian: {{referensi}}\nBatas waktu: {{tanggal}}\n\nMohon menyelesaikan dan memperbarui status tugas melalui portal SATU DPBI sebelum batas waktu tersebut. Jika terdapat kendala, sampaikan kepada penanggung jawab terkait melalui kanal koordinasi resmi.\n\nTerima kasih atas perhatian dan tanggung jawab Anda.\n\nSalam,\nSekretariat DPBI',
+      'etpl-7', 'notifikasi_revisi', 'Permintaan Revisi Proposal atau Laporan (LKL)', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Pengajuan Perlu Revisi — {{referensi}}',
+      'Yth. {{nama}},\n\nPengajuan {{referensi}} ({{provinsi}}) berstatus Perlu Revisi setelah pemeriksaan tahap persetujuan pada {{tanggal}}.\nMohon perbaiki dokumen sesuai catatan peninjau dan ajukan ulang sebelum {{tenggat}} melalui:\n{{tautan}}',
     ],
     [
-      'etpl-8',
-      'pemberitahuan_status_pengajuan',
-      'Pemberitahuan Status Pengajuan',
-      'Administrasi & Persetujuan',
-      '[PEMBARUAN STATUS] Pengajuan {{referensi}}',
-      'Yth. {{nama}},\n\nKami menyampaikan pembaruan status atas pengajuan dengan referensi {{referensi}}.\n\nStatus terbaru: Silakan periksa detail keputusan dan catatan verifikasi pada portal SATU DPBI.\nTanggal pembaruan: {{tanggal}}\n\nApabila diperlukan perbaikan atau informasi tambahan, petunjuk akan tercantum pada detail pengajuan.\n\nTerima kasih.\n\nHormat kami,\nSekretariat DPBI',
+      'etpl-8', 'proposal_disetujui', 'Pemberitahuan Proposal Kegiatan Disetujui', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Proposal Disetujui — {{referensi}}',
+      'Selamat {{nama}},\n\nProposal kegiatan {{referensi}} untuk wilayah {{provinsi}} ({{angkatan}}) telah resmi disetujui pada {{tanggal}}.\nAgenda kalender dan tugas tindak lanjut (termasuk kewajiban LKL) telah dibuat otomatis di portal:\n{{tautan}}',
     ],
     [
-      'etpl-9',
-      'permintaan_perbaikan_data',
-      'Permintaan Perbaikan / Kelengkapan Data',
-      'Administrasi & Verifikasi',
-      '[TINDAK LANJUT] Kelengkapan Data {{referensi}}',
-      'Yth. {{nama}},\n\nBerdasarkan pemeriksaan administrasi, masih terdapat bagian data/berkas yang perlu dilengkapi atau diperbaiki pada pengajuan {{referensi}}.\n\nMohon meninjau catatan verifikasi pada portal SATU DPBI dan melakukan pembaruan paling lambat {{tanggal}}. Pastikan seluruh informasi yang disampaikan benar dan sesuai dokumen pendukung.\n\nJika Anda telah melakukan pembaruan, email ini dapat diabaikan.\n\nTerima kasih atas kerja sama Anda.\n\nHormat kami,\nSekretariat DPBI',
+      'etpl-9', 'proposal_ditolak', 'Pemberitahuan Proposal Tidak Dapat Disetujui', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Keputusan Penolakan Proposal — {{referensi}}',
+      'Yth. {{nama}},\n\nBerdasarkan evaluasi administrasi dan kesesuaian risiko, proposal {{referensi}} ({{provinsi}}) belum dapat disetujui pada {{tanggal}}.\nSilakan tinjau catatan keputusan lengkap pada: {{tautan}}',
     ],
     [
-      'etpl-10',
-      'tindak_lanjut_koordinasi',
-      'Tindak Lanjut Hasil Koordinasi',
-      'Koordinasi Organisasi',
-      '[TINDAK LANJUT KOORDINASI] {{referensi}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMenindaklanjuti koordinasi sebelumnya terkait {{referensi}}, kami memohon agar poin-poin tindak lanjut dapat diperhatikan dan diselesaikan sesuai pembagian tugas serta jadwal yang telah disepakati.\n\nTarget tindak lanjut: {{tanggal}}\n\nApabila terdapat perkembangan atau kendala, mohon menyampaikan pembaruan melalui kanal koordinasi resmi agar dapat ditindaklanjuti bersama.\n\nTerima kasih atas perhatian dan kolaborasinya.\n\nHormat kami,\nSekretariat DPBI',
+      'etpl-10', 'konfirmasi_kegiatan', 'Konfirmasi Jadwal & Pelaksanaan Kegiatan Resmi', 'Program & Kegiatan',
+      '[Informasi Kegiatan] Konfirmasi Program {{angkatan}} — {{provinsi}}',
+      'Halo {{nama}},\n\nBerikut konfirmasi jadwal pelaksanaan kegiatan resmi DPBI untuk wilayah {{provinsi}} pada {{tanggal}}.\nPastikan daftar hadir, izin lokasi, dan pendamping dewasa tersedia sesuai SOP. Detail agenda:\n{{tautan}}\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-11',
-      'apresiasi_partisipasi',
-      'Ucapan Terima Kasih dan Apresiasi',
-      'Apresiasi',
-      '[APRESIASI DPBI] Terima Kasih atas Kontribusi Anda',
-      'Yth. {{nama}},\n\nDuta Pelajar Berbudaya Indonesia menyampaikan terima kasih dan apresiasi atas waktu, partisipasi, serta kontribusi Anda dalam mendukung pelaksanaan {{referensi}}.\n\nSemoga pengalaman dan kerja sama yang terjalin dapat terus memberikan manfaat bagi penguatan pendidikan dan kebudayaan Indonesia.\n\nTanggal: {{tanggal}}\n\nSalam budaya,\nDuta Pelajar Berbudaya Indonesia',
+      'etpl-11', 'pengingat_tenggat', 'Pengingat Tenggat Tugas, Proposal & Laporan Bulanan', 'Koordinasi Wilayah',
+      '[Pengingat Tenggat] Kewajiban {{jabatan}} {{provinsi}} — Batas {{tenggat}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon segera menuntaskan kewajiban administrasi/laporan Anda sebelum tenggat {{tenggat}}.\nAkses modul pelaporan langsung di:\n{{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+    [
+      'etpl-12', 'notifikasi_laporan', 'Status Pemeriksaan LKL / Laporan Koordinator', 'Laporan & Evaluasi',
+      '[SATU DPBI] Pembaruan Status Laporan {{referensi}}',
+      'Yth. {{nama}},\n\nLaporan {{referensi}} wilayah {{provinsi}} telah diperiksa pada {{tanggal}}.\nLihat hasil verifikasi dan catatan evaluasi kinerja melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-13', 'penetapan_jabatan', 'Surat Keputusan & Penetapan Jabatan Resmi', 'Struktur Organisasi',
+      '[SATU DPBI] Penetapan Jabatan Resmi: {{jabatan}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nSelamat atas penetapan amanah resmi Anda sebagai {{jabatan}} di wilayah {{provinsi}} ({{angkatan}}) berdasarkan surat nomor {{nomor_surat}} tertanggal {{tanggal}}.\nUnduh SK dan kelengkapan tugas di:\n{{tautan}}',
+    ],
+    [
+      'etpl-14', 'perubahan_jabatan', 'Pemberitahuan Perubahan / Rotasi Jabatan', 'Struktur Organisasi',
+      '[SATU DPBI] Pembaruan Penugasan Jabatan — {{nama}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nTerdapat pembaruan penugasan jabatan Anda menjadi {{jabatan}} ({{provinsi}}) efektif per {{tanggal}} sesuai catatan nomor {{nomor_surat}}.\nRiwayat jabatan telah tercatat permanen di profil Anda:\n{{tautan}}',
+    ],
+    [
+      'etpl-15', 'pengumuman_organisasi', 'Pengumuman Resmi Organisasi DPBI', 'Komunikasi Nasional',
+      '[Pengumuman Resmi DPBI] Informasi Organisasi — {{tanggal}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nSekretariat Nasional DPBI menyampaikan pengumuman resmi organisasi terkait pelaksanaan program {{angkatan}}.\nSilakan membaca naskah lengkap pengumuman pada:\n{{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+    [
+      'etpl-16', 'rekap_bulanan', 'Rekapitulasi Bulanan Operasional Wilayah & Program', 'Laporan & Evaluasi',
+      '[SATU DPBI] Rekapitulasi Bulanan Wilayah {{provinsi}} — {{tanggal}}',
+      'Yth. {{nama}},\n\nBerikut ringkasan rekapitulasi operasional bulanan wilayah {{provinsi}} untuk periode berjalan per {{tanggal}}.\nTinjau indikator capaian proposal, LKL, dan tugas di:\n{{tautan}}\n\nNomor Rekap: {{nomor_surat}}',
+    ],
+    [
+      'etpl-17', 'informasi_alumni', 'Informasi Transisi & Jendela Akses Arsip Alumni', 'Alumni',
+      '[SATU DPBI] Informasi Alumni & Jendela Arsip 30 Hari — {{nama}}',
+      'Yth. {{nama}},\n\nMasa tugas {{angkatan}} telah memasuki fase Alumni. Anda memiliki akses arsip pribadi & unduh sertifikat hingga {{tenggat}} melalui:\n{{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+    [
+      'etpl-18', 'serah_terima_jabatan', 'Berita Acara Serah Terima Jabatan Koordinator Wilayah', 'Struktur Organisasi',
+      '[SATU DPBI] Serah Terima Jabatan Wilayah {{provinsi}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nProses serah terima jabatan Koordinator Wilayah {{provinsi}} ({{nomor_surat}}) telah dicatat pada {{tanggal}} mencakup pengalihan tugas, proposal aktif, dan arsip dokumen.\nTinjau paket serah terima lengkap di:\n{{tautan}}\n\nReferensi: {{referensi}}',
     ],
   ];
 
-  for (const template of templates) {
-    insert.run(...template, now);
+  const insStmt = db.prepare(
+    `INSERT OR IGNORE INTO email_templates (id, code, name, category, subject, body_text, body_html, version, is_active, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)`
+  );
+  const updHtmlStmt = db.prepare(
+    `UPDATE email_templates SET body_html = ? WHERE code = ? AND (body_html IS NULL OR TRIM(body_html) = '')`
+  );
+
+  for (const [id, code, name, cat, subj, bodyText] of templates) {
+    const html = wrapOfficialEmailHtml(name, bodyText);
+    insStmt.run(id, code, name, cat, subj, bodyText, html, now);
+    updHtmlStmt.run(html, code);
   }
 }

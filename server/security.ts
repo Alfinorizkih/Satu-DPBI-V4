@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { DatabaseSync } from 'node:sqlite';
@@ -682,4 +684,172 @@ export function createNotificationIdempotent(
     ).run(id, params.userId, params.title, params.message, params.category, params.targetPath, now);
   }
 }
+
+let cachedAppVersion: string | null = null;
+export function readAppVersion(): string {
+  if (cachedAppVersion) return cachedAppVersion;
+  try {
+    const pkgPath = path.resolve(process.cwd(), 'package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf8');
+    const parsed = JSON.parse(raw) as { version?: string };
+    cachedAppVersion = parsed.version && parsed.version.trim() ? parsed.version.trim() : '4.1.0';
+  } catch {
+    cachedAppVersion = '4.1.0';
+  }
+  return cachedAppVersion;
+}
+
+const MAINTENANCE_MUTATION_EXEMPT_PATHS = new Set([
+  '/auth/login',
+  '/auth/logout',
+  '/auth/demo-switch',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/accept-invitation',
+  '/system/maintenance',
+]);
+
+export function requireNotInMaintenance(req: Request, res: Response, next: NextFunction): void {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    next();
+    return;
+  }
+  const cleanPath = (req.path || '').replace(/\/+$/, '') || '/';
+  if (MAINTENANCE_MUTATION_EXEMPT_PATHS.has(cleanPath)) {
+    next();
+    return;
+  }
+  try {
+    const db = getDb();
+    const row = db
+      .prepare("SELECT value FROM system_settings WHERE key = 'maintenance_mode'")
+      .get() as { value: string } | undefined;
+    if (row?.value === 'true') {
+      const msgRow = db
+        .prepare("SELECT value FROM system_settings WHERE key = 'maintenance_message'")
+        .get() as { value: string } | undefined;
+      res.status(503).json({
+        error:
+          msgRow?.value ||
+          'Sistem sedang dalam mode pemeliharaan terjadwal. Operasi tulis sementara ditangguhkan oleh Super Admin.',
+        code: 503,
+        maintenanceMode: true,
+      });
+      return;
+    }
+  } catch {
+    // Allow fallback if DB unavailable
+  }
+  next();
+}
+
+export function logSensitivePiiAccess(
+  db: DatabaseSync,
+  actor: { id: string; fullName: string; role: string },
+  targetType: string,
+  targetId: string,
+  note = 'Akses tampilan data pribadi sensitif'
+): void {
+  writeAuditLog(db, actor, 'VIEW_SENSITIVE_PII', targetType, targetId, 'berhasil', note);
+}
+
+interface ApiMetricEntry {
+  ts: number;
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+}
+
+const API_METRIC_RING: ApiMetricEntry[] = [];
+const MAX_API_METRICS = 300;
+
+export function recordApiMetric(method: string, pathStr: string, status: number, durationMs: number): void {
+  API_METRIC_RING.push({
+    ts: Date.now(),
+    method,
+    path: pathStr.slice(0, 120),
+    status,
+    durationMs: Math.max(0, Math.round(durationMs * 10) / 10),
+  });
+  if (API_METRIC_RING.length > MAX_API_METRICS) {
+    API_METRIC_RING.shift();
+  }
+}
+
+export function getApiMetricsSnapshot(): {
+  sampleCount: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+  error5xxCount: number;
+  error4xxCount: number;
+} {
+  if (API_METRIC_RING.length === 0) {
+    return { sampleCount: 0, avgLatencyMs: 0, p95LatencyMs: 0, error5xxCount: 0, error4xxCount: 0 };
+  }
+  const durations = API_METRIC_RING.map((m) => m.durationMs).sort((a, b) => a - b);
+  const sum = durations.reduce((acc, d) => acc + d, 0);
+  const p95Idx = Math.min(durations.length - 1, Math.floor(durations.length * 0.95));
+  return {
+    sampleCount: API_METRIC_RING.length,
+    avgLatencyMs: Math.round((sum / API_METRIC_RING.length) * 10) / 10,
+    p95LatencyMs: durations[p95Idx] ?? 0,
+    error5xxCount: API_METRIC_RING.filter((m) => m.status >= 500).length,
+    error4xxCount: API_METRIC_RING.filter((m) => m.status >= 400 && m.status < 500).length,
+  };
+}
+
+export function idempotencyGuard(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  const rawKey = req.header('x-idempotency-key')?.trim();
+  if (!rawKey || rawKey.length < 8 || rawKey.length > 128 || !req.authUser) {
+    next();
+    return;
+  }
+  const db = getDb();
+  const userId = req.authUser.id;
+  const method = req.method.toUpperCase();
+  const pathKey = req.baseUrl + req.path;
+
+  const existing = db
+    .prepare(
+      `SELECT status_code, response_json, created_at FROM idempotency_keys
+       WHERE idem_key = ? AND user_id = ? AND method = ? AND path = ?`
+    )
+    .get(rawKey, userId, method, pathKey) as
+    | { status_code: number; response_json: string; created_at: string }
+    | undefined;
+
+  if (existing) {
+    const ageMs = Date.now() - Date.parse(existing.created_at);
+    if (Number.isFinite(ageMs) && ageMs < 24 * 60 * 60 * 1000) {
+      try {
+        res.setHeader('X-Idempotency-Replayed', 'true');
+        res.status(existing.status_code).json(JSON.parse(existing.response_json));
+        return;
+      } catch {
+        // Fall through on malformed cached payload
+      }
+    }
+  }
+
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    try {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        const nowIso = new Date().toISOString();
+        db.prepare(
+          `INSERT OR REPLACE INTO idempotency_keys (idem_key, user_id, method, path, status_code, response_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(rawKey, userId, method, pathKey, res.statusCode, JSON.stringify(body ?? {}), nowIso);
+      }
+    } catch {
+      // Never fail primary response due to idempotency cache write
+    }
+    return originalJson(body);
+  }) as typeof res.json;
+
+  next();
+}
+
+
 

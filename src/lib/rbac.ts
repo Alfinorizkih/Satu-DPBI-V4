@@ -166,6 +166,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     arsip: ALL_ACTIONS,
     persetujuan: ALL_ACTIONS,
     email: ALL_ACTIONS,
+    program: ALL_ACTIONS,
+    persuratan: ALL_ACTIONS,
     sistem: ALL_ACTIONS,
     pengaturan: ALL_ACTIONS,
   },
@@ -188,6 +190,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     arsip: ['view', 'download'],
     persetujuan: ['view', 'review', 'approve', 'reject', 'assign'],
     email: ['view', 'create', 'publish'],
+    program: ['view', 'create', 'edit', 'review', 'manage'],
+    persuratan: ['view', 'create', 'edit', 'assign', 'download'],
     pengaturan: ['view'],
   },
   penanggung_jawab: {
@@ -209,6 +213,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     arsip: ['view', 'download'],
     persetujuan: ['view', 'review', 'approve', 'reject'],
     email: ['view'],
+    program: ['view', 'review'],
+    persuratan: ['view', 'download'],
     pengaturan: ['view'],
   },
   pengurus_nasional: {
@@ -230,6 +236,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     arsip: ['view', 'download'],
     persetujuan: ['view', 'review', 'approve', 'reject'],
     email: ['view', 'create'],
+    program: ['view', 'create', 'edit', 'manage'],
+    persuratan: ['view', 'create', 'edit', 'assign', 'download'],
     pengaturan: ['view'],
   },
   sekretariat_nasional: {
@@ -250,6 +258,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     arsip: ['view', 'create', 'download', 'archive'],
     persetujuan: ['view', 'review'],
     email: ['view', 'create', 'publish'],
+    program: ['view', 'create', 'edit'],
+    persuratan: ['view', 'create', 'edit', 'assign', 'download', 'archive'],
     pengaturan: ['view'],
   },
   koordinator_wilayah: {
@@ -268,6 +278,8 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     evaluasi: ['view', 'create'],
     arsip: ['view', 'download'],
     persetujuan: ['view', 'review', 'approve', 'reject'],
+    program: ['view'],
+    persuratan: ['view', 'create', 'download'],
     pengaturan: ['view'],
   },
   duta: {
@@ -283,12 +295,15 @@ export const BASE_ROLE_PERMISSIONS: Record<RoleCode, Partial<Record<ModuleCode, 
     perlindungan: ['view', 'create'],
     evaluasi: ['view'],
     arsip: ['view', 'download'],
+    program: ['view'],
+    persuratan: ['view', 'download'],
     pengaturan: ['view'],
   },
   alumni: {
     dashboard: ['view'],
     dokumen: ['view', 'download'],
     arsip: ['view', 'download', 'export'],
+    program: ['view'],
     pengaturan: ['view'],
   },
 };
@@ -304,7 +319,7 @@ export function resolveEffectivePermissions(
     'dashboard', 'command_center', 'organisasi', 'personalia', 'wilayah',
     'angkatan', 'proposal', 'lkl', 'laporan_koordinator', 'tugas', 'dokumen',
     'pengumuman', 'kalender', 'perlindungan', 'evaluasi', 'arsip',
-    'persetujuan', 'email', 'sistem', 'pengaturan',
+    'persetujuan', 'email', 'program', 'persuratan', 'sistem', 'pengaturan',
   ];
 
   for (const mod of modules) {
@@ -603,7 +618,7 @@ export function calculateProfileCompleteness(
 }
 
 export function formatReferenceNumber(
-  category: 'PROP' | 'LKL' | 'LKW' | 'AKUN' | 'DOC' | 'TGS' | 'ADU' | 'INS' | 'PERS' | 'HND',
+  category: 'PROP' | 'LKL' | 'LKW' | 'AKUN' | 'DOC' | 'TGS' | 'ADU' | 'INS' | 'PERS' | 'HND' | 'SURAT' | 'PROG' | 'TIKET',
   year: number,
   sequence: number
 ): string {
@@ -637,9 +652,13 @@ export const ALLOWED_EMAIL_VARIABLES = [
   'nama',
   'email',
   'jabatan',
+  'role',
   'provinsi',
   'angkatan',
+  'nomor_surat',
   'tanggal',
+  'tenggat',
+  'tautan',
   'referensi',
 ] as const;
 

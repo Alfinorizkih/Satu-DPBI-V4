@@ -823,6 +823,182 @@ function initSchema(db: DatabaseSync): void {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_user_event_key ON notifications(user_id, event_key) WHERE event_key IS NOT NULL;'
   );
 
+  // Migration 4: Personnel vs Account vs Invitation separation, Org Position History & CSV Import Batches
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS org_position_history (
+      id TEXT PRIMARY KEY,
+      position_id TEXT NOT NULL,
+      position_title TEXT NOT NULL,
+      personnel_id TEXT,
+      holder_name TEXT NOT NULL,
+      bidang TEXT NOT NULL,
+      province_code TEXT,
+      sk_number TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      change_reason TEXT NOT NULL DEFAULT '',
+      actor_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_org_pos_history_pos ON org_position_history(position_id);
+    CREATE INDEX IF NOT EXISTS idx_org_pos_history_pers ON org_position_history(personnel_id);
+
+    CREATE TABLE IF NOT EXISTS import_batches (
+      id TEXT PRIMARY KEY,
+      file_name TEXT NOT NULL,
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      skipped_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'selesai',
+      imported_by TEXT NOT NULL,
+      imported_by_name TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      rolled_back_at TEXT
+    );
+  `);
+  addColumnIfMissing('invitations', 'personnel_id', 'TEXT');
+  addColumnIfMissing('invitations', 'status', "TEXT NOT NULL DEFAULT 'undangan_terkirim'");
+  addColumnIfMissing('invitations', 'resend_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('invitations', 'last_sent_at', 'TEXT');
+  addColumnIfMissing('invitations', 'opened_at', 'TEXT');
+  addColumnIfMissing('invitations', 'cancelled_at', 'TEXT');
+  addColumnIfMissing('invitations', 'cancelled_by', 'TEXT');
+  db.exec("UPDATE invitations SET status = 'aktif' WHERE used_at IS NOT NULL AND status = 'undangan_terkirim';");
+
+  addColumnIfMissing('personnel', 'import_batch_id', 'TEXT');
+  addColumnIfMissing('personnel', 'nik_masked', 'TEXT');
+
+  // Migration 5: Org Hierarchy & Flagship Programs
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS flagship_programs (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      tagline TEXT NOT NULL,
+      description TEXT NOT NULL,
+      objectives TEXT NOT NULL,
+      bidang TEXT NOT NULL,
+      lead_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'aktif',
+      target_provinces INTEGER NOT NULL DEFAULT 38,
+      target_participants INTEGER NOT NULL DEFAULT 1000,
+      period_label TEXT NOT NULL DEFAULT '2026',
+      is_public INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  addColumnIfMissing('organization_positions', 'parent_id', 'TEXT');
+  addColumnIfMissing('organization_positions', 'category', "TEXT NOT NULL DEFAULT 'Bidang'");
+  addColumnIfMissing('organization_positions', 'sort_order', 'INTEGER NOT NULL DEFAULT 10');
+  addColumnIfMissing('organization_positions', 'is_vacant', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('organization_positions', 'role_binding', 'TEXT');
+
+  // Migration 6: Approval History, Task Dependencies & Program Linkage
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS approval_history (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      from_status TEXT,
+      to_status TEXT NOT NULL,
+      stage_label TEXT NOT NULL DEFAULT '',
+      actor_user_id TEXT NOT NULL,
+      actor_name TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      diff_json TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_history_entity ON approval_history(entity_type, entity_id);
+  `);
+  addColumnIfMissing('proposals', 'program_id', 'TEXT');
+  addColumnIfMissing('lkl_reports', 'program_id', 'TEXT');
+  addColumnIfMissing('tasks', 'program_id', 'TEXT');
+  addColumnIfMissing('tasks', 'depends_on_task_id', 'TEXT');
+  addColumnIfMissing('evaluations', 'program_id', 'TEXT');
+  addColumnIfMissing('evaluations', 'evaluator_type', "TEXT NOT NULL DEFAULT 'pengurus_nasional'");
+
+  // Migration 7: Email HTML + Versioning + Delivery Channel
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_template_history (
+      id TEXT PRIMARY KEY,
+      template_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      body_html TEXT,
+      updated_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_tpl_history_tpl ON email_template_history(template_id);
+  `);
+  addColumnIfMissing('email_templates', 'body_html', 'TEXT');
+  addColumnIfMissing('email_templates', 'version', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('email_campaigns', 'body_html', 'TEXT');
+  addColumnIfMissing('email_logs', 'delivery_channel', "TEXT NOT NULL DEFAULT 'sandbox_outbox'");
+
+  // Migration 8: Correspondence (Persuratan) & Document Lineage/Superseding
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS correspondence (
+      id TEXT PRIMARY KEY,
+      reference_number TEXT NOT NULL UNIQUE,
+      direction TEXT NOT NULL DEFAULT 'keluar',
+      letter_type TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      recipient_name TEXT NOT NULL,
+      letter_date TEXT NOT NULL,
+      received_date TEXT,
+      province_code TEXT,
+      program_id TEXT,
+      urgency TEXT NOT NULL DEFAULT 'biasa',
+      status TEXT NOT NULL DEFAULT 'baru',
+      file_id TEXT,
+      file_name TEXT,
+      summary TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_by_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_correspondence_dir ON correspondence(direction);
+
+    CREATE TABLE IF NOT EXISTS correspondence_dispositions (
+      id TEXT PRIMARY KEY,
+      correspondence_id TEXT NOT NULL,
+      from_user_id TEXT NOT NULL,
+      from_user_name TEXT NOT NULL,
+      to_user_id TEXT,
+      to_user_name TEXT NOT NULL,
+      instruction TEXT NOT NULL,
+      due_date TEXT,
+      status TEXT NOT NULL DEFAULT 'belum_dibaca',
+      response_note TEXT,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_corr_disp_corr ON correspondence_dispositions(correspondence_id);
+  `);
+  addColumnIfMissing('documents', 'parent_document_id', 'TEXT');
+  addColumnIfMissing('documents', 'replaced_by_id', 'TEXT');
+  addColumnIfMissing('documents', 'program_id', 'TEXT');
+
+  // Migration 9: Handover Snapshot Package & Location Reported vs Verified Separation
+  addColumnIfMissing('handovers', 'package_json', 'TEXT');
+  addColumnIfMissing('location_verifications', 'reported_location_text', 'TEXT');
+  addColumnIfMissing('location_verifications', 'verified_location_proof', 'TEXT');
+
+  // Migration 10: Maintenance Mode Default Settings
+  const migNow = new Date().toISOString();
+  db.prepare(
+    "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('maintenance_mode', 'false', ?)"
+  ).run(migNow);
+  db.prepare(
+    "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('maintenance_message', 'Portal sedang menjalani pemeliharaan sistem terjadwal oleh Super Admin. Silakan coba kembali beberapa saat lagi.', ?)"
+  ).run(migNow);
+
   // Enforce hard 24h ceiling on any pre-existing session_ttl_hours value
   const existingTtl = db
     .prepare("SELECT value FROM system_settings WHERE key = 'session_ttl_hours'")
@@ -833,25 +1009,118 @@ function initSchema(db: DatabaseSync): void {
       const clamped = String(Math.max(1, Math.min(24, Number.isFinite(parsedTtl) ? Math.round(parsedTtl) : 24)));
       db.prepare("UPDATE system_settings SET value = ?, updated_at = ? WHERE key = 'session_ttl_hours'").run(
         clamped,
-        new Date().toISOString()
+        migNow
       );
     }
   }
 
-  // Record schema migration version cleanly
-  const migNow = new Date().toISOString();
+  // Migration 11: Global Error & Support Center (support_tickets)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id TEXT PRIMARY KEY,
+      ticket_number TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      province_code TEXT,
+      page_path TEXT NOT NULL,
+      module_name TEXT NOT NULL DEFAULT 'umum',
+      category TEXT NOT NULL DEFAULT 'bug_fungsional',
+      title TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL,
+      screenshot_file_id TEXT,
+      screenshot_file_name TEXT,
+      error_ref_code TEXT,
+      priority TEXT NOT NULL DEFAULT 'sedang',
+      status TEXT NOT NULL DEFAULT 'baru',
+      assigned_to_id TEXT,
+      assigned_to_name TEXT,
+      admin_note TEXT NOT NULL DEFAULT '',
+      resolution_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id);
+    CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status);
+  `);
+
+  // Migration 12: Idempotency Keys, Optimistic Concurrency Versions & Soft-Delete Recovery
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      idem_key TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      status_code INTEGER NOT NULL,
+      response_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (idem_key, user_id, method, path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_idem_created ON idempotency_keys(created_at);
+  `);
+  addColumnIfMissing('proposals', 'soft_deleted_at', 'TEXT');
+  addColumnIfMissing('proposals', 'soft_deleted_by', 'TEXT');
+  addColumnIfMissing('proposals', 'pre_delete_status', 'TEXT');
+  addColumnIfMissing('lkl_reports', 'updated_at', 'TEXT');
+  addColumnIfMissing('lkl_reports', 'soft_deleted_at', 'TEXT');
+  addColumnIfMissing('tasks', 'version', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('tasks', 'updated_at', 'TEXT');
+  addColumnIfMissing('tasks', 'soft_deleted_at', 'TEXT');
+
+  // Migration 13: User Preferences & Accessibility Settings
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id TEXT PRIMARY KEY,
+      start_page TEXT NOT NULL DEFAULT '/beranda',
+      display_scale TEXT NOT NULL DEFAULT 'nyaman',
+      favorite_paths_json TEXT NOT NULL DEFAULT '[]',
+      notification_prefs_json TEXT NOT NULL DEFAULT '{"emailProposal":true,"emailTugas":true,"pengingatSesi":true}',
+      tour_completed_roles_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // Record schema migration versions cleanly (1..13)
   const migStmt = db.prepare('INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)');
   migStmt.run(1, 'baseline_satu_dpbi_v4', migNow);
   migStmt.run(2, 'security_hardening_file_grants_and_24h_session_cap', migNow);
   migStmt.run(3, 'connected_workflow_linkage_and_email_center', migNow);
+  migStmt.run(4, 'personnel_account_invitation_separation', migNow);
+  migStmt.run(5, 'org_structure_and_programs', migNow);
+  migStmt.run(6, 'approval_history_and_programs_sync', migNow);
+  migStmt.run(7, 'email_18_templates_and_html', migNow);
+  migStmt.run(8, 'correspondence_and_document_versioning', migNow);
+  migStmt.run(9, 'handover_package_and_location_proof', migNow);
+  migStmt.run(10, 'maintenance_and_versioning_settings', migNow);
+  migStmt.run(11, 'support_tickets_and_error_center', migNow);
+  migStmt.run(12, 'idempotency_optimistic_concurrency_and_soft_delete', migNow);
+  migStmt.run(13, 'user_preferences_and_accessibility', migNow);
+}
+
+export function createWalSafeSqliteSnapshot(db: DatabaseSync, destFilePath: string): void {
+  const escaped = destFilePath.replace(/'/g, "''");
+  if (fs.existsSync(destFilePath)) {
+    fs.unlinkSync(destFilePath);
+  }
+  db.exec(`VACUUM INTO '${escaped}';`);
+}
+
+export function cleanupSqliteSidecarFiles(dbPath: string): void {
+  for (const suffix of ['-wal', '-shm']) {
+    const sidecar = `${dbPath}${suffix}`;
+    if (fs.existsSync(sidecar)) {
+      fs.unlinkSync(sidecar);
+    }
+  }
 }
 
 export function nextReferenceNumber(
   db: DatabaseSync,
-  category: 'PROP' | 'LKL' | 'LKW' | 'AKUN' | 'DOC' | 'TGS' | 'ADU' | 'INS' | 'PERS' | 'HND',
+  category: 'PROP' | 'LKL' | 'LKW' | 'AKUN' | 'DOC' | 'TGS' | 'ADU' | 'INS' | 'PERS' | 'HND' | 'SURAT' | 'PROG' | 'TIKET',
   year: number = new Date().getFullYear()
 ): string {
-  db.exec('BEGIN IMMEDIATE;');
+  db.exec('SAVEPOINT next_ref_sp;');
   try {
     const existing = db
       .prepare('SELECT last_seq FROM reference_sequences WHERE category = ? AND year = ?')
@@ -870,10 +1139,11 @@ export function nextReferenceNumber(
         nextSeq
       );
     }
-    db.exec('COMMIT;');
+    db.exec('RELEASE SAVEPOINT next_ref_sp;');
     return `DPBI/${category}/${year}/${String(nextSeq).padStart(4, '0')}`;
   } catch (err) {
-    db.exec('ROLLBACK;');
+    db.exec('ROLLBACK TO SAVEPOINT next_ref_sp;');
+    db.exec('RELEASE SAVEPOINT next_ref_sp;');
     throw err;
   }
 }
