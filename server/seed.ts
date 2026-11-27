@@ -898,7 +898,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Undangan Aktivasi Akun Resmi SATU DPBI',
       'Akun & Aktivasi',
       '[SATU DPBI] Undangan Aktivasi Akun {{jabatan}} - {{provinsi}}',
-      'Yth. {{nama}},\\n\\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\\nSilakan selesaikan aktivasi melalui tautan undangan resmi yang diberikan oleh admin sebelum {{tanggal}}.\\n\\nReferensi: {{referensi}}\\nSatu Sistem, Satu Data, Satu Koordinasi.',
+      'Yth. {{nama}},\n\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi yang diberikan oleh admin sebelum {{tanggal}}.\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
     ],
     [
       'etpl-2',
@@ -906,7 +906,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Pengingat Batas Laporan Bulanan Wilayah',
       'Koordinasi Wilayah',
       '[Pengingat] Laporan Bulanan Wilayah {{provinsi}} — Batas {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\\n\\nMohon lengkapi rekap LKL dan unggah Laporan Bulanan Koordinator Wilayah melalui modul Laporan Koordinator sebelum {{tanggal}}.\\n\\nReferensi: {{referensi}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon lengkapi rekap LKL dan unggah Laporan Bulanan Koordinator Wilayah melalui modul Laporan Koordinator sebelum {{tanggal}}.\n\nReferensi: {{referensi}}',
     ],
     [
       'etpl-3',
@@ -914,7 +914,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Informasi Resmi Kegiatan Nasional / Wilayah',
       'Kegiatan',
       '[Informasi Kegiatan] Pemberitahuan Program {{angkatan}} — {{provinsi}}',
-      'Yth. {{nama}},\\n\\nDengan hormat,\\n\\nKami menyampaikan informasi kegiatan/program DPBI untuk wilayah {{provinsi}}. Mohon memperhatikan jadwal dan ketentuan kegiatan yang tercantum pada kanal koordinasi resmi.\\n\\nTanggal pelaksanaan: {{tanggal}}\\nReferensi: {{referensi}}\\n\\nDemikian informasi ini disampaikan. Terima kasih atas perhatian dan kerja sama Anda.\\n\\nHormat kami,\\nSekretariat Nasional\\nDuta Pelajar Berbudaya Indonesia',
+      'Yth. {{nama}},\n\nDengan hormat,\n\nKami menyampaikan informasi kegiatan/program DPBI untuk wilayah {{provinsi}}. Mohon memperhatikan jadwal dan ketentuan kegiatan yang tercantum pada kanal koordinasi resmi.\n\nTanggal pelaksanaan: {{tanggal}}\nReferensi: {{referensi}}\n\nDemikian informasi ini disampaikan. Terima kasih atas perhatian dan kerja sama Anda.\n\nHormat kami,\nSekretariat Nasional\nDuta Pelajar Berbudaya Indonesia',
     ],
     [
       'etpl-4',
@@ -922,7 +922,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Pengingat Masa Transisi Alumni (30 Hari)',
       'Alumni',
       '[SATU DPBI] Pengingat Jendela Arsip Alumni — {{nama}}',
-      'Yth. {{nama}},\\n\\nMasa tugas {{angkatan}} telah berakhir dan akun Anda berada pada jendela akses arsip alumni 30 hari hingga {{tanggal}}. Mohon unduh sertifikat dan portofolio kegiatan Anda melalui menu Arsip.\\n\\nReferensi: {{referensi}}',
+      'Yth. {{nama}},\n\nMasa tugas {{angkatan}} telah berakhir dan akun Anda berada pada jendela akses arsip alumni 30 hari hingga {{tanggal}}. Mohon unduh sertifikat dan portofolio kegiatan Anda melalui menu Arsip.\n\nReferensi: {{referensi}}',
     ],
     [
       'etpl-5',
@@ -930,7 +930,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Pengumuman Resmi Organisasi',
       'Informasi & Pengumuman',
       '[PENGUMUMAN RESMI DPBI] {{referensi}}',
-      'Yth. {{nama}},\\n\\nDengan hormat,\\n\\nMelalui email ini, Duta Pelajar Berbudaya Indonesia menyampaikan pengumuman resmi terkait {{referensi}}. Mohon membaca informasi yang disampaikan dan memperhatikan ketentuan serta jadwal yang berlaku mulai {{tanggal}}.\\n\\nApabila diperlukan tindak lanjut, silakan berkoordinasi melalui kanal resmi organisasi.\\n\\nTerima kasih atas perhatian dan kerja sama Anda.\\n\\nHormat kami,\\nSekretariat Nasional\\nDuta Pelajar Berbudaya Indonesia',
+      'Yth. {{nama}},\n\nDengan hormat,\n\nMelalui email ini, Duta Pelajar Berbudaya Indonesia menyampaikan pengumuman resmi terkait {{referensi}}. Mohon membaca informasi yang disampaikan dan memperhatikan ketentuan serta jadwal yang berlaku mulai {{tanggal}}.\n\nApabila diperlukan tindak lanjut, silakan berkoordinasi melalui kanal resmi organisasi.\n\nTerima kasih atas perhatian dan kerja sama Anda.\n\nHormat kami,\nSekretariat Nasional\nDuta Pelajar Berbudaya Indonesia',
     ],
     [
       'etpl-6',
@@ -938,7 +938,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Undangan Rapat / Koordinasi',
       'Undangan & Koordinasi',
       '[UNDANGAN] Rapat Koordinasi DPBI — {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}}),\\n\\nDengan hormat,\\n\\nDalam rangka memperkuat koordinasi dan kelancaran pelaksanaan program Duta Pelajar Berbudaya Indonesia, kami mengundang Anda untuk mengikuti rapat/koordinasi yang akan dilaksanakan pada:\\n\\nHari/Tanggal: {{tanggal}}\\nAgenda: {{referensi}}\\nMedia/Tempat: Akan diinformasikan melalui kanal koordinasi resmi.\\n\\nMohon memberikan konfirmasi kehadiran kepada sekretariat melalui kanal komunikasi yang telah ditetapkan.\\n\\nAtas perhatian dan kesediaannya, kami ucapkan terima kasih.\\n\\nHormat kami,\\nSekretariat DPBI',
+      'Yth. {{nama}} ({{jabatan}}),\n\nDengan hormat,\n\nDalam rangka memperkuat koordinasi dan kelancaran pelaksanaan program Duta Pelajar Berbudaya Indonesia, kami mengundang Anda untuk mengikuti rapat/koordinasi yang akan dilaksanakan pada:\n\nHari/Tanggal: {{tanggal}}\nAgenda: {{referensi}}\nMedia/Tempat: Akan diinformasikan melalui kanal koordinasi resmi.\n\nMohon memberikan konfirmasi kehadiran kepada sekretariat melalui kanal komunikasi yang telah ditetapkan.\n\nAtas perhatian dan kesediaannya, kami ucapkan terima kasih.\n\nHormat kami,\nSekretariat DPBI',
     ],
     [
       'etpl-7',
@@ -946,7 +946,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Pengingat Tugas dan Tenggat Waktu',
       'Tugas & Administrasi',
       '[PENGINGAT TUGAS] {{referensi}} — Batas {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}}),\\n\\nKami mengingatkan bahwa terdapat tugas/administrasi yang perlu ditindaklanjuti dengan rincian:\\n\\nUraian: {{referensi}}\\nBatas waktu: {{tanggal}}\\n\\nMohon menyelesaikan dan memperbarui status tugas melalui portal SATU DPBI sebelum batas waktu tersebut. Jika terdapat kendala, sampaikan kepada penanggung jawab terkait melalui kanal koordinasi resmi.\\n\\nTerima kasih atas perhatian dan tanggung jawab Anda.\\n\\nSalam,\\nSekretariat DPBI',
+      'Yth. {{nama}} ({{jabatan}}),\n\nKami mengingatkan bahwa terdapat tugas/administrasi yang perlu ditindaklanjuti dengan rincian:\n\nUraian: {{referensi}}\nBatas waktu: {{tanggal}}\n\nMohon menyelesaikan dan memperbarui status tugas melalui portal SATU DPBI sebelum batas waktu tersebut. Jika terdapat kendala, sampaikan kepada penanggung jawab terkait melalui kanal koordinasi resmi.\n\nTerima kasih atas perhatian dan tanggung jawab Anda.\n\nSalam,\nSekretariat DPBI',
     ],
     [
       'etpl-8',
@@ -954,7 +954,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Pemberitahuan Status Pengajuan',
       'Administrasi & Persetujuan',
       '[PEMBARUAN STATUS] Pengajuan {{referensi}}',
-      'Yth. {{nama}},\\n\\nKami menyampaikan pembaruan status atas pengajuan dengan referensi {{referensi}}.\\n\\nStatus terbaru: Silakan periksa detail keputusan dan catatan verifikasi pada portal SATU DPBI.\\nTanggal pembaruan: {{tanggal}}\\n\\nApabila diperlukan perbaikan atau informasi tambahan, petunjuk akan tercantum pada detail pengajuan.\\n\\nTerima kasih.\\n\\nHormat kami,\\nSekretariat DPBI',
+      'Yth. {{nama}},\n\nKami menyampaikan pembaruan status atas pengajuan dengan referensi {{referensi}}.\n\nStatus terbaru: Silakan periksa detail keputusan dan catatan verifikasi pada portal SATU DPBI.\nTanggal pembaruan: {{tanggal}}\n\nApabila diperlukan perbaikan atau informasi tambahan, petunjuk akan tercantum pada detail pengajuan.\n\nTerima kasih.\n\nHormat kami,\nSekretariat DPBI',
     ],
     [
       'etpl-9',
@@ -962,7 +962,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Permintaan Perbaikan / Kelengkapan Data',
       'Administrasi & Verifikasi',
       '[TINDAK LANJUT] Kelengkapan Data {{referensi}}',
-      'Yth. {{nama}},\\n\\nBerdasarkan pemeriksaan administrasi, masih terdapat bagian data/berkas yang perlu dilengkapi atau diperbaiki pada pengajuan {{referensi}}.\\n\\nMohon meninjau catatan verifikasi pada portal SATU DPBI dan melakukan pembaruan paling lambat {{tanggal}}. Pastikan seluruh informasi yang disampaikan benar dan sesuai dokumen pendukung.\\n\\nJika Anda telah melakukan pembaruan, email ini dapat diabaikan.\\n\\nTerima kasih atas kerja sama Anda.\\n\\nHormat kami,\\nSekretariat DPBI',
+      'Yth. {{nama}},\n\nBerdasarkan pemeriksaan administrasi, masih terdapat bagian data/berkas yang perlu dilengkapi atau diperbaiki pada pengajuan {{referensi}}.\n\nMohon meninjau catatan verifikasi pada portal SATU DPBI dan melakukan pembaruan paling lambat {{tanggal}}. Pastikan seluruh informasi yang disampaikan benar dan sesuai dokumen pendukung.\n\nJika Anda telah melakukan pembaruan, email ini dapat diabaikan.\n\nTerima kasih atas kerja sama Anda.\n\nHormat kami,\nSekretariat DPBI',
     ],
     [
       'etpl-10',
@@ -970,7 +970,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Tindak Lanjut Hasil Koordinasi',
       'Koordinasi Organisasi',
       '[TINDAK LANJUT KOORDINASI] {{referensi}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\\n\\nMenindaklanjuti koordinasi sebelumnya terkait {{referensi}}, kami memohon agar poin-poin tindak lanjut dapat diperhatikan dan diselesaikan sesuai pembagian tugas serta jadwal yang telah disepakati.\\n\\nTarget tindak lanjut: {{tanggal}}\\n\\nApabila terdapat perkembangan atau kendala, mohon menyampaikan pembaruan melalui kanal koordinasi resmi agar dapat ditindaklanjuti bersama.\\n\\nTerima kasih atas perhatian dan kolaborasinya.\\n\\nHormat kami,\\nSekretariat DPBI',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMenindaklanjuti koordinasi sebelumnya terkait {{referensi}}, kami memohon agar poin-poin tindak lanjut dapat diperhatikan dan diselesaikan sesuai pembagian tugas serta jadwal yang telah disepakati.\n\nTarget tindak lanjut: {{tanggal}}\n\nApabila terdapat perkembangan atau kendala, mohon menyampaikan pembaruan melalui kanal koordinasi resmi agar dapat ditindaklanjuti bersama.\n\nTerima kasih atas perhatian dan kolaborasinya.\n\nHormat kami,\nSekretariat DPBI',
     ],
     [
       'etpl-11',
@@ -978,7 +978,7 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Ucapan Terima Kasih dan Apresiasi',
       'Apresiasi',
       '[APRESIASI DPBI] Terima Kasih atas Kontribusi Anda',
-      'Yth. {{nama}},\\n\\nDuta Pelajar Berbudaya Indonesia menyampaikan terima kasih dan apresiasi atas waktu, partisipasi, serta kontribusi Anda dalam mendukung pelaksanaan {{referensi}}.\\n\\nSemoga pengalaman dan kerja sama yang terjalin dapat terus memberikan manfaat bagi penguatan pendidikan dan kebudayaan Indonesia.\\n\\nTanggal: {{tanggal}}\\n\\nSalam budaya,\\nDuta Pelajar Berbudaya Indonesia',
+      'Yth. {{nama}},\n\nDuta Pelajar Berbudaya Indonesia menyampaikan terima kasih dan apresiasi atas waktu, partisipasi, serta kontribusi Anda dalam mendukung pelaksanaan {{referensi}}.\n\nSemoga pengalaman dan kerja sama yang terjalin dapat terus memberikan manfaat bagi penguatan pendidikan dan kebudayaan Indonesia.\n\nTanggal: {{tanggal}}\n\nSalam budaya,\nDuta Pelajar Berbudaya Indonesia',
     ],
   ];
 
