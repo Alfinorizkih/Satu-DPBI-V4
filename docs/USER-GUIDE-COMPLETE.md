@@ -15,7 +15,8 @@
    - Masuk menggunakan email & kata sandi resmi, aktivasi token undangan (`72 jam`, sekali pakai), atau pengaturan ulang kata sandi.
    - Pada mode evaluasi (`DEMO_MODE=true`), panel pilih akun simulasi tersedia di halaman `/login`.
 3. **Portal Internal (Sesuai Role & 6 Bidang Resmi)**
-   - Menggunakan menu sidebar terkelompok (*Utama, Organisasi, Operasional, Informasi, Pengelolaan*), pencarian cepat (`Ctrl+K`), mode Terang/Gelap, serta banner peringatan otomatis saat *Mode Pemeliharaan* aktif.
+   - Setelah masuk, pengguna diarahkan ke **Beranda Saya (`/beranda`)** yang disesuaikan dengan peran (atau halaman awal pilihan pada *Pengaturan -> Tampilan*).
+   - Dilengkapi menu sidebar terkelompok (*Utama, Organisasi, Operasional, Informasi, Pengelolaan*), pencarian cepat (`Ctrl+K`), tombol bantuan kontekstual (`?`) & tur interaktif peran, Pusat Kendala (`/kendala`), mode Terang/Gelap, serta banner peringatan otomatis saat *Mode Pemeliharaan* aktif.
 
 ---
 
@@ -40,8 +41,8 @@
   - Unduh templat resmi CSV, unggah atau tempel CSV dengan pemetaan kolom & pratinjau validasi per baris (duplikasi NISN/email/nomor anggota ditolak otomatis), serta batalkan (*rollback*) batch impor bila diperlukan (baris yang sudah ditautkan ke akun aktif tetap terlindungi).
 - **Persuratan Digital & Disposisi (`/persuratan`)**:
   - Mencatat Surat Masuk/Keluar dengan penomoran atomik `DPBI/SURAT/[TAHUN]/[URUTAN]`, mengunggah lampiran surat, dan menerbitkan Disposisi beserta tenggat tindak lanjut ke Bidang atau Koordinator Wilayah.
-- **Pusat Email 18 Templat Resmi (`/email`)**:
-  - Menggunakan 18 templat resmi DPBI dengan 11 variabel aman (`{{nama}}`, `{{email}}`, `{{role}}`, `{{wilayah}}`, `{{periode}}`, `{{tanggal}}`, `{{nomor_surat}}`, `{{judul_kegiatan}}`, `{{tenggat}}`, `{{tautan}}`, `{{catatan}}`), editor Teks & HTML + pratinjau langsung, riwayat perubahan templat, impor audiens CSV, dan penjadwalan pengiriman.
+- **Pusat Email 50 Templat Resmi (`/email`)**:
+  - Menggunakan **50 templat resmi DPBI** (dapat diaktifkan/nonaktifkan) dengan **20 variabel aman** (`{{nama}}`, `{{email}}`, `{{jabatan}}`, `{{role}}`, `{{provinsi}}`, `{{kabupaten}}`, `{{angkatan}}`, `{{nomor_anggota}}`, `{{nomor_surat}}`, `{{nomor_pengajuan}}`, `{{nama_program}}`, `{{tanggal}}`, `{{tenggat}}`, `{{tautan}}`, `{{tautan_aktivasi}}`, `{{tautan_dokumen}}`, `{{catatan_pemeriksa}}`, `{{nama_pemeriksa}}`, `{{nama_organisasi}}`, `{{referensi}}`), editor Teks & HTML anti-XSS + pratinjau langsung, lampiran berkas, impor audiens CSV (RFC-4180), serta antrean pengiriman bertahap lengkap dengan jeda/lanjut/batal.
 
 ### C. Pengurus Nasional (6 Bidang Resmi)
 - **Bidang Resmi DPBI**:
@@ -78,7 +79,10 @@
 
 ---
 
-## 3. Catatan Keamanan & Kebersihan Data
+## 3. Fitur Kenyamanan, Bantuan & Keandalan Operasional
+- **Beranda Saya (`/beranda`) & Tampilan (`/pengaturan`)**: Atur halaman awal, skala tampilan (*Ringkas, Nyaman, Besar*), dan pintasan favorit pribadi sesuai peran Anda.
+- **Pelacak Proses (`Process Tracker`) & Formulir Bertahap**: Proposal dan LKL dilengkapi langkah terpandu, indikator kelengkapan, penyimpanan *draft* otomatis, dan lini masa pemeriksa yang transparan.
+- **Pusat Bantuan (`?`) & Pusat Kendala (`/kendala`)**: Buka panduan halaman atau tur peran kapan saja, serta kirim tiket laporan kendala beserta tangkapan layar ke Super Admin / Sekretariat Nasional.
 - **Perlindungan Data Pelajar (U18)**: Data sensitif pelajar (NISN, alamat, kontak wali, laporan *safeguarding*) disamarkan sesuai peran dan setiap akses maupun ekspor terekam dalam `Audit Log`.
 - **Dokumen & Versi Usang (`/dokumen`)**: Dokumen yang digantikan versi baru (`replaced_by_id`) menampilkan spanduk peringatan agar pengguna merujuk versi mutakhir.
 - **Cetak Resmi A4**: Gunakan tombol **Cetak** di Wilayah, Personalia, Struktur Organisasi, Proposal, LKL, Dokumen Resmi, dan Arsip untuk menghasilkan dokumen berstandar A4.

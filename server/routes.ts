@@ -38,6 +38,7 @@ import {
   recordApprovalHistory,
 } from './workflow';
 import { csvSafeCell } from '../src/lib/rbac';
+import { sendTransactionalEmail } from './email';
 import {
   calculateAlumniWindow,
   calculateProfileCompleteness,
@@ -140,6 +141,8 @@ function maskPersonnelRow(row: Record<string, unknown>, viewer: AuthenticatedReq
     completenessScore: comp.score,
     missingFields: comp.missingFields,
     restrictedFieldsMasked: !canSeeSensitive,
+    archivedAt: row.archived_at ? String(row.archived_at) : null,
+    archivedReason: row.archived_reason ? String(row.archived_reason) : null,
   };
 }
 
@@ -467,8 +470,9 @@ export function registerCoreRoutes(app: Express): void {
       return;
     }
 
-    if (userRow.account_status === 'nonaktif' || userRow.account_status === 'terkunci') {
-      res.status(403).json({ error: 'Akun ini sedang dinonaktifkan atau terkunci.', code: 403 });
+    if (['nonaktif', 'terkunci', 'ditangguhkan', 'dibatalkan'].includes(String(userRow.account_status))) {
+      const reasonMsg = userRow.suspended_reason ? ` Alasan: ${String(userRow.suspended_reason)}` : '';
+      res.status(403).json({ error: `Akun ini sedang berstatus ${String(userRow.account_status)} dan tidak dapat masuk.${reasonMsg}`, code: 403 });
       return;
     }
 
@@ -683,7 +687,7 @@ export function registerCoreRoutes(app: Express): void {
     res.json({ logs });
   });
 
-  app.post('/api/auth/request-reset', (req, res: Response) => {
+  app.post('/api/auth/request-reset', async (req, res: Response) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const throttle = checkGenericThrottle(`reset-req:${req.ip || 'local'}:${email}`, 5, 15 * 60_000);
     if (!throttle.allowed) {
@@ -695,8 +699,8 @@ export function registerCoreRoutes(app: Express): void {
       return;
     }
     const db = getDb();
-    const user = db.prepare('SELECT id, full_name, role FROM users WHERE email = ?').get(email) as
-      | { id: string; full_name: string; role: string }
+    const user = db.prepare('SELECT id, full_name, role, province_code FROM users WHERE email = ?').get(email) as
+      | { id: string; full_name: string; role: string; province_code: string | null }
       | undefined;
     writeAuditLog(
       db,
@@ -714,6 +718,24 @@ export function registerCoreRoutes(app: Express): void {
       db.prepare(
         'INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
       ).run(crypto.randomUUID(), user.id, tokenHash, expiresAt, new Date().toISOString());
+
+      const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+      const provName = user.province_code ? PROVINCE_BY_CODE.get(user.province_code)?.name ?? 'Nasional' : 'Nasional';
+      await sendTransactionalEmail(db, {
+        templateCode: 'reset_password',
+        toEmail: email,
+        toName: user.full_name,
+        userId: user.id,
+        role: ROLE_LABELS[user.role as RoleCode] ?? user.role,
+        provinsi: provName,
+        tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(expiresAt)),
+        tautan: `${appUrl}/reset-sandi?token=${rawToken}`,
+        fallbackSubject: `[SATU DPBI] Permintaan Reset Kata Sandi — ${user.full_name}`,
+        fallbackBody: `Yth. ${user.full_name},\n\nGunakan tautan berikut untuk mengatur ulang kata sandi Anda (berlaku 60 menit): ${appUrl}/reset-sandi?token=${rawToken}`,
+        actorId: user.id,
+        actorName: user.full_name,
+      });
+
       // Return token ONLY in isolated demo mode for testing; in production send via SMTP
       res.json({
         ok: true,
@@ -1889,7 +1911,11 @@ export function registerCoreRoutes(app: Express): void {
   app.get('/api/personnel', requireAuth, requirePermission('personalia', 'view'), (req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const user = req.authUser!;
+    const includeArchived = req.query.includeArchived === '1' && ['super_admin', 'wakil_super_admin', 'sekretariat_nasional', 'koordinator_wilayah'].includes(user.role);
     let sql = `SELECT p.*, b.name AS batch_name FROM personnel p LEFT JOIN batches b ON b.id = p.batch_id WHERE 1=1`;
+    if (!includeArchived) {
+      sql += ' AND p.archived_at IS NULL';
+    }
     const params: string[] = [];
 
     if (user.role === 'duta' || user.role === 'alumni') {
@@ -2167,6 +2193,95 @@ export function registerCoreRoutes(app: Express): void {
     res.json({ ok: true });
   });
 
+  app.post('/api/personnel/:id/archive', requireAuth, requirePermission('personalia', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const user = req.authUser!;
+    if (user.role === 'duta' || user.role === 'alumni') {
+      res.status(403).json({ error: 'Hanya Koordinator atau Pengelola Nasional yang dapat mengarsipkan data personel.' });
+      return;
+    }
+    const id = String(req.params.id);
+    const existing = db.prepare('SELECT * FROM personnel WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Personel tidak ditemukan.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(existing.province_code)) {
+      res.status(403).json({ error: 'Koordinator hanya dapat mengarsipkan personel di provinsinya.' });
+      return;
+    }
+    if (existing.archived_at) {
+      res.status(409).json({ error: 'Personel ini sudah berstatus arsip.' });
+      return;
+    }
+    const reason = String(req.body?.reason || 'Diarsipkan dari direktori aktif operasional').trim();
+    const now = new Date().toISOString();
+    db.prepare(
+      "UPDATE personnel SET personnel_status = 'diarsipkan', archived_at = ?, archived_reason = ?, archived_by = ?, updated_at = ? WHERE id = ?"
+    ).run(now, reason, user.fullName, now, id);
+    writeAuditLog(db, user, 'ARCHIVE_PERSONNEL', 'personnel', String(existing.reference_number), 'berhasil', reason);
+    res.json({ ok: true, archivedAt: now });
+  });
+
+  app.post('/api/personnel/:id/restore', requireAuth, requirePermission('personalia', 'edit'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const user = req.authUser!;
+    if (user.role === 'duta' || user.role === 'alumni') {
+      res.status(403).json({ error: 'Hanya Koordinator atau Pengelola Nasional yang dapat memulihkan arsip personel.' });
+      return;
+    }
+    const id = String(req.params.id);
+    const existing = db.prepare('SELECT * FROM personnel WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Personel tidak ditemukan.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(existing.province_code)) {
+      res.status(403).json({ error: 'Koordinator hanya dapat memulihkan personel di provinsinya.' });
+      return;
+    }
+    const now = new Date().toISOString();
+    db.prepare(
+      "UPDATE personnel SET personnel_status = 'aktif', archived_at = NULL, archived_reason = NULL, archived_by = NULL, updated_at = ? WHERE id = ?"
+    ).run(now, id);
+    writeAuditLog(db, user, 'RESTORE_PERSONNEL', 'personnel', String(existing.reference_number), 'berhasil', 'Dipulihkan ke direktori aktif');
+    res.json({ ok: true });
+  });
+
+  app.delete('/api/personnel/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const user = req.authUser!;
+    if (user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Hanya Super Admin yang dapat melakukan penghapusan permanen data personel tanpa riwayat.' });
+      return;
+    }
+    const id = String(req.params.id);
+    const existing = db.prepare('SELECT * FROM personnel WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Personel tidak ditemukan.' });
+      return;
+    }
+    const hasLinked =
+      Boolean(existing.user_id) ||
+      Boolean(db.prepare('SELECT 1 FROM users WHERE personnel_id = ? LIMIT 1').get(id)) ||
+      Boolean(db.prepare('SELECT 1 FROM proposals WHERE applicant_personnel_id = ? LIMIT 1').get(id)) ||
+      Boolean(db.prepare('SELECT 1 FROM lkl_reports WHERE submitter_personnel_id = ? LIMIT 1').get(id)) ||
+      Boolean(db.prepare('SELECT 1 FROM evaluations WHERE personnel_id = ? LIMIT 1').get(id)) ||
+      Boolean(db.prepare('SELECT 1 FROM org_position_history WHERE personnel_id = ? LIMIT 1').get(id));
+
+    if (hasLinked) {
+      res.status(409).json({
+        error: 'Personel ini memiliki riwayat akun, proposal, LKL, evaluasi, atau jabatan yang terhubung. Gunakan fitur Arsipkan agar integritas audit tetap terjaga.',
+        code: 409,
+      });
+      return;
+    }
+
+    db.prepare('DELETE FROM personnel WHERE id = ?').run(id);
+    writeAuditLog(db, user, 'DELETE_PERSONNEL_PERMANENT', 'personnel', String(existing.reference_number), 'berhasil', `Hapus permanen: ${String(existing.full_name)}`);
+    res.json({ ok: true });
+  });
+
   app.get('/api/personnel/import-template', requireAuth, requirePermission('personalia', 'view'), (_req, res: Response) => {
     const header = ['fullName', 'email', 'provinceCode', 'schoolName', 'batchId', 'nisn', 'phone', 'regency', 'positionTitle', 'bidang', 'roleCode'];
     const sample = ['Alya Ramadhani', 'alya.calon@dpbi.or.id', '32', 'SMAN 3 Bandung', 'batch-3', '0089123456', '081234567890', 'Kota Bandung', 'Duta Pelajar Berbudaya', 'Bidang Pendidikan & Kebudayaan', 'duta'];
@@ -2205,15 +2320,27 @@ export function registerCoreRoutes(app: Express): void {
         const nisn = String(r.nisn || '').trim();
         const memberNoInput = String(r.memberNumber || '').trim();
         const prov = String(r.provinceCode || user.provinceCode || '31').trim();
+        const requestedRole = String(r.roleCode || 'duta').trim().toLowerCase();
 
-        if (!email || !fullName) {
-          skipped.push({ row: i + 1, email: email || '(kosong)', reason: 'Nama atau email kosong' });
+        if (!email || !fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          skipped.push({ row: i + 1, email: email || '(kosong)', reason: 'Nama kosong atau format email tidak valid' });
+          continue;
+        }
+        if (requestedRole === 'super_admin' || requestedRole === 'wakil_super_admin') {
+          skipped.push({ row: i + 1, email, reason: `Hak peran '${requestedRole}' tidak dapat diberikan melalui impor CSV.` });
+          continue;
+        }
+        if (!PROVINCE_BY_CODE.has(prov)) {
+          skipped.push({ row: i + 1, email, reason: `Kode provinsi '${prov}' tidak dikenal (gunakan kode resmi BPS 2 digit).` });
           continue;
         }
         if (user.role === 'koordinator_wilayah' && prov !== user.provinceCode) {
           skipped.push({ row: i + 1, email, reason: `Di luar wilayah Koordinator (${prov})` });
           continue;
         }
+        const safeRoleCode = user.role === 'koordinator_wilayah'
+          ? 'duta'
+          : (ROLE_LABELS[requestedRole as RoleCode] ? requestedRole : 'duta');
         const dupEmail = db.prepare('SELECT id FROM personnel WHERE LOWER(email) = ?').get(email);
         if (dupEmail) {
           skipped.push({ row: i + 1, email, reason: 'Email duplikat sudah terdaftar' });
@@ -2251,9 +2378,9 @@ export function registerCoreRoutes(app: Express): void {
           String(r.schoolName || ''),
           nisn,
           String(r.batchId || 'batch-3'),
-          String(r.positionTitle || 'Duta Pelajar Berbudaya'),
+          String(r.positionTitle || ROLE_LABELS[safeRoleCode as RoleCode] || 'Duta Pelajar Berbudaya'),
           String(r.bidang || 'Bidang Pendidikan & Kebudayaan'),
-          String(r.roleCode || 'duta'),
+          safeRoleCode,
           batchImportId,
           now,
           now
@@ -2366,7 +2493,7 @@ export function registerCoreRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/invitations', requireAuth, requirePermission('personalia', 'create'), (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/invitations', requireAuth, requirePermission('personalia', 'create'), async (req: AuthenticatedRequest, res: Response) => {
     const { email, fullName, role, provinceCode, batchId, personnelId } = req.body ?? {};
     if (!email || !fullName) {
       res.status(422).json({ error: 'Nama lengkap dan email penerima undangan wajib diisi.' });
@@ -2375,20 +2502,39 @@ export function registerCoreRoutes(app: Express): void {
     const db = getDb();
     const user = req.authUser!;
     const cleanEmail = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      res.status(422).json({ error: 'Format alamat email tidak valid.' });
+      return;
+    }
     const existingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
     if (existingUser) {
       res.status(409).json({ error: 'Email tersebut sudah memiliki akun login aktif.' });
       return;
     }
-    const prov = provinceCode ? String(provinceCode) : (user.provinceCode || '31');
-    if (user.role === 'koordinator_wilayah' && user.provinceCode && prov !== user.provinceCode) {
+    const requestedRole = String(role || 'duta');
+    if (requestedRole === 'super_admin' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Hanya Super Admin yang dapat mengundang peran Super Admin baru.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && requestedRole !== 'duta') {
+      res.status(403).json({ error: 'Koordinator Wilayah hanya dapat mengajukan atau mengundang akun Duta.' });
+      return;
+    }
+    const prov = user.role === 'koordinator_wilayah' && user.provinceCode
+      ? user.provinceCode
+      : (provinceCode ? String(provinceCode) : (user.provinceCode || '31'));
+    if (user.role === 'koordinator_wilayah' && user.provinceCode && provinceCode && String(provinceCode) !== user.provinceCode) {
       res.status(403).json({ error: 'Koordinator hanya dapat mengirim undangan untuk provinsinya sendiri.' });
       return;
     }
+
+    const ttlSetting = db.prepare("SELECT value FROM system_settings WHERE key = 'invite_expiry_hours'").get() as { value: string } | undefined;
+    const ttlHours = Math.max(12, Math.min(336, Number(ttlSetting?.value || 72) || 72));
     const id = crypto.randomUUID();
     const rawToken = crypto.randomBytes(20).toString('hex');
     const now = new Date().toISOString();
-    const exp = new Date(Date.now() + 72 * 3600000).toISOString();
+    const exp = new Date(Date.now() + ttlHours * 3600000).toISOString();
+    const finalRole = ROLE_LABELS[requestedRole as RoleCode] ? requestedRole : 'duta';
 
     db.prepare(
       `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, personnel_id, token_hash, status, resend_count, last_sent_at, expires_at, created_by, created_at)
@@ -2397,7 +2543,7 @@ export function registerCoreRoutes(app: Express): void {
       id,
       cleanEmail,
       String(fullName).trim(),
-      String(role || 'duta'),
+      finalRole,
       prov,
       String(batchId || 'batch-3'),
       personnelId ? String(personnelId) : null,
@@ -2408,7 +2554,25 @@ export function registerCoreRoutes(app: Express): void {
       now
     );
 
-    writeAuditLog(db, user, 'CREATE_INVITATION', 'invitation', cleanEmail, 'berhasil', `Role: ${role || 'duta'}`);
+    const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+    const provName = PROVINCE_BY_CODE.get(prov)?.name ?? 'Nasional';
+    await sendTransactionalEmail(db, {
+      templateCode: 'undangan_akun',
+      toEmail: cleanEmail,
+      toName: String(fullName).trim(),
+      role: ROLE_LABELS[finalRole as RoleCode] ?? finalRole,
+      provinsi: provName,
+      referenceCode: id.slice(0, 8).toUpperCase(),
+      tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(exp)),
+      tautan: `${appUrl}/aktivasi-undangan?token=${rawToken}`,
+      tautanAktivasi: `${appUrl}/aktivasi-undangan?token=${rawToken}`,
+      fallbackSubject: `[SATU DPBI] Undangan Aktivasi Akun ${ROLE_LABELS[finalRole as RoleCode] ?? finalRole}`,
+      fallbackBody: `Yth. ${String(fullName).trim()},\n\nAkun resmi Anda telah disiapkan. Aktivasi melalui tautan: ${appUrl}/aktivasi-undangan?token=${rawToken}`,
+      actorId: user.id,
+      actorName: user.fullName,
+    });
+
+    writeAuditLog(db, user, 'CREATE_INVITATION', 'invitation', cleanEmail, 'berhasil', `Role: ${finalRole}`);
     res.status(201).json({
       ok: true,
       id,
@@ -2418,13 +2582,17 @@ export function registerCoreRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/invitations/:id/resend', requireAuth, requirePermission('personalia', 'create'), (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/invitations/:id/resend', requireAuth, requirePermission('personalia', 'create'), async (req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const user = req.authUser!;
     const id = String(req.params.id);
     const inv = db.prepare('SELECT * FROM invitations WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     if (!inv) {
       res.status(404).json({ error: 'Undangan tidak ditemukan.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(inv.province_code)) {
+      res.status(403).json({ error: 'Koordinator hanya dapat mengelola undangan provinsinya.' });
       return;
     }
     if (String(inv.status) === 'aktif' || inv.used_at || String(inv.status) === 'dibatalkan') {
@@ -2438,9 +2606,11 @@ export function registerCoreRoutes(app: Express): void {
       return;
     }
 
+    const ttlSetting = db.prepare("SELECT value FROM system_settings WHERE key = 'invite_expiry_hours'").get() as { value: string } | undefined;
+    const ttlHours = Math.max(12, Math.min(336, Number(ttlSetting?.value || 72) || 72));
     const rawToken = crypto.randomBytes(20).toString('hex');
     const now = new Date().toISOString();
-    const exp = new Date(Date.now() + 72 * 3600000).toISOString();
+    const exp = new Date(Date.now() + ttlHours * 3600000).toISOString();
     const nextResend = Number(inv.resend_count || 0) + 1;
 
     db.prepare(
@@ -2448,6 +2618,24 @@ export function registerCoreRoutes(app: Express): void {
        SET token_hash = ?, status = 'undangan_terkirim', resend_count = ?, last_sent_at = ?, expires_at = ?
        WHERE id = ?`
     ).run(sha256(rawToken), nextResend, now, exp, id);
+
+    const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+    const provName = inv.province_code ? PROVINCE_BY_CODE.get(String(inv.province_code))?.name ?? 'Nasional' : 'Nasional';
+    await sendTransactionalEmail(db, {
+      templateCode: 'kirim_ulang_undangan',
+      toEmail: String(inv.email),
+      toName: String(inv.full_name),
+      role: ROLE_LABELS[String(inv.role) as RoleCode] ?? String(inv.role),
+      provinsi: provName,
+      referenceCode: id.slice(0, 8).toUpperCase(),
+      tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(exp)),
+      tautan: `${appUrl}/aktivasi-undangan?token=${rawToken}`,
+      tautanAktivasi: `${appUrl}/aktivasi-undangan?token=${rawToken}`,
+      fallbackSubject: `[SATU DPBI] Pengingat & Tautan Baru Aktivasi Akun — ${String(inv.full_name)}`,
+      fallbackBody: `Yth. ${String(inv.full_name)},\n\nTautan aktivasi terbaru Anda: ${appUrl}/aktivasi-undangan?token=${rawToken}. Tautan lama otomatis dinonaktifkan.`,
+      actorId: user.id,
+      actorName: user.fullName,
+    });
 
     writeAuditLog(db, user, 'RESEND_INVITATION', 'invitation', String(inv.email), 'berhasil', `Kirim ulang ke-${nextResend}`);
     res.json({
@@ -2502,6 +2690,17 @@ export function registerCoreRoutes(app: Express): void {
         provinceName: PROVINCE_BY_CODE.get(String(r.province_code))?.name ?? String(r.province_code),
         batchId: String(r.batch_id),
         schoolName: String(r.school_name),
+        schoolNpsn: r.school_npsn ? String(r.school_npsn) : '',
+        guardianName: r.guardian_name ? String(r.guardian_name) : '',
+        docsChecklist: (() => {
+          try {
+            return JSON.parse(String(r.docs_checklist_json || '{}'));
+          } catch {
+            return {};
+          }
+        })(),
+        revisionCount: Number(r.revision_count || 0),
+        autoApproved: Boolean(r.auto_approved),
         requestedByName: String(r.requested_by_name),
         status: String(r.status),
         decisionNote: r.decision_note ? String(r.decision_note) : null,
@@ -2511,32 +2710,213 @@ export function registerCoreRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/account-requests', requireAuth, requirePermission('personalia', 'create'), (req: AuthenticatedRequest, res: Response) => {
-    const { fullName, email, phone, provinceCode, batchId, schoolName } = req.body ?? {};
-    if (!fullName || !email || !provinceCode || !schoolName) {
+  app.post('/api/account-requests', requireAuth, requirePermission('personalia', 'create'), async (req: AuthenticatedRequest, res: Response) => {
+    const { fullName, email, phone, provinceCode, batchId, schoolName, schoolNpsn, guardianName, docsChecklist } = req.body ?? {};
+    const user = req.authUser!;
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const targetProv = user.role === 'koordinator_wilayah' && user.provinceCode
+      ? user.provinceCode
+      : String(provinceCode || user.provinceCode || '');
+
+    if (!fullName || !cleanEmail || !targetProv || !schoolName) {
       res.status(422).json({ error: 'Nama calon Duta, email, provinsi, dan nama sekolah wajib diisi.' });
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      res.status(422).json({ error: 'Format alamat email calon Duta tidak valid.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode && provinceCode && String(provinceCode) !== user.provinceCode) {
+      res.status(403).json({ error: 'Koordinator Wilayah hanya dapat mengajukan akun Duta untuk provinsinya sendiri.' });
+      return;
+    }
+    if (!PROVINCE_BY_CODE.has(targetProv)) {
+      res.status(422).json({ error: 'Kode provinsi tidak valid.' });
+      return;
+    }
+
     const db = getDb();
+    const dupUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+    const dupPers = db.prepare('SELECT id FROM personnel WHERE LOWER(email) = ? AND archived_at IS NULL').get(cleanEmail);
+    const dupReq = db.prepare("SELECT id FROM account_requests WHERE LOWER(email) = ? AND status IN ('menunggu', 'perlu_revisi')").get(cleanEmail);
+    if (dupUser || dupReq) {
+      res.status(409).json({ error: 'Email calon Duta tersebut sudah terdaftar sebagai akun atau memiliki pengajuan aktif.' });
+      return;
+    }
+
+    const checklist = (docsChecklist && typeof docsChecklist === 'object') ? docsChecklist : { pasFoto: false, kartuPelajar: false };
+    const isCompleteForAutoApprove =
+      Boolean(String(phone || '').trim()) &&
+      Boolean(String(schoolName || '').trim()) &&
+      Boolean((checklist as Record<string, unknown>).pasFoto) &&
+      Boolean((checklist as Record<string, unknown>).kartuPelajar) &&
+      !dupPers;
+
+    const policyRows = db
+      .prepare("SELECT key, value FROM system_settings WHERE key IN ('duta_auto_approve', 'require_sekretariat_duta_review', 'invite_expiry_hours')")
+      .all() as { key: string; value: string }[];
+    const policyMap = new Map(policyRows.map((p) => [p.key, p.value]));
+    const autoApproveEnabled = policyMap.get('duta_auto_approve') === 'true' && policyMap.get('require_sekretariat_duta_review') !== 'true';
+    const shouldAutoApprove = autoApproveEnabled && isCompleteForAutoApprove;
+    const ttlHours = Math.max(12, Math.min(336, Number(policyMap.get('invite_expiry_hours') || 72) || 72));
+
     const refNo = nextReferenceNumber(db, 'AKUN');
     const id = crypto.randomUUID();
-    db.prepare(
-      `INSERT INTO account_requests (id, reference_number, full_name, email, phone, province_code, batch_id, school_name, requested_by_user_id, requested_by_name, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'menunggu', ?)`
-    ).run(id, refNo, String(fullName), String(email).toLowerCase(), String(phone || ''), String(provinceCode), String(batchId || 'batch-3'), String(schoolName), req.authUser!.id, req.authUser!.fullName, new Date().toISOString());
+    const now = new Date().toISOString();
+    const provName = PROVINCE_BY_CODE.get(targetProv)?.name ?? targetProv;
 
-    writeAuditLog(db, req.authUser!, 'CREATE_ACCOUNT_REQUEST', 'account_request', refNo);
-    res.status(201).json({ ok: true, id, referenceNumber: refNo });
+    let inviteToken: string | null = null;
+    if (shouldAutoApprove) {
+      let personnelId = crypto.randomUUID();
+      const persRef = nextReferenceNumber(db, 'PERS');
+      const memberNo = `DPBI-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
+      inviteToken = crypto.randomBytes(20).toString('hex');
+      const exp = new Date(Date.now() + ttlHours * 3600000).toISOString();
+
+      db.exec('BEGIN IMMEDIATE;');
+      try {
+        db.prepare(
+          `INSERT INTO account_requests (id, reference_number, full_name, email, phone, province_code, batch_id, school_name, school_npsn, guardian_name, docs_checklist_json, revision_count, auto_approved, requested_by_user_id, requested_by_name, status, decided_by, decision_note, decided_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, 'disetujui', 'Kebijakan Otomatis Sistem', 'Disetujui otomatis karena data & berkas syarat Duta lengkap serta non-duplikat.', ?, ?)`
+        ).run(
+          id, refNo, String(fullName).trim(), cleanEmail, String(phone || ''), targetProv, String(batchId || 'batch-3'),
+          String(schoolName).trim(), String(schoolNpsn || ''), String(guardianName || ''), JSON.stringify(checklist),
+          user.id, user.fullName, now, now
+        );
+        db.prepare(
+          `INSERT INTO personnel (id, member_number, reference_number, full_name, email, phone, province_code, school_name, npsn, batch_id, position_title, bidang, role_code, guardian_name, docs_checklist_json, personnel_status, verification_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Duta Pelajar Berbudaya', 'Bidang Pendidikan & Kebudayaan', 'duta', ?, ?, 'aktif', 'terverifikasi', ?, ?)`
+        ).run(
+          personnelId, memberNo, persRef, String(fullName).trim(), cleanEmail, String(phone || ''), targetProv,
+          String(schoolName).trim(), String(schoolNpsn || ''), String(batchId || 'batch-3'), String(guardianName || ''),
+          JSON.stringify(checklist), now, now
+        );
+        db.prepare(
+          `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, personnel_id, token_hash, status, resend_count, last_sent_at, expires_at, created_by, created_at)
+           VALUES (?, ?, ?, 'duta', ?, ?, ?, ?, 'undangan_terkirim', 0, ?, ?, ?, ?)`
+        ).run(
+          crypto.randomUUID(), cleanEmail, String(fullName).trim(), targetProv, String(batchId || 'batch-3'),
+          personnelId, sha256(inviteToken), now, exp, user.id, now
+        );
+        db.exec('COMMIT;');
+      } catch {
+        db.exec('ROLLBACK;');
+        res.status(500).json({ error: 'Gagal memproses persetujuan otomatis akun Duta.' });
+        return;
+      }
+
+      const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+      await sendTransactionalEmail(db, {
+        templateCode: 'undangan_akun',
+        toEmail: cleanEmail,
+        toName: String(fullName).trim(),
+        role: ROLE_LABELS.duta,
+        provinsi: provName,
+        referenceCode: refNo,
+        tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(exp)),
+        tautan: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        tautanAktivasi: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        fallbackSubject: `[SATU DPBI] Undangan Aktivasi Akun Duta Pelajar — ${provName}`,
+        fallbackBody: `Yth. ${String(fullName).trim()},\n\nPengajuan akun Duta Anda (${refNo}) telah disetujui otomatis. Aktivasi di: ${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        actorId: user.id,
+        actorName: user.fullName,
+      });
+
+      writeAuditLog(db, user, 'CREATE_ACCOUNT_REQUEST_AUTO_APPROVED', 'account_request', refNo, 'berhasil', cleanEmail);
+      res.status(201).json({
+        ok: true,
+        id,
+        referenceNumber: refNo,
+        status: 'disetujui',
+        autoApproved: true,
+        inviteToken: IS_DEMO_MODE ? inviteToken : undefined,
+      });
+      return;
+    }
+
+    db.prepare(
+      `INSERT INTO account_requests (id, reference_number, full_name, email, phone, province_code, batch_id, school_name, school_npsn, guardian_name, docs_checklist_json, revision_count, auto_approved, requested_by_user_id, requested_by_name, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 'menunggu', ?)`
+    ).run(
+      id, refNo, String(fullName).trim(), cleanEmail, String(phone || ''), targetProv, String(batchId || 'batch-3'),
+      String(schoolName).trim(), String(schoolNpsn || ''), String(guardianName || ''), JSON.stringify(checklist),
+      user.id, user.fullName, now
+    );
+
+    await sendTransactionalEmail(db, {
+      templateCode: 'permohonan_akun_diterima',
+      toEmail: cleanEmail,
+      toName: String(fullName).trim(),
+      role: ROLE_LABELS.duta,
+      provinsi: provName,
+      referenceCode: refNo,
+      fallbackSubject: `[SATU DPBI] Pengajuan Akun Duta Diterima (${refNo})`,
+      fallbackBody: `Yth. ${String(fullName).trim()},\n\nPengajuan akun Duta (${refNo}) dari wilayah ${provName} telah diterima dan menunggu verifikasi Sekretariat Nasional.`,
+      actorId: user.id,
+      actorName: user.fullName,
+    });
+
+    writeAuditLog(db, user, 'CREATE_ACCOUNT_REQUEST', 'account_request', refNo);
+    res.status(201).json({ ok: true, id, referenceNumber: refNo, status: 'menunggu', autoApproved: false });
   });
 
-  app.post('/api/account-requests/:id/decide', requireAuth, requirePermission('personalia', 'review'), (req: AuthenticatedRequest, res: Response) => {
+  app.patch('/api/account-requests/:id/resubmit', requireAuth, requirePermission('personalia', 'create'), (req: AuthenticatedRequest, res: Response) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const id = String(req.params.id);
+    const existing = db.prepare('SELECT * FROM account_requests WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Permintaan akun tidak ditemukan.' });
+      return;
+    }
+    if (user.role === 'koordinator_wilayah' && user.provinceCode !== String(existing.province_code)) {
+      res.status(403).json({ error: 'Koordinator hanya dapat merevisi permintaan akun dari provinsinya sendiri.' });
+      return;
+    }
+    if (!['perlu_revisi', 'menunggu'].includes(String(existing.status))) {
+      res.status(409).json({ error: 'Hanya permintaan akun berstatus perlu revisi atau menunggu yang dapat diperbarui.' });
+      return;
+    }
+    const { fullName, phone, schoolName, schoolNpsn, guardianName, docsChecklist } = req.body ?? {};
+    const nextRevision = Number(existing.revision_count || 0) + 1;
+    db.prepare(
+      `UPDATE account_requests SET
+        full_name = COALESCE(?, full_name),
+        phone = COALESCE(?, phone),
+        school_name = COALESCE(?, school_name),
+        school_npsn = COALESCE(?, school_npsn),
+        guardian_name = COALESCE(?, guardian_name),
+        docs_checklist_json = COALESCE(?, docs_checklist_json),
+        revision_count = ?,
+        status = 'menunggu',
+        decision_note = NULL
+       WHERE id = ?`
+    ).run(
+      fullName ? String(fullName).trim() : null,
+      phone !== undefined ? String(phone) : null,
+      schoolName ? String(schoolName).trim() : null,
+      schoolNpsn !== undefined ? String(schoolNpsn) : null,
+      guardianName !== undefined ? String(guardianName) : null,
+      docsChecklist ? JSON.stringify(docsChecklist) : null,
+      nextRevision,
+      id
+    );
+    writeAuditLog(db, user, 'RESUBMIT_ACCOUNT_REQUEST', 'account_request', String(existing.reference_number), 'berhasil', `Revisi ke-${nextRevision}`);
+    res.json({ ok: true, status: 'menunggu', revisionCount: nextRevision });
+  });
+
+  app.post('/api/account-requests/:id/decide', requireAuth, requirePermission('personalia', 'review'), async (req: AuthenticatedRequest, res: Response) => {
     if (!['super_admin', 'wakil_super_admin', 'sekretariat_nasional'].includes(req.authUser!.role)) {
       res.status(403).json({ error: 'Persetujuan permintaan akun Duta hanya dapat dilakukan pihak Nasional.' });
       return;
     }
     const { decision, note } = req.body ?? {};
-    if (!['disetujui', 'ditolak'].includes(String(decision))) {
-      res.status(422).json({ error: 'Keputusan harus disetujui atau ditolak.' });
+    if (!['disetujui', 'perlu_revisi', 'ditolak'].includes(String(decision))) {
+      res.status(422).json({ error: 'Keputusan harus disetujui, perlu_revisi, atau ditolak.' });
+      return;
+    }
+    if ((decision === 'perlu_revisi' || decision === 'ditolak') && !String(note || '').trim()) {
+      res.status(422).json({ error: 'Catatan alasan wajib diisi saat meminta revisi atau menolak permohonan akun.' });
       return;
     }
     const db = getDb();
@@ -2545,27 +2925,97 @@ export function registerCoreRoutes(app: Express): void {
       res.status(404).json({ error: 'Permintaan akun tidak ditemukan.' });
       return;
     }
+    if (!['menunggu', 'perlu_revisi'].includes(String(reqRow.status))) {
+      res.status(409).json({ error: 'Permintaan akun ini sudah diputuskan sebelumnya.' });
+      return;
+    }
     const now = new Date().toISOString();
+    const user = req.authUser!;
     db.prepare('UPDATE account_requests SET status = ?, decision_note = ?, decided_by = ?, decided_at = ? WHERE id = ?').run(
       String(decision),
       String(note || ''),
-      req.authUser!.fullName,
+      user.fullName,
       now,
       String(reqRow.id)
     );
 
+    const cleanEmail = String(reqRow.email).trim().toLowerCase();
+    const provCode = String(reqRow.province_code);
+    const provName = PROVINCE_BY_CODE.get(provCode)?.name ?? provCode;
     let inviteToken: string | null = null;
+
     if (decision === 'disetujui') {
+      let linkedPers = db.prepare('SELECT id FROM personnel WHERE LOWER(email) = ? LIMIT 1').get(cleanEmail) as { id: string } | undefined;
+      let personnelId = linkedPers?.id ?? null;
+      if (!personnelId) {
+        personnelId = crypto.randomUUID();
+        const persRef = nextReferenceNumber(db, 'PERS');
+        const memberNo = `DPBI-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
+        db.prepare(
+          `INSERT INTO personnel (id, member_number, reference_number, full_name, email, phone, province_code, school_name, npsn, batch_id, position_title, bidang, role_code, guardian_name, docs_checklist_json, personnel_status, verification_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Duta Pelajar Berbudaya', 'Bidang Pendidikan & Kebudayaan', 'duta', ?, ?, 'aktif', 'terverifikasi', ?, ?)`
+        ).run(
+          personnelId,
+          memberNo,
+          persRef,
+          String(reqRow.full_name),
+          cleanEmail,
+          String(reqRow.phone || ''),
+          provCode,
+          String(reqRow.school_name || ''),
+          String(reqRow.school_npsn || ''),
+          String(reqRow.batch_id || 'batch-3'),
+          String(reqRow.guardian_name || ''),
+          String(reqRow.docs_checklist_json || '{}'),
+          now,
+          now
+        );
+      }
+
+      const ttlSetting = db.prepare("SELECT value FROM system_settings WHERE key = 'invite_expiry_hours'").get() as { value: string } | undefined;
+      const ttlHours = Math.max(12, Math.min(336, Number(ttlSetting?.value || 72) || 72));
       inviteToken = crypto.randomBytes(20).toString('hex');
-      const exp = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+      const exp = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
       db.prepare(
-        `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, token_hash, expires_at, created_by, created_at)
-         VALUES (?, ?, ?, 'duta', ?, ?, ?, ?, ?, ?)`
-      ).run(crypto.randomUUID(), String(reqRow.email), String(reqRow.full_name), String(reqRow.province_code), String(reqRow.batch_id), sha256(inviteToken), exp, req.authUser!.id, now);
+        `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, personnel_id, token_hash, status, resend_count, last_sent_at, expires_at, created_by, created_at)
+         VALUES (?, ?, ?, 'duta', ?, ?, ?, ?, 'undangan_terkirim', 0, ?, ?, ?, ?)`
+      ).run(crypto.randomUUID(), cleanEmail, String(reqRow.full_name), provCode, String(reqRow.batch_id || 'batch-3'), personnelId, sha256(inviteToken), now, exp, user.id, now);
+
+      const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+      await sendTransactionalEmail(db, {
+        templateCode: 'undangan_akun',
+        toEmail: cleanEmail,
+        toName: String(reqRow.full_name),
+        role: ROLE_LABELS.duta,
+        provinsi: provName,
+        referenceCode: String(reqRow.reference_number),
+        tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(exp)),
+        tautan: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        tautanAktivasi: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        fallbackSubject: `[SATU DPBI] Undangan Aktivasi Akun Duta Pelajar — ${provName}`,
+        fallbackBody: `Yth. ${String(reqRow.full_name)},\n\nPermohonan akun Duta (${String(reqRow.reference_number)}) telah disetujui. Aktivasi akun Anda di: ${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+        actorId: user.id,
+        actorName: user.fullName,
+      });
+    } else {
+      await sendTransactionalEmail(db, {
+        templateCode: decision === 'perlu_revisi' ? 'permohonan_akun_revisi' : 'permohonan_akun_ditolak',
+        toEmail: cleanEmail,
+        toName: String(reqRow.full_name),
+        role: ROLE_LABELS.duta,
+        provinsi: provName,
+        referenceCode: String(reqRow.reference_number),
+        catatanPemeriksa: String(note || ''),
+        namaPemeriksa: user.fullName,
+        fallbackSubject: `[SATU DPBI] Status Permohonan Akun ${String(reqRow.reference_number)}`,
+        fallbackBody: `Yth. ${String(reqRow.full_name)},\n\nPermohonan akun ${String(reqRow.reference_number)} berstatus ${String(decision)}. Catatan: ${String(note || '-')}`,
+        actorId: user.id,
+        actorName: user.fullName,
+      });
     }
 
-    writeAuditLog(db, req.authUser!, 'DECIDE_ACCOUNT_REQUEST', 'account_request', String(reqRow.reference_number), 'berhasil', String(decision));
-    res.json({ ok: true, inviteToken });
+    writeAuditLog(db, user, 'DECIDE_ACCOUNT_REQUEST', 'account_request', String(reqRow.reference_number), 'berhasil', String(decision));
+    res.json({ ok: true, status: String(decision), inviteToken: IS_DEMO_MODE ? inviteToken : undefined });
   });
 
   // ==================== ORGANIZATION & BATCHES ====================

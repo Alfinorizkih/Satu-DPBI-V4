@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
-import { apiGet, apiPost, setApiHandlers } from '../lib/api';
-import type { AuthUser, ModuleCode, PermissionAction, ToastVariant } from '../lib/types';
+import { apiGet, apiPatch, apiPost, setApiHandlers } from '../lib/api';
+import type { AuthUser, DisplayScale, ModuleCode, PermissionAction, ToastVariant, UserPreferences } from '../lib/types';
 import { hasPermission } from '../lib/rbac';
 import { getRouteTitle, matchPrivateRoute, normalizePathname } from '../lib/routes';
+import { normalizeDisplayScale, sanitizeFavoritePaths } from '../lib/guidance';
 import { clearAllUserDrafts } from '../lib/offlineDraft';
 
 interface ToastItem {
@@ -18,7 +19,16 @@ export interface RecentRouteItem {
   visitedAt: string;
 }
 
+const DEFAULT_PREFERENCES: UserPreferences = {
+  startPage: '/beranda',
+  displayScale: 'nyaman',
+  favoritePaths: ['/beranda', '/proposal', '/tugas-saya'],
+  notificationPrefs: { emailProposal: true, emailTugas: true, pengingatSesi: true },
+  tourCompletedRoles: [],
+};
+
 export const ROUTE_TITLES: Record<string, string> = {
+  '/beranda': 'Beranda Saya',
   '/dashboard': 'Dashboard & Ringkasan',
   '/aktivitas-saya': 'Aktivitas Saya',
   '/tugas-saya': 'Tugas Saya',
@@ -52,7 +62,8 @@ export const ROUTE_TITLES: Record<string, string> = {
   '/email': 'Pusat Email & Pengiriman Massal',
   '/program': 'Program Unggulan Nasional',
   '/persuratan': 'Persuratan & Disposisi',
-  '/bantuan': 'Pusat Bantuan Internal',
+  '/bantuan': 'Pusat Bantuan & Panduan',
+  '/kendala': 'Pusat Kendala & Laporan Error',
 };
 
 interface AuthContextValue {
@@ -72,6 +83,14 @@ interface AuthContextValue {
   appVersion: string;
   maintenanceMode: boolean;
   maintenanceMessage: string;
+  preferences: UserPreferences;
+  helpDrawerOpen: boolean;
+  setHelpDrawerOpen: (val: boolean) => void;
+  tourOpen: boolean;
+  setTourOpen: (val: boolean) => void;
+  updatePreferences: (patch: Partial<UserPreferences>) => Promise<UserPreferences | null>;
+  toggleFavoritePath: (path: string) => Promise<void>;
+  markTourCompleted: (roleCode: string) => Promise<void>;
   refreshSystemMeta: () => Promise<void>;
   setPendingRedirectPath: (path: string | null) => void;
   navigate: (path: string) => void;
@@ -114,6 +133,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [appVersion, setAppVersion] = useState('4.1.0');
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [helpDrawerOpen, setHelpDrawerOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const lastActivityRef = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -125,6 +147,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.setItem('satu_dpbi_theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const scale: DisplayScale = normalizeDisplayScale(preferences.displayScale);
+    root.classList.remove('scale-ringkas', 'scale-nyaman', 'scale-besar');
+    root.classList.add(`scale-${scale}`);
+  }, [preferences.displayScale]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return;
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setHelpDrawerOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [user]);
 
   useEffect(() => {
     const onPop = () => setCurrentPath(window.location.pathname || '/');
@@ -230,11 +274,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         setOnboardingDone(localStorage.getItem(`satu_dpbi_onboarded_${data.user.id}`) === '1');
+        try {
+          const prefRes = await apiGet<{ preferences: UserPreferences }>('/api/auth/preferences', true);
+          if (prefRes?.preferences) {
+            setPreferences(prefRes.preferences);
+          }
+        } catch {
+          setPreferences(DEFAULT_PREFERENCES);
+        }
       } else if (data.expiredReason) {
         setSessionExpiredReason(data.expiredReason);
       }
     } catch {
       setUser(null);
+      setPreferences(DEFAULT_PREFERENCES);
       try {
         const pub = await apiGet<{ isDemoMode: boolean }>('/api/public/overview', true);
         setIsDemoMode(pub.isDemoMode);
@@ -354,6 +407,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   }, []);
 
+  const updatePreferences = useCallback(
+    async (patch: Partial<UserPreferences>): Promise<UserPreferences | null> => {
+      if (!user) return null;
+      const merged: UserPreferences = {
+        ...preferences,
+        ...patch,
+        displayScale: normalizeDisplayScale(patch.displayScale ?? preferences.displayScale),
+        favoritePaths:
+          patch.favoritePaths !== undefined
+            ? sanitizeFavoritePaths(patch.favoritePaths)
+            : preferences.favoritePaths,
+      };
+      setPreferences(merged);
+      try {
+        const res = await apiPatch<{ ok: boolean; preferences: UserPreferences }>('/api/auth/preferences', merged);
+        if (res?.preferences) {
+          setPreferences(res.preferences);
+          return res.preferences;
+        }
+        return merged;
+      } catch {
+        notify('Gagal menyimpan preferensi tampilan ke server.', 'error');
+        return null;
+      }
+    },
+    [user, preferences, notify]
+  );
+
+  const toggleFavoritePath = useCallback(
+    async (path: string) => {
+      const exists = preferences.favoritePaths.includes(path);
+      const nextPaths = exists
+        ? preferences.favoritePaths.filter((p) => p !== path)
+        : [path, ...preferences.favoritePaths].slice(0, 8);
+      await updatePreferences({ favoritePaths: nextPaths });
+      notify(exists ? 'Menu dihapus dari Favorit.' : 'Menu disematkan ke Favorit.', 'success');
+    },
+    [preferences.favoritePaths, updatePreferences, notify]
+  );
+
+  const markTourCompleted = useCallback(
+    async (roleCode: string) => {
+      const nextTours = preferences.tourCompletedRoles.includes(roleCode)
+        ? preferences.tourCompletedRoles
+        : [...preferences.tourCompletedRoles, roleCode];
+      await updatePreferences({ tourCompletedRoles: nextTours });
+    },
+    [preferences.tourCompletedRoles, updatePreferences]
+  );
+
   const logout = useCallback(async () => {
     const currentId = user?.id;
     try {
@@ -365,6 +468,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearAllUserDrafts(currentId);
     }
     setUser(null);
+    setPreferences(DEFAULT_PREFERENCES);
+    setHelpDrawerOpen(false);
+    setTourOpen(false);
     setSessionExpiredReason(null);
     setIdleWarningSecondsLeft(null);
     navigate('/');
@@ -398,6 +504,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         appVersion,
         maintenanceMode,
         maintenanceMessage,
+        preferences,
+        helpDrawerOpen,
+        setHelpDrawerOpen,
+        tourOpen,
+        setTourOpen,
+        updatePreferences,
+        toggleFavoritePath,
+        markTourCompleted,
         refreshSystemMeta,
         setPendingRedirectPath,
         navigate,

@@ -1100,6 +1100,61 @@ ALTER TABLE `tasks`
   ADD COLUMN `updated_at` VARCHAR(40) NULL,
   ADD COLUMN `soft_deleted_at` VARCHAR(40) NULL;
 
+-- Migration 14 Parity: Email Attachments, Queue, Personnel Archival & Lifecycle
+CREATE TABLE IF NOT EXISTS `email_attachments` (
+  `id` VARCHAR(64) NOT NULL,
+  `owner_type` VARCHAR(24) NOT NULL,
+  `owner_id` VARCHAR(64) NOT NULL,
+  `file_id` VARCHAR(64) NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `size_bytes` BIGINT NOT NULL DEFAULT 0,
+  `mime_type` VARCHAR(120) NOT NULL DEFAULT 'application/octet-stream',
+  `uploaded_by` VARCHAR(64) NOT NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_email_att` (`owner_type`, `owner_id`, `file_id`),
+  KEY `idx_email_att_owner` (`owner_type`, `owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `email_queue` (
+  `id` VARCHAR(64) NOT NULL,
+  `campaign_id` VARCHAR(64) NOT NULL,
+  `recipient_user_id` VARCHAR(64) NULL,
+  `recipient_email` VARCHAR(191) NOT NULL,
+  `recipient_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `subject_rendered` VARCHAR(255) NOT NULL DEFAULT '',
+  `body_rendered` LONGTEXT NOT NULL,
+  `html_rendered` LONGTEXT NULL,
+  `queue_status` VARCHAR(32) NOT NULL DEFAULT 'dalam_antrean',
+  `attempts` INT NOT NULL DEFAULT 0,
+  `last_error` TEXT NULL,
+  `processed_at` VARCHAR(40) NULL,
+  `created_at` VARCHAR(40) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_email_queue_campaign_qstatus` (`campaign_id`, `queue_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE `email_campaigns`
+  ADD COLUMN `paused` TINYINT(1) NOT NULL DEFAULT 0,
+  ADD COLUMN `cancelled_at` VARCHAR(40) NULL,
+  ADD COLUMN `queued_count` INT NOT NULL DEFAULT 0;
+
+ALTER TABLE `personnel`
+  ADD COLUMN `archived_at` VARCHAR(40) NULL,
+  ADD COLUMN `archived_reason` TEXT NULL,
+  ADD COLUMN `archived_by` VARCHAR(191) NULL;
+
+ALTER TABLE `users`
+  ADD COLUMN `suspended_reason` TEXT NULL,
+  ADD COLUMN `locked_until` VARCHAR(40) NULL;
+
+ALTER TABLE `account_requests`
+  ADD COLUMN `school_npsn` VARCHAR(32) NULL,
+  ADD COLUMN `guardian_name` VARCHAR(191) NULL,
+  ADD COLUMN `docs_checklist_json` LONGTEXT NULL,
+  ADD COLUMN `revision_count` INT NOT NULL DEFAULT 0,
+  ADD COLUMN `auto_approved` TINYINT(1) NOT NULL DEFAULT 0;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 

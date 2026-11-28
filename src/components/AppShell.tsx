@@ -19,8 +19,10 @@ import {
   Globe,
   GraduationCap,
   HelpCircle,
+  Home,
   KeyRound,
   LayoutDashboard,
+  LifeBuoy,
   ListTodo,
   LogOut,
   Mail,
@@ -34,6 +36,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Star,
   Sun,
   UserCheck,
   Users,
@@ -44,6 +47,7 @@ import { apiGet, apiPost } from '../lib/api';
 import type { ModuleCode, NotificationRecord, PermissionAction } from '../lib/types';
 import { getRouteTitle, resolveBaseNavPath } from '../lib/routes';
 import { CommandPalette } from './CommandPalette';
+import { ContextualHelpDrawer, RoleTourModal } from './HelpTourDrawer';
 import { OfflineBanner } from './ui';
 import { formatTanggalIndonesia } from '../lib/rbac';
 
@@ -68,6 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: 'utama',
     group: 'Utama',
     items: [
+      { label: 'Beranda Saya', path: '/beranda', module: 'dashboard', icon: Home },
       { label: 'Dashboard', path: '/dashboard', module: 'dashboard', icon: LayoutDashboard },
       { label: 'Aktivitas Saya', path: '/aktivitas-saya', module: 'dashboard', icon: Activity },
       { label: 'Tugas Saya', path: '/tugas-saya', module: 'tugas', icon: CheckSquare },
@@ -111,6 +116,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Dokumen', path: '/dokumen', module: 'dokumen', icon: FolderOpen },
       { label: 'Arsip', path: '/arsip', module: 'arsip', icon: Archive },
       { label: 'Pusat Bantuan', path: '/bantuan', icon: HelpCircle },
+      { label: 'Pusat Kendala', path: '/kendala', icon: LifeBuoy },
     ],
   },
   {
@@ -155,6 +161,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     appVersion,
     maintenanceMode,
     maintenanceMessage,
+    preferences,
+    toggleFavoritePath,
+    setHelpDrawerOpen,
   } = useAuth();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -212,6 +221,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     .map((s) => s[0]?.toUpperCase() || '')
     .join('');
 
+  const visibleNavItems = NAV_GROUPS.flatMap((g) =>
+    g.items.filter((item) => {
+      if (item.canShow) return item.canShow(user, can);
+      return !item.module || can(item.module, item.action || 'view');
+    })
+  );
+  const favoriteItems = preferences.favoritePaths
+    .map((fp) => visibleNavItems.find((item) => item.path === fp))
+    .filter((x): x is NavItem => Boolean(x));
+
   const SidebarBody = (
     <div className="flex flex-col h-full">
       {/* Brand header */}
@@ -219,27 +238,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           onClick={() => {
-            navigate('/dashboard');
+            navigate('/beranda');
             setMobileOpen(false);
           }}
           className="flex items-center gap-2.5 min-w-0 text-left"
         >
-          <img
-            src="/assets/aistudio/logosd_69efa81d.jpg"
-            alt="Logo SATU DPBI"
-            referrerPolicy="no-referrer"
-            className="w-8 h-8 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
-          />
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="font-display text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap truncate">
-                SATU <span className="text-[#0EA5E9]">DPBI</span>
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                Satu Sistem, Satu Data
-              </p>
-            </div>
+          {collapsed ? (
+            <img
+              src="/assets/aistudio/icon-app-sd_f7fda3a9.png"
+              alt="Ikon SATU DPBI"
+              referrerPolicy="no-referrer"
+              className="w-8 h-8 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+            />
+          ) : (
+            <img
+              src="/assets/aistudio/icon-utama_7bb14cc7.png"
+              alt="Logo Utama SATU DPBI"
+              referrerPolicy="no-referrer"
+              className="h-9 w-auto object-contain rounded-lg bg-white px-1.5 py-0.5 border border-slate-200 dark:border-slate-700 shrink-0"
+            />
           )}
+          <span className="sr-only">SATU DPBI</span>
         </button>
         <button
           type="button"
@@ -259,8 +278,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </button>
       </div>
 
-      {/* Grouped navigation with collapsible submenus */}
+      {/* Grouped navigation with Menu Favorit & collapsible submenus */}
       <nav aria-label="Navigasi Portal Internal" className="flex-1 overflow-y-auto px-2.5 py-3 space-y-3">
+        {!collapsed && favoriteItems.length > 0 && (
+          <div>
+            <p className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              Menu Favorit
+            </p>
+            <div className="space-y-0.5 mt-0.5">
+              {favoriteItems.map((item) => {
+                const Icon = item.icon;
+                const active = baseActivePath === item.path;
+                return (
+                  <div key={`fav-${item.path}`} className="flex items-center gap-1 group">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(item.path);
+                        setMobileOpen(false);
+                      }}
+                      aria-current={active ? 'page' : undefined}
+                      className={`flex-1 min-w-0 flex items-center gap-2.5 px-3 min-h-[36px] py-1.5 rounded-xl text-xs font-medium transition-colors whitespace-nowrap ${
+                        active
+                          ? 'bg-[#0EA5E9] text-white shadow-sm'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleFavoritePath(item.path)}
+                      aria-label={`Hapus ${item.label} dari favorit`}
+                      title="Lepas dari Favorit"
+                      className="p-1.5 rounded-lg text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                    >
+                      <Star className="w-3 h-3 fill-amber-500" aria-hidden="true" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {NAV_GROUPS.map((grp) => {
           const visibleItems = grp.items.filter((item) => {
             if (item.canShow) return item.canShow(user, can);
@@ -298,25 +360,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {visibleItems.map((item) => {
                     const Icon = item.icon;
                     const active = baseActivePath === item.path;
+                    const isFav = preferences.favoritePaths.includes(item.path);
                     return (
-                      <button
-                        key={item.path}
-                        type="button"
-                        onClick={() => {
-                          navigate(item.path);
-                          setMobileOpen(false);
-                        }}
-                        title={collapsed ? item.label : undefined}
-                        aria-current={active ? 'page' : undefined}
-                        className={`w-full flex items-center ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-3'} min-h-[44px] lg:min-h-[38px] py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
-                          active
-                            ? 'bg-[#0EA5E9] text-white shadow-sm'
-                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                      </button>
+                      <div key={item.path} className="flex items-center gap-1 group">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigate(item.path);
+                            setMobileOpen(false);
+                          }}
+                          title={collapsed ? item.label : undefined}
+                          aria-current={active ? 'page' : undefined}
+                          className={`flex-1 min-w-0 flex items-center ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-3'} min-h-[44px] lg:min-h-[38px] py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                            active
+                              ? 'bg-[#0EA5E9] text-white shadow-sm'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          {!collapsed && <span className="truncate">{item.label}</span>}
+                        </button>
+                        {!collapsed && (
+                          <button
+                            type="button"
+                            onClick={() => toggleFavoritePath(item.path)}
+                            aria-label={isFav ? `Hapus ${item.label} dari favorit` : `Sematkan ${item.label} ke favorit`}
+                            title={isFav ? 'Hapus dari Favorit' : 'Sematkan ke Favorit'}
+                            className={`p-1.5 rounded-lg transition-opacity shrink-0 ${
+                              isFav
+                                ? 'text-amber-500 opacity-100'
+                                : 'text-slate-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-amber-500'
+                            }`}
+                          >
+                            <Star className={`w-3 h-3 ${isFav ? 'fill-amber-500' : ''}`} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -463,6 +542,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <button
               type="button"
+              onClick={() => setHelpDrawerOpen(true)}
+              aria-label="Buka panduan halaman ini"
+              title="Bantuan halaman ini (pintasan ?)"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-[#0EA5E9] transition-colors whitespace-nowrap"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-[#0EA5E9]" />
+              <span className="hidden sm:inline">Panduan</span>
+            </button>
+
+            <button
+              type="button"
               onClick={toggleTheme}
               aria-label={theme === 'light' ? 'Aktifkan mode gelap' : 'Aktifkan mode terang'}
               className="p-2 min-w-[36px] min-h-[36px] inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-300 hover:border-[#0EA5E9] transition-colors"
@@ -594,6 +684,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         type="button"
                         onClick={() => {
                           setProfileOpen(false);
+                          navigate(`/kendala?from=${encodeURIComponent(currentPath)}`);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left"
+                      >
+                        <LifeBuoy className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Laporkan Kendala</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
                           navigate('/tentang');
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left"
@@ -654,6 +755,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 Pusat Bantuan
               </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/kendala?from=${encodeURIComponent(currentPath)}`)}
+                className="hover:text-[#0EA5E9] transition-colors whitespace-nowrap"
+              >
+                Pusat Kendala
+              </button>
             </div>
           </div>
         </footer>
@@ -704,6 +812,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ContextualHelpDrawer />
+      <RoleTourModal />
     </div>
   );
 }

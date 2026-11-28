@@ -18,6 +18,7 @@ const { registerCoreRoutes } = await import('./routes');
 const { registerModuleRoutes } = await import('./routes_modules');
 const { registerWorkflowAndEmailRoutes } = await import('./routes_workflow_email');
 const { registerProgramAndCorrespondenceRoutes } = await import('./routes_programs_correspondence');
+const { registerAddendumRoutes } = await import('./routes_addendum');
 const { requireNotInMaintenance, requireSafeOrigin } = await import('./security');
 
 let server: http.Server;
@@ -88,6 +89,7 @@ before(async () => {
   registerModuleRoutes(app);
   registerWorkflowAndEmailRoutes(app);
   registerProgramAndCorrespondenceRoutes(app);
+  registerAddendumRoutes(app);
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, '127.0.0.1', () => {
@@ -641,15 +643,30 @@ test('Email Center: deduplicated audience preview, placeholder validation, sandb
   assert.ok(csvRes.text.includes("'=SUM(1,2)"), 'Expected formula prefix in campaign title to be escaped');
 });
 
-test('v4.1.0 Email Center: 18 seeded templates, template version history, HTML send, and CSV recipient parser', async () => {
+test('v4.1.0 & v4.2.0 Email Center: 50 seeded templates, active toggle, version history, HTML send, queue pause/resume, and CSV recipient parser', async () => {
   const superCookie = await loginAs('superadmin@simulasi.dpbi.or.id');
 
   const overview = await requestApi('/api/email/overview', { cookie: superCookie });
   assert.equal(overview.status, 200);
   const templates = overview.json?.templates as { id: string; version: number; subject: string; bodyText: string }[];
-  assert.ok(Array.isArray(templates) && templates.length >= 18, `Expected >= 18 templates, got ${templates?.length}`);
+  assert.ok(Array.isArray(templates) && templates.length >= 50, `Expected >= 50 templates, got ${templates?.length}`);
 
   const targetTpl = templates[0];
+  const toggleOff = await requestApi(`/api/email/templates/${targetTpl.id}/status`, {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { isActive: false },
+  });
+  assert.equal(toggleOff.status, 200);
+  assert.equal(toggleOff.json?.isActive, false);
+
+  const toggleOn = await requestApi(`/api/email/templates/${targetTpl.id}/status`, {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { isActive: true },
+  });
+  assert.equal(toggleOn.status, 200);
+  assert.equal(toggleOn.json?.isActive, true);
   const updateTpl = await requestApi(`/api/email/templates/${targetTpl.id}`, {
     method: 'PUT',
     cookie: superCookie,
@@ -1144,3 +1161,313 @@ test('v4.1.0 Flagship Programs, Persuratan & Disposisi Digital, Handover Session
     assert.equal(maintOff.json?.maintenanceMode, false);
   }
 });
+
+test('v4.2.0 Personnel Lifecycle, CSV Role Guard, Last Super Admin Guard, 2-Pathway Duta & Email Queue Control', async () => {
+  const superCookie = await loginAs('superadmin@simulasi.dpbi.or.id');
+  const korwilJabarCookie = await loginAs('korwil.jabar@simulasi.dpbi.or.id');
+  const dutaJabarCookie = await loginAs('duta.jabar@simulasi.dpbi.or.id');
+
+  // 1. CSV import blocks super_admin & wakil_super_admin roles in skipped
+  const blockedCsvImport = await requestApi('/api/personnel/import', {
+    method: 'POST',
+    cookie: superCookie,
+    body: {
+      fileName: 'role-escalation.csv',
+      rows: [
+        { fullName: 'Coba Super', email: 'escalate1@dpbi.or.id', provinceCode: '31', roleCode: 'super_admin' },
+        { fullName: 'Coba Wakil', email: 'escalate2@dpbi.or.id', provinceCode: '31', roleCode: 'wakil_super_admin' },
+        { fullName: 'Calon Valid', email: 'valid.import.v42@dpbi.or.id', provinceCode: '32', roleCode: 'duta', schoolName: 'SMAN 1 Bandung' },
+      ],
+    },
+  });
+  assert.equal(blockedCsvImport.status, 200);
+  assert.equal(blockedCsvImport.json?.inserted, 1);
+  const skippedCsv = blockedCsvImport.json?.skipped as { email: string; reason: string }[];
+  assert.equal(skippedCsv.length, 2);
+  assert.ok(skippedCsv.every((s) => s.reason.includes('tidak dapat diberikan')));
+
+  // 2. Last active super_admin cannot be disabled or downgraded (409)
+  const db = getDb();
+  const superUserRow = db
+    .prepare("SELECT id FROM users WHERE role = 'super_admin' AND account_status = 'aktif' LIMIT 1")
+    .get() as { id: string };
+  const activeSuperCount = (
+    db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'super_admin' AND account_status = 'aktif'").get() as { c: number }
+  ).c;
+  assert.equal(activeSuperCount, 1);
+
+  const disableLastSuper = await requestApi(`/api/settings/users/${superUserRow.id}/status`, {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { accountStatus: 'nonaktif', suspendedReason: 'Uji proteksi super admin terakhir' },
+  });
+  assert.equal(disableLastSuper.status, 409);
+
+  // 3. Personnel Archive -> includeArchived=1 -> Restore, Duta forbidden, Permanent Delete 409 (linked) vs 200 (unlinked)
+  const unlinkedRow = db
+    .prepare("SELECT id FROM personnel WHERE email = 'valid.import.v42@dpbi.or.id'")
+    .get() as { id: string };
+  assert.ok(unlinkedRow?.id);
+
+  const dutaArchiveDenied = await requestApi(`/api/personnel/${unlinkedRow.id}/archive`, {
+    method: 'POST',
+    cookie: dutaJabarCookie,
+    body: { reason: 'Duta tidak boleh arsipkan' },
+  });
+  assert.equal(dutaArchiveDenied.status, 403);
+
+  const archiveRes = await requestApi(`/api/personnel/${unlinkedRow.id}/archive`, {
+    method: 'POST',
+    cookie: superCookie,
+    body: { reason: 'Uji pengarsipan personel' },
+  });
+  assert.equal(archiveRes.status, 200);
+
+  const activeOnlyList = await requestApi('/api/personnel', { cookie: superCookie });
+  const activeIds = ((activeOnlyList.json?.personnel as { id: string }[]) || []).map((p) => p.id);
+  assert.equal(activeIds.includes(unlinkedRow.id), false);
+
+  const withArchivedList = await requestApi('/api/personnel?includeArchived=1', { cookie: superCookie });
+  const archivedIds = ((withArchivedList.json?.personnel as { id: string }[]) || []).map((p) => p.id);
+  assert.equal(archivedIds.includes(unlinkedRow.id), true);
+
+  const restoreRes = await requestApi(`/api/personnel/${unlinkedRow.id}/restore`, {
+    method: 'POST',
+    cookie: superCookie,
+  });
+  assert.equal(restoreRes.status, 200);
+
+  const linkedPers = db
+    .prepare("SELECT id FROM personnel WHERE user_id IS NOT NULL LIMIT 1")
+    .get() as { id: string };
+  const deleteLinked409 = await requestApi(`/api/personnel/${linkedPers.id}`, {
+    method: 'DELETE',
+    cookie: superCookie,
+  });
+  assert.equal(deleteLinked409.status, 409);
+
+  const deleteUnlinked200 = await requestApi(`/api/personnel/${unlinkedRow.id}`, {
+    method: 'DELETE',
+    cookie: superCookie,
+  });
+  assert.equal(deleteUnlinked200.status, 200);
+
+  // 4. Two-pathway Account Request: request -> perlu_revisi -> resubmit -> approval_center request_revision -> auto-approve policy
+  const reqCreate = await requestApi('/api/account-requests', {
+    method: 'POST',
+    cookie: korwilJabarCookie,
+    body: {
+      fullName: 'Nadia Revisi Uji',
+      email: 'nadia.revisi@dpbi.or.id',
+      phone: '081299900011',
+      provinceCode: '32',
+      batchId: 'batch-3',
+      schoolName: 'SMAN 2 Bogor',
+      schoolNpsn: '20220301',
+      guardianName: 'Ibu Nadia',
+      docsChecklist: { pasFoto: true, kartuPelajar: false },
+    },
+  });
+  assert.equal(reqCreate.status, 201);
+  assert.equal(reqCreate.json?.status, 'menunggu');
+  const accReqId = String(reqCreate.json?.id);
+
+  const markRevise = await requestApi(`/api/account-requests/${accReqId}/decide`, {
+    method: 'POST',
+    cookie: superCookie,
+    body: { decision: 'perlu_revisi', note: 'Mohon centang kartu pelajar terlebih dahulu.' },
+  });
+  assert.equal(markRevise.status, 200);
+  assert.equal(markRevise.json?.status, 'perlu_revisi');
+
+  const resubmitReq = await requestApi(`/api/account-requests/${accReqId}/resubmit`, {
+    method: 'PATCH',
+    cookie: korwilJabarCookie,
+    body: {
+      schoolNpsn: '20220302',
+      docsChecklist: { pasFoto: true, kartuPelajar: true },
+    },
+  });
+  assert.equal(resubmitReq.status, 200);
+  assert.equal(resubmitReq.json?.status, 'menunggu');
+  assert.equal(resubmitReq.json?.revisionCount, 1);
+
+  const approvalCenterRevise = await requestApi(`/api/approval-center/account_request/${accReqId}/action`, {
+    method: 'POST',
+    cookie: superCookie,
+    body: { action: 'request_revision', reason: 'Verifikasi ulang foto kartu pelajar.' },
+  });
+  assert.equal(approvalCenterRevise.status, 200);
+  assert.equal(approvalCenterRevise.json?.status, 'perlu_revisi');
+
+  // Enable auto-approve when sekretariat review is off & complete docs submitted
+  const setAuto = await requestApi('/api/system/settings', {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { settings: { duta_auto_approve: 'true', require_sekretariat_duta_review: 'false' } },
+  });
+  assert.equal(setAuto.status, 200);
+
+  const autoReq = await requestApi('/api/account-requests', {
+    method: 'POST',
+    cookie: korwilJabarCookie,
+    body: {
+      fullName: 'Rafi Otomatis Duta',
+      email: 'rafi.auto@dpbi.or.id',
+      phone: '081233344455',
+      provinceCode: '32',
+      batchId: 'batch-3',
+      schoolName: 'SMAN 3 Depok',
+      schoolNpsn: '20229111',
+      guardianName: 'Bapak Rafi',
+      docsChecklist: { pasFoto: true, kartuPelajar: true },
+    },
+  });
+  assert.equal(autoReq.status, 201);
+  assert.equal(autoReq.json?.autoApproved, true);
+  assert.equal(autoReq.json?.status, 'disetujui');
+  assert.ok(String(autoReq.json?.inviteToken || '').length >= 20);
+
+  // Restore conservative default policy
+  await requestApi('/api/system/settings', {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { settings: { duta_auto_approve: 'false', require_sekretariat_duta_review: 'true' } },
+  });
+
+  // 5. Email Queue chunking, pause, and resume with 12 manual recipients
+  const manualBatch = Array.from({ length: 12 }, (_, idx) => `queue.user.${idx + 1}@dpbi.or.id`);
+  const queuedSend = await requestApi('/api/email/send', {
+    method: 'POST',
+    cookie: superCookie,
+    body: {
+      actionMode: 'send_now',
+      useQueue: true,
+      title: 'Kampanye Antrean Batch v4.2.0',
+      subject: 'Pemberitahuan {{nama}}',
+      bodyText: 'Halo {{nama}}, informasi antrean batch.',
+      audienceFilter: { mode: 'bulk', manualEmails: manualBatch },
+    },
+  });
+  assert.equal(queuedSend.status, 201);
+  const queueCmpId = String(queuedSend.json?.campaignId);
+  assert.equal(queuedSend.json?.totalRecipients, 12);
+
+  const pauseRes = await requestApi(`/api/email/campaigns/${queueCmpId}/pause`, {
+    method: 'POST',
+    cookie: superCookie,
+  });
+  assert.ok([200, 409].includes(pauseRes.status));
+
+  const resumeRes = await requestApi(`/api/email/campaigns/${queueCmpId}/resume`, {
+    method: 'POST',
+    cookie: superCookie,
+  });
+  assert.ok([200, 409].includes(resumeRes.status));
+});
+
+test('v4.2.0 Zero-Confusion Addendum: Role-scoped Beranda, Process Tracker, Support Tickets, Preferences & Task Optimistic Locking', async () => {
+  const superCookie = await loginAs('superadmin@simulasi.dpbi.or.id');
+  const dutaJabarCookie = await loginAs('duta.jabar@simulasi.dpbi.or.id');
+
+  // 1. Personal Workspace /api/beranda scoped strictly by role
+  const berandaDuta = await requestApi('/api/beranda', { cookie: dutaJabarCookie });
+  assert.equal(berandaDuta.status, 200);
+  const dutaApprovals = berandaDuta.json?.pendingApprovals as unknown[];
+  assert.deepEqual(dutaApprovals, []);
+  const dutaQuick = berandaDuta.json?.quickActions as { path: string }[];
+  assert.ok(dutaQuick.some((q) => q.path === '/proposal/baru'));
+  assert.equal(dutaQuick.some((q) => q.path === '/status-sistem'), false);
+
+  const berandaSuper = await requestApi('/api/beranda', { cookie: superCookie });
+  assert.equal(berandaSuper.status, 200);
+  const superQuick = berandaSuper.json?.quickActions as { path: string }[];
+  assert.ok(superQuick.some((q) => q.path === '/status-sistem'));
+
+  // 2. Process Tracker explains stage, reviewer, action owner, and timeline steps
+  const trackerRes = await requestApi('/api/process-tracker/proposal/prop-1', { cookie: superCookie });
+  assert.equal(trackerRes.status, 200);
+  assert.ok(typeof trackerRes.json?.currentStageLabel === 'string');
+  assert.ok(typeof trackerRes.json?.actionRequired === 'string');
+  assert.ok(Array.isArray(trackerRes.json?.steps) && trackerRes.json.steps.length === 4);
+
+  // 3. Support Tickets (/api/support-tickets) + RBAC triage guard
+  const createTicket = await requestApi('/api/support-tickets', {
+    method: 'POST',
+    cookie: dutaJabarCookie,
+    body: {
+      title: 'Uji Kendala Formulir Proposal',
+      description: 'Pengisian tanggal kegiatan di langkah 2 gagal disimpan sementara saat simulasi.',
+      pagePath: '/proposal/baru',
+      moduleName: 'proposal',
+      category: 'bug_fungsional',
+      priority: 'sedang',
+      errorRefCode: 'ERR-TEST01',
+    },
+  });
+  assert.equal(createTicket.status, 201);
+  const ticketId = String(createTicket.json?.id);
+  assert.ok(String(createTicket.json?.ticketNumber || '').startsWith('DPBI/TIKET/'));
+
+  const dutaTriageDenied = await requestApi(`/api/support-tickets/${ticketId}`, {
+    method: 'PATCH',
+    cookie: dutaJabarCookie,
+    body: { status: 'selesai', resolutionNote: 'Tidak boleh menutup tiket sendiri' },
+  });
+  assert.equal(dutaTriageDenied.status, 403);
+
+  const adminTriageOk = await requestApi(`/api/support-tickets/${ticketId}`, {
+    method: 'PATCH',
+    cookie: superCookie,
+    body: { status: 'selesai', priority: 'tinggi', resolutionNote: 'Diperiksa dan dikonfirmasi selesai.' },
+  });
+  assert.equal(adminTriageOk.status, 200);
+  assert.equal(adminTriageOk.json?.status, 'selesai');
+
+  // 4. User Preferences persistence (/api/auth/preferences)
+  const patchPref = await requestApi('/api/auth/preferences', {
+    method: 'PATCH',
+    cookie: dutaJabarCookie,
+    body: {
+      startPage: '/tugas-saya',
+      displayScale: 'besar',
+      favoritePaths: ['/beranda', '/proposal/baru', 'invalid-relative'],
+      tourCompletedRoles: ['duta'],
+    },
+  });
+  assert.equal(patchPref.status, 200);
+
+  const getPref = await requestApi('/api/auth/preferences', { cookie: dutaJabarCookie });
+  assert.equal(getPref.status, 200);
+  const prefObj = getPref.json?.preferences as { startPage: string; displayScale: string; favoritePaths: string[]; tourCompletedRoles: string[] };
+  assert.equal(prefObj.startPage, '/tugas-saya');
+  assert.equal(prefObj.displayScale, 'besar');
+  assert.deepEqual(prefObj.favoritePaths, ['/beranda', '/proposal/baru']);
+  assert.deepEqual(prefObj.tourCompletedRoles, ['duta']);
+
+  // 5. Optimistic concurrency check on Task PATCH returns 409 on stale expectedVersion
+  const taskCreate = await requestApi('/api/tasks', {
+    method: 'POST',
+    cookie: superCookie,
+    body: { title: 'Uji Optimistic Lock Tugas', deadline: '2026-12-28', assigneeId: 'usr-duta-jabar', provinceCode: '32' },
+  });
+  assert.equal(taskCreate.status, 201);
+  const taskId = String(taskCreate.json?.id);
+
+  const okUpdate = await requestApi(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    cookie: dutaJabarCookie,
+    body: { status: 'sedang_berjalan', expectedVersion: 1 },
+  });
+  assert.equal(okUpdate.status, 200);
+  assert.equal(okUpdate.json?.version, 2);
+
+  const staleUpdate = await requestApi(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    cookie: dutaJabarCookie,
+    body: { status: 'selesai', expectedVersion: 1 },
+  });
+  assert.equal(staleUpdate.status, 409);
+  assert.equal(staleUpdate.json?.conflict, true);
+});
+

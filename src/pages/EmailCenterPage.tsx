@@ -8,15 +8,20 @@ import {
   FileText,
   History,
   Mail,
+  Paperclip,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
+  Search,
   Send,
+  Trash2,
   Upload,
   Users,
   XCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { apiGet, apiPost, apiPut, apiUrl } from '../lib/api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUploadFile, apiUrl } from '../lib/api';
 import {
   ALLOWED_EMAIL_VARIABLES,
   formatTanggalIndonesia,
@@ -100,7 +105,17 @@ export function EmailCenterPage() {
   const [batchId, setBatchId] = useState('');
   const [manualEmailsText, setManualEmailsText] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
+  const [useQueue, setUseQueue] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<{ fileId: string; fileName: string; sizeBytes: number }[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [csvParsing, setCsvParsing] = useState(false);
+  const [csvSummary, setCsvSummary] = useState<{
+    totalValid: number;
+    ignoredCount: number;
+    delimiter: string;
+    matchedInSystem: number;
+    errorCsv: string;
+  } | null>(null);
 
   const [preview, setPreview] = useState<AudiencePreviewResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -110,8 +125,11 @@ export function EmailCenterPage() {
   // Campaign / log management
   const [logCampaignFilter, setLogCampaignFilter] = useState('');
   const [cancelCampaignId, setCancelCampaignId] = useState<string | null>(null);
+  const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
 
-  // Template create / edit / history modals
+  // Template create / edit / history / attachments / filters
+  const [tplSearch, setTplSearch] = useState('');
+  const [tplCategoryFilter, setTplCategoryFilter] = useState('');
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [tplName, setTplName] = useState('');
@@ -125,6 +143,8 @@ export function EmailCenterPage() {
     { id: string; version: number; subject: string; body_text: string; body_html: string | null; updated_by: string; created_at: string }[]
   >([]);
   const [tplHistoryLoading, setTplHistoryLoading] = useState(false);
+  const [attModalTpl, setAttModalTpl] = useState<EmailTemplateRecord | null>(null);
+  const [uploadingTplAtt, setUploadingTplAtt] = useState(false);
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -172,6 +192,35 @@ export function EmailCenterPage() {
       setSubject(tpl.subject);
       setBodyText(tpl.bodyText);
       setBodyHtml(tpl.bodyHtml || '');
+      if (tpl.attachments && tpl.attachments.length > 0) {
+        setAttachmentFiles(
+          tpl.attachments.map((a) => ({
+            fileId: a.fileId,
+            fileName: a.fileName,
+            sizeBytes: a.sizeBytes,
+          }))
+        );
+      }
+    }
+  };
+
+  const handleComposerAttachmentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAttachment(true);
+    try {
+      const up = await apiUploadFile(file, 'email');
+      setAttachmentFiles((prev) =>
+        prev.some((f) => f.fileId === up.fileId)
+          ? prev
+          : [...prev, { fileId: up.fileId, fileName: up.fileName, sizeBytes: up.sizeBytes }]
+      );
+      notify(`Lampiran "${up.fileName}" siap disertakan.`, 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengunggah lampiran email.', 'error');
+    } finally {
+      setUploadingAttachment(false);
+      e.target.value = '';
     }
   };
 
@@ -200,12 +249,24 @@ export function EmailCenterPage() {
     setCsvParsing(true);
     try {
       const csvText = await file.text();
-      const res = await apiPost<{ emails: string[]; totalValid: number; ignoredCount: number }>('/api/email/parse-csv', {
-        csvText,
-      });
+      const res = await apiPost<{
+        emails: string[];
+        totalValid: number;
+        ignoredCount: number;
+        delimiter: string;
+        matchedInSystem: number;
+        errorCsv: string;
+      }>('/api/email/parse-csv', { csvText });
       const existing = parsedManualEmails.map((em) => em.toLowerCase());
       const merged = Array.from(new Set([...existing, ...res.emails]));
       setManualEmailsText(merged.join('\n'));
+      setCsvSummary({
+        totalValid: res.totalValid,
+        ignoredCount: res.ignoredCount,
+        delimiter: res.delimiter || ',',
+        matchedInSystem: res.matchedInSystem || 0,
+        errorCsv: res.errorCsv || '',
+      });
       notify(
         `${res.totalValid} email valid diekstrak dari CSV${res.ignoredCount > 0 ? ` (${res.ignoredCount} baris diabaikan)` : ''}.`,
         'success'
@@ -216,6 +277,15 @@ export function EmailCenterPage() {
       setCsvParsing(false);
       e.target.value = '';
     }
+  };
+
+  const downloadCsvErrors = () => {
+    if (!csvSummary?.errorCsv) return;
+    const blob = new Blob([csvSummary.errorCsv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'baris-gagal-penerima-email.csv';
+    a.click();
   };
 
   const handlePreviewAudience = async () => {
@@ -254,6 +324,7 @@ export function EmailCenterPage() {
         deliveryMode: string;
         totalRecipients: number;
         sentCount: number;
+        queuedCount?: number;
         failedCount: number;
       }>('/api/email/send', {
         title: title.trim() || subject.trim(),
@@ -267,6 +338,8 @@ export function EmailCenterPage() {
         audienceFilter: buildAudienceFilter(),
         actionMode,
         scheduledAt: actionMode === 'schedule' ? new Date(scheduledAt).toISOString() : null,
+        attachmentFileIds: attachmentFiles.map((f) => f.fileId),
+        useQueue,
       });
 
       const modeInfo =
@@ -277,6 +350,11 @@ export function EmailCenterPage() {
         notify('Draf kampanye email berhasil disimpan.', 'success');
       } else if (actionMode === 'schedule') {
         notify('Kampanye email berhasil dijadwalkan.', 'success');
+      } else if (res.queuedCount && res.queuedCount > 0) {
+        notify(
+          `Kampanye masuk antrean (${res.sentCount} selesai, ${res.queuedCount} mengantre dari ${res.totalRecipients} penerima). Pantau di tab Riwayat Kampanye.`,
+          'success'
+        );
       } else {
         notify(
           `Berhasil diproses ${modeInfo}: ${res.sentCount} dari ${res.totalRecipients} penerima.`,
@@ -301,6 +379,45 @@ export function EmailCenterPage() {
       await loadOverview();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal membatalkan kampanye.', 'error');
+    }
+  };
+
+  const handlePauseCampaign = async (id: string) => {
+    setQueueBusyId(id);
+    try {
+      await apiPost(`/api/email/campaigns/${id}/pause`);
+      notify('Antrean kampanye dijeda.', 'info');
+      await loadOverview();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menjeda kampanye.', 'error');
+    } finally {
+      setQueueBusyId(null);
+    }
+  };
+
+  const handleResumeCampaign = async (id: string) => {
+    setQueueBusyId(id);
+    try {
+      const res = await apiPost<{ processed: number; remaining: number }>(`/api/email/campaigns/${id}/resume`);
+      notify(`Kampanye dilanjutkan (${res.processed} diproses, ${res.remaining} tersisa).`, 'success');
+      await loadOverview();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal melanjutkan kampanye.', 'error');
+    } finally {
+      setQueueBusyId(null);
+    }
+  };
+
+  const handleProcessNextBatch = async (id: string) => {
+    setQueueBusyId(id);
+    try {
+      const res = await apiPost<{ processed: number; remaining: number }>(`/api/email/campaigns/${id}/process-next`);
+      notify(`Batch antrean diproses (${res.processed} penerima, sisa ${res.remaining}).`, 'info');
+      await loadOverview();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memproses batch berikutnya.', 'error');
+    } finally {
+      setQueueBusyId(null);
     }
   };
 
@@ -391,11 +508,76 @@ export function EmailCenterPage() {
     setSelectedRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
   };
 
+  const handleToggleTemplateStatus = async (tpl: EmailTemplateRecord) => {
+    try {
+      await apiPatch(`/api/email/templates/${tpl.id}/status`, { isActive: !tpl.isActive });
+      notify(`Templat "${tpl.name}" ${!tpl.isActive ? 'diaktifkan' : 'dinonaktifkan'}.`, 'success');
+      await loadOverview();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengubah status templat.', 'error');
+    }
+  };
+
+  const handleAttachFileToTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !attModalTpl) return;
+    setUploadingTplAtt(true);
+    try {
+      const up = await apiUploadFile(file, 'email');
+      await apiPost(`/api/email/templates/${attModalTpl.id}/attachments`, { fileId: up.fileId });
+      notify(`Lampiran "${up.fileName}" ditambahkan ke templat.`, 'success');
+      const refreshed = await apiGet<EmailOverviewResponse>('/api/email/overview');
+      setData(refreshed);
+      const updated = refreshed.templates.find((item) => item.id === attModalTpl.id) || null;
+      setAttModalTpl(updated);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menambahkan lampiran templat.', 'error');
+    } finally {
+      setUploadingTplAtt(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveTemplateAttachment = async (templateId: string, attachmentId: string) => {
+    try {
+      await apiDelete(`/api/email/templates/${templateId}/attachments/${attachmentId}`);
+      notify('Lampiran templat dihapus.', 'info');
+      const refreshed = await apiGet<EmailOverviewResponse>('/api/email/overview');
+      setData(refreshed);
+      const updated = refreshed.templates.find((item) => item.id === templateId) || null;
+      setAttModalTpl(updated);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menghapus lampiran templat.', 'error');
+    }
+  };
+
   const filteredLogs = useMemo(() => {
     if (!data) return [];
     if (!logCampaignFilter) return data.logs;
     return data.logs.filter((l) => l.campaignId === logCampaignFilter);
   }, [data, logCampaignFilter]);
+
+  const templateCategories = useMemo(() => {
+    if (!data) return [];
+    return Array.from(new Set(data.templates.map((t) => t.category || 'Umum'))).sort();
+  }, [data]);
+
+  const filteredTemplates = useMemo(() => {
+    if (!data) return [];
+    const q = tplSearch.trim().toLowerCase();
+    return data.templates.filter((t) => {
+      if (tplCategoryFilter && (t.category || 'Umum') !== tplCategoryFilter) return false;
+      if (
+        q &&
+        !t.name.toLowerCase().includes(q) &&
+        !t.subject.toLowerCase().includes(q) &&
+        !t.code.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [data, tplSearch, tplCategoryFilter]);
 
   const canPublishBulk = can('email', 'publish');
   const canCreate = can('email', 'create');
@@ -514,8 +696,8 @@ export function EmailCenterPage() {
               >
                 <option value="">-- Tulis Manual --</option>
                 {data.templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.category})
+                  <option key={t.id} value={t.id} disabled={!t.isActive}>
+                    {t.name} ({t.category}){!t.isActive ? ' [Nonaktif]' : ''}
                   </option>
                 ))}
               </Select>
@@ -646,13 +828,66 @@ export function EmailCenterPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 bg-slate-50/70 dark:bg-slate-900/50">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Paperclip className="w-3.5 h-3.5 text-[#0EA5E9]" /> Lampiran Email ({attachmentFiles.length})
+                </span>
+                {canCreate && (
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-semibold cursor-pointer hover:border-[#0EA5E9]">
+                    <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                    {uploadingAttachment ? 'Mengunggah...' : 'Tambah Lampiran'}
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt"
+                      onChange={handleComposerAttachmentUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+              {attachmentFiles.length === 0 ? (
+                <p className="text-[11px] text-slate-500">
+                  Belum ada berkas terlampir. Lampiran pada templat otomatis ikut terbawa saat memilih templat.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {attachmentFiles.map((f) => (
+                    <span
+                      key={f.fileId}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-[11px] text-slate-700 dark:text-slate-200"
+                    >
+                      <Paperclip className="w-3 h-3 text-[#0EA5E9]" />
+                      <span className="truncate max-w-[180px]">{f.fileName}</span>
+                      <span className="font-mono text-slate-400 tabular-nums">({Math.max(1, Math.round(f.sizeBytes / 1024))} KB)</span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentFiles((prev) => prev.filter((item) => item.fileId !== f.fileId))}
+                        aria-label={`Hapus lampiran ${f.fileName}`}
+                        className="text-rose-500 hover:text-rose-700 ml-0.5"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 items-end">
               <Input
                 type="datetime-local"
                 label="Jadwalkan Pengiriman (Opsional)"
                 value={scheduledAt}
                 onChange={(e) => setScheduledAt(e.target.value)}
               />
+              <div className="pb-1">
+                <Switch
+                  label="Proses bertahap lewat antrean (disarankan untuk >25 penerima)"
+                  checked={useQueue}
+                  onChange={setUseQueue}
+                />
+              </div>
             </div>
 
             {canCreate && (
@@ -774,16 +1009,35 @@ export function EmailCenterPage() {
             />
 
             {canCreate && (
-              <label className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-[#0EA5E9] cursor-pointer">
-                <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
-                {csvParsing ? 'Membaca Berkas CSV...' : 'Unggah CSV Daftar Email Penerima'}
-                <input
-                  type="file"
-                  accept=".csv,.txt,text/csv,text/plain"
-                  onChange={handleCsvRecipientsUpload}
-                  className="hidden"
-                />
-              </label>
+              <div className="space-y-2">
+                <label className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-[#0EA5E9] cursor-pointer">
+                  <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                  {csvParsing ? 'Membaca Berkas CSV...' : 'Unggah CSV Daftar Email Penerima'}
+                  <input
+                    type="file"
+                    accept=".csv,.txt,text/csv,text/plain"
+                    onChange={handleCsvRecipientsUpload}
+                    className="hidden"
+                  />
+                </label>
+                {csvSummary && (
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-2.5 text-[11px] space-y-1">
+                    <p className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      CSV ({csvSummary.delimiter === ';' ? 'titik koma' : 'koma'}): {csvSummary.totalValid} valid ·{' '}
+                      {csvSummary.matchedInSystem} cocok di sistem · {csvSummary.ignoredCount} diabaikan
+                    </p>
+                    {csvSummary.errorCsv && (
+                      <button
+                        type="button"
+                        onClick={downloadCsvErrors}
+                        className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold hover:underline"
+                      >
+                        <Download className="w-3 h-3" /> Unduh Laporan Baris Gagal (CSV)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             <Button
@@ -835,58 +1089,102 @@ export function EmailCenterPage() {
             />
           ) : (
             <div className="space-y-3">
-              {data.campaigns.map((c) => (
-                <div
-                  key={c.id}
-                  className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-bold text-slate-900 dark:text-white">{c.title}</p>
-                      <StatusIndicator status={c.status} />
-                      <span className="text-[11px] font-mono text-slate-500">
-                        {c.deliveryMode === 'smtp_live' ? 'SMTP Live' : 'Sandbox Outbox'}
-                      </span>
+              {data.campaigns.map((c) => {
+                const pct = c.totalRecipients > 0 ? Math.min(100, Math.round((c.sentCount / c.totalRecipients) * 100)) : 0;
+                const isQueued = ['dalam_antrean', 'sedang_dikirim'].includes(c.status);
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white">{c.title}</p>
+                        <StatusIndicator status={c.paused ? 'menunggu' : c.status} customLabel={c.paused ? 'Dijeda' : undefined} />
+                        <span className="text-[11px] font-mono text-slate-500">
+                          {c.deliveryMode === 'smtp_live' ? 'SMTP Live' : 'Sandbox Outbox'}
+                        </span>
+                        {c.attachments && c.attachments.length > 0 && (
+                          <span className="text-[11px] text-[#0EA5E9] inline-flex items-center gap-1 font-medium">
+                            <Paperclip className="w-3 h-3" /> {c.attachments.length} lampiran
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 truncate">Subjek: {c.subject}</p>
+                      <div className="max-w-md space-y-1">
+                        <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                          <div className="h-full bg-[#0EA5E9] transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                          Oleh {c.createdByName} · {c.sentCount}/{c.totalRecipients} terkirim ({pct}%) · {c.queuedCount ?? 0} antre · {c.failedCount} gagal ·{' '}
+                          {formatTanggalIndonesia(c.sentAt || c.scheduledAt || c.createdAt, true)}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 truncate">Subjek: {c.subject}</p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-                      Oleh {c.createdByName} · {c.sentCount}/{c.totalRecipients} terkirim · {c.failedCount} gagal ·{' '}
-                      {formatTanggalIndonesia(c.sentAt || c.scheduledAt || c.createdAt, true)}
-                    </p>
-                  </div>
 
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setLogCampaignFilter(c.id);
-                        setActiveTab('logs');
-                      }}
-                    >
-                      Lihat Log
-                    </Button>
-                    {['draft', 'terjadwal'].includes(c.status) && canCreate && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => setCancelCampaignId(c.id)}
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Batalkan
-                      </Button>
-                    )}
-                    {c.failedCount > 0 && canCreate && (
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => handleRetryCampaign(c.id)}
+                        onClick={() => {
+                          setLogCampaignFilter(c.id);
+                          setActiveTab('logs');
+                        }}
                       >
-                        <RefreshCw className="w-3.5 h-3.5" /> Ulangi Gagal
+                        Lihat Log
                       </Button>
-                    )}
+                      {isQueued && canCreate && !c.paused && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={queueBusyId === c.id}
+                          onClick={() => handlePauseCampaign(c.id)}
+                        >
+                          <Pause className="w-3.5 h-3.5" /> Jeda
+                        </Button>
+                      )}
+                      {isQueued && canCreate && c.paused && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={queueBusyId === c.id}
+                          onClick={() => handleResumeCampaign(c.id)}
+                        >
+                          <Play className="w-3.5 h-3.5" /> Lanjutkan
+                        </Button>
+                      )}
+                      {isQueued && canCreate && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={queueBusyId === c.id}
+                          onClick={() => handleProcessNextBatch(c.id)}
+                        >
+                          Proses Batch
+                        </Button>
+                      )}
+                      {['draft', 'terjadwal', 'dalam_antrean', 'sedang_dikirim'].includes(c.status) && canCreate && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => setCancelCampaignId(c.id)}
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Batalkan
+                        </Button>
+                      )}
+                      {c.failedCount > 0 && canCreate && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleRetryCampaign(c.id)}
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" /> Ulangi Gagal
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
@@ -958,75 +1256,134 @@ export function EmailCenterPage() {
       )}
 
       {activeTab === 'templates' && (
-        <div className="space-y-6">
-          {Object.entries(
-            data.templates.reduce<Record<string, EmailTemplateRecord[]>>((acc, t) => {
-              const cat = t.category || 'Umum';
-              if (!acc[cat]) acc[cat] = [];
-              acc[cat].push(t);
-              return acc;
-            }, {})
-          ).map(([cat, tpls]) => (
-            <div key={cat} className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  {cat} ({tpls.length})
-                </h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {tpls.map((t) => (
-                  <Card key={t.id} className="p-4 space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-[11px] text-[#0EA5E9] font-semibold">
-                          {t.category} · v{t.version || 1}
-                        </p>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-[#0EA5E9] shrink-0" />
-                          <span className="truncate">{t.name}</span>
-                        </h4>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => openTemplateHistory(t)}
-                        >
-                          <History className="w-3.5 h-3.5" /> Versi
-                        </Button>
-                        {can('email', 'edit') && (
+        <div className="space-y-5">
+          <Card className="p-4 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="search"
+                value={tplSearch}
+                onChange={(e) => setTplSearch(e.target.value)}
+                placeholder="Cari dari 50+ templat email resmi berdasarkan nama, kode, atau subjek..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
+              />
+            </div>
+            <Select
+              aria-label="Filter kategori templat"
+              value={tplCategoryFilter}
+              onChange={(e) => setTplCategoryFilter(e.target.value)}
+            >
+              <option value="">Semua Kategori ({data.templates.length})</option>
+              {templateCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </Select>
+          </Card>
+
+          {filteredTemplates.length === 0 ? (
+            <EmptyState
+              title="Templat tidak ditemukan"
+              description="Sesuaikan kata kunci atau kategori untuk menampilkan templat email resmi."
+            />
+          ) : (
+            Object.entries(
+              filteredTemplates.reduce<Record<string, EmailTemplateRecord[]>>((acc, t) => {
+                const cat = t.category || 'Umum';
+                if (!acc[cat]) acc[cat] = [];
+                acc[cat].push(t);
+                return acc;
+              }, {})
+            ).map(([cat, tpls]) => (
+              <div key={cat} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {cat} ({tpls.length})
+                  </h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {tpls.map((t) => (
+                    <Card key={t.id} className="p-4 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-[11px] text-[#0EA5E9] font-semibold">
+                              {t.category} · v{t.version || 1}
+                            </p>
+                            <StatusIndicator status={t.isActive ? 'aktif' : 'nonaktif'} />
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5">
+                            <FileText className="w-3.5 h-3.5 text-[#0EA5E9] shrink-0" />
+                            <span className="truncate">{t.name}</span>
+                          </h4>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => openEditTemplateModal(t)}
+                            onClick={() => openTemplateHistory(t)}
                           >
-                            <Edit3 className="w-3.5 h-3.5" /> Ubah
+                            <History className="w-3.5 h-3.5" /> Versi
                           </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          onClick={() => {
-                            handleSelectTemplate(t.id);
-                            setActiveTab('composer');
-                          }}
-                        >
-                          Pakai
-                        </Button>
+                          {can('email', 'edit') && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setAttModalTpl(t)}
+                              >
+                                <Paperclip className="w-3.5 h-3.5" /> {t.attachments?.length || 0}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => openEditTemplateModal(t)}
+                              >
+                                <Edit3 className="w-3.5 h-3.5" /> Ubah
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => handleToggleTemplateStatus(t)}
+                              >
+                                {t.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            disabled={!t.isActive}
+                            onClick={() => {
+                              handleSelectTemplate(t.id);
+                              setActiveTab('composer');
+                            }}
+                          >
+                            Pakai
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Subjek: {t.subject}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line line-clamp-3">{t.bodyText}</p>
-                    {t.bodyHtml && (
-                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 font-medium">
-                        <Eye className="w-3 h-3" /> Mendukung format HTML Email
-                      </p>
-                    )}
-                  </Card>
-                ))}
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">Subjek: {t.subject}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line line-clamp-3">{t.bodyText}</p>
+                      <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                        {t.bodyHtml && (
+                          <span className="text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 font-medium">
+                            <Eye className="w-3 h-3" /> Format HTML
+                          </span>
+                        )}
+                        {t.attachments && t.attachments.length > 0 && (
+                          <span className="text-[#0EA5E9] inline-flex items-center gap-1 font-medium">
+                            <Paperclip className="w-3 h-3" /> {t.attachments.length} lampiran default
+                          </span>
+                        )}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       )}
 
@@ -1092,6 +1449,52 @@ export function EmailCenterPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Template Attachments Modal */}
+      <Modal
+        open={Boolean(attModalTpl)}
+        onClose={() => setAttModalTpl(null)}
+        title={`Lampiran Templat — ${attModalTpl?.name || ''}`}
+        subtitle="Lampiran ini akan otomatis disertakan saat Anda memakai templat di komposer."
+      >
+        {attModalTpl && (
+          <div className="space-y-4 text-xs">
+            <label className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 font-semibold cursor-pointer hover:border-[#0EA5E9]">
+              <Upload className="w-3.5 h-3.5 text-[#0EA5E9]" />
+              {uploadingTplAtt ? 'Mengunggah Berkas...' : 'Unggah & Pasang Lampiran Baru'}
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt"
+                onChange={handleAttachFileToTemplate}
+                className="hidden"
+              />
+            </label>
+            {!attModalTpl.attachments || attModalTpl.attachments.length === 0 ? (
+              <p className="text-slate-500 py-3 text-center">Belum ada lampiran pada templat ini.</p>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {attModalTpl.attachments.map((att) => (
+                  <div key={att.id} className="py-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 dark:text-white truncate">{att.fileName}</p>
+                      <p className="text-[11px] font-mono text-slate-500 tabular-nums">
+                        {Math.max(1, Math.round(att.sizeBytes / 1024))} KB · {att.mimeType}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => handleRemoveTemplateAttachment(attModalTpl.id, att.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Hapus
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* Template Version History Modal */}

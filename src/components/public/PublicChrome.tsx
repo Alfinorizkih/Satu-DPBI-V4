@@ -33,14 +33,12 @@ export function PublicNavbar() {
           className="flex items-center gap-3 whitespace-nowrap shrink-0 text-left"
         >
           <img
-            src="/assets/aistudio/logosd_69efa81d.jpg"
-            alt="Logo Resmi DPBI"
+            src="/assets/aistudio/icon-utama_7bb14cc7.png"
+            alt="Logo Utama SATU DPBI"
             referrerPolicy="no-referrer"
-            className="w-9 h-9 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+            className="h-9 w-auto object-contain rounded-lg bg-white px-1.5 py-0.5 border border-slate-200 dark:border-slate-700 shrink-0"
           />
-          <span className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-            SATU <span className="text-[#0EA5E9]">DPBI</span>
-          </span>
+          <span className="sr-only">SATU DPBI</span>
         </button>
 
         {/* Zone 2: 4 Clean Public Links */}
@@ -152,10 +150,10 @@ export function PublicFooter() {
             <div className="lg:col-span-5 space-y-3">
               <div className="flex items-center gap-3">
                 <img
-                  src="/assets/aistudio/logosd_69efa81d.jpg"
-                  alt="Logo Resmi DPBI"
+                  src="/assets/aistudio/icon-utama_7bb14cc7.png"
+                  alt="Logo Utama SATU DPBI"
                   referrerPolicy="no-referrer"
-                  className="w-10 h-10 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                  className="h-11 w-auto object-contain rounded-xl bg-white px-2 py-1 border border-slate-200 dark:border-slate-700 shrink-0"
                 />
                 <div>
                   <p className="font-display font-bold text-slate-900 dark:text-white text-sm">
@@ -169,9 +167,22 @@ export function PublicFooter() {
               <p className="leading-relaxed max-w-md text-slate-600 dark:text-slate-400">
                 Sistem Administrasi Terpadu Duta Pelajar Berbudaya Indonesia — organisasi kepemimpinan pelajar independen di bawah naungan yayasan dengan fokus literasi budaya dan kolaborasi 38 provinsi.
               </p>
-              <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
-                Satu Sistem, Satu Data, Satu Koordinasi · Berbudaya, Bergerak, dan Berdampak Untuk Negeri.
-              </p>
+              <div className="flex items-center gap-3 pt-1">
+                <img
+                  src="/assets/aistudio/logotp_bf31c116.png"
+                  alt="Lambang Duta Pelajar Berbudaya Indonesia"
+                  referrerPolicy="no-referrer"
+                  className="w-11 h-11 rounded-full object-contain bg-white p-0.5 border border-slate-200 dark:border-slate-700 shrink-0"
+                />
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                    Didukung &amp; Dikelola Oleh Duta Pelajar Berbudaya Indonesia
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Satu Sistem, Satu Data, Satu Koordinasi · Berbudaya, Bergerak, Berdampak Untuk Negeri.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Column 2: Portal Navigation */}

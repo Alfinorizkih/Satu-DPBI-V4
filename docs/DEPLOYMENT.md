@@ -31,6 +31,16 @@ VITE_API_BASE_URL=""
 CORS_ALLOWED_ORIGINS="https://satu.dpbi.or.id"
 COOKIE_SAMESITE="lax"
 COOKIE_DOMAIN=""
+
+# Pengiriman email produksi (kosongkan untuk mode sandbox_outbox internal)
+SMTP_HOST=""
+SMTP_PORT="587"
+SMTP_SECURE="false"
+SMTP_USER=""
+SMTP_PASS=""
+SMTP_FROM="SATU DPBI <noreply@dpbi.or.id>"
+EMAIL_BATCH_LIMIT="250"
+EMAIL_RATE_PER_MIN="60"
 ```
 
 > **Peringatan Keamanan**: Jangan pernah mengaktifkan `DEMO_MODE="true"` di server produksi karena mode tersebut membuka endpoint `/api/auth/demo-switch` dan menampilkan tombol akun simulasi di halaman masuk.
@@ -81,4 +91,4 @@ Berkas `vercel.json` sudah menyiapkan rewrite SPA agar rute bersih seperti `/wil
 1. Panggil `GET https://<domain-backend>/api/health` -> pastikan `"ok":true` dan `"mode":"PRODUKSI"`.
 2. Buka `/` di peramban: pada database kosong, portal otomatis mengarahkan admin perdana ke inisialisasi Super Admin pertama (`POST /api/auth/bootstrap`).
 3. Segera buat akun Super Admin pertama; setelah 1 pengguna tersimpan, form bootstrap terkunci otomatis selamanya.
-4. Uji muat ulang halaman (`F5`) setelah login, unggah berkas PDF ke `/proposal`, serta uji `/wilayah` untuk memastikan seluruh berkas GeoJSON di `public/maps/` termuat dengan status `200 OK`.
+4. Uji muat ulang halaman (`F5`) setelah login di `/beranda`, unggah berkas PDF ke `/proposal/baru`, cek `/status-sistem`, serta uji `/wilayah` untuk memastikan seluruh berkas GeoJSON di `public/maps/` termuat dengan status `200 OK`.

@@ -23,8 +23,8 @@
    - Modul terpadu **Program Unggulan Nasional** (*Behind The Culture*, *Sedapnya Warisanku*, *Budaya Masuk Sekolah*) di `/program` & `/program/:slug` yang terhubung ke Proposal, LKL, Tugas, Dokumen, Persuratan, dan Evaluasi.
    - Modul **Persuratan & Disposisi Digital** (`/persuratan`) dengan penomoran atomik `DPBI/SURAT/[TAHUN]/[URUTAN]` dan pelacakan status disposisi (`dibaca`, `ditindaklanjuti`, `selesai`).
 
-5. **Pusat Email 18 Templat Resmi DPBI & Repositori Dokumen Versi**
-   - 18 templat resmi DPBI tersemai secara idempoten dengan dukungan `body_html`, pratinjau Teks/HTML, riwayat sunting templat (`email_template_history`), 11 variabel aman, dan impor penerima CSV.
+5. **Pusat Email 50 Templat Resmi DPBI, Antrean Batch & Repositori Dokumen Versi**
+   - 50 templat resmi DPBI tersemai secara idempoten (dengan toggle aktif/nonaktif) mendukung `body_html` anti-XSS, pratinjau Teks/HTML, riwayat sunting templat (`email_template_history`), 20 variabel aman, lampiran berkas (`email_attachments`), parser penerima CSV RFC-4180, serta antrean pengiriman bertahap (`email_queue`) dengan kontrol jeda/lanjut/batal.
    - Repositori dokumen mendukung rantai penggantian versi (`replaced_by_id`) dengan peringatan otomatis pada versi usang.
 
 6. **Ketahanan Sistem, Backup WAL-Safe & Mode Pemeliharaan**
@@ -32,6 +32,11 @@
    - Mode Pemeliharaan global yang memblokir operasi tulis non-Super Admin (`HTTP 503`) dan menampilkan banner **Mode Baca-Saja** di seluruh antarmuka portal.
    - Perbaikan keandalan transaksi SQLite: `nextReferenceNumber()` menggunakan `SAVEPOINT` agar aman dipanggil di dalam transaksi outer (`accept-invitation` & impor personalia).
 
-7. **Pengujian & Keamanan Terverifikasi**
-   - **26/26** pengujian otomatis lulus (`18` unit domain/RBAC/router/offlineDraft + `8` integrasi keamanan & alur kerja API).
-   - `tsc --noEmit` lulus dengan `0` galat, build produksi `vite build && esbuild` sukses, `bun audit` melaporkan `0` kerentanan di 341 paket, serta verifikasi browser Playwright pada Desktop (`1440x900` Light/Dark), Tablet (`768x1024`), dan Mobile (`390x844`).
+7. **Pengalaman Pengguna Zero-Confusion, Preferensi & Identitas Brand Resmi**
+   - Ruang kerja `/beranda` adaptif per peran sebagai halaman awal default pasca-login, formulir pengajuan 4 langkah bertahap dengan *autosave* & *draft recovery*, `ProcessTracker` lini masa lengkap, Pusat Bantuan & Tur Interaktif per peran, Pusat Kendala (`/kendala`), dan tab **Tampilan & Preferensi** di `/pengaturan`.
+   - Perlindungan *double submission* (`X-Idempotency-Key`), *optimistic locking* (`version` guard), pengajuan Duta 2 jalur dengan `perlu_revisi`/`resubmit`, dan penyematan logo resmi DPBI (`icon-app-sd`, `icon-utama`, `logotp`).
+
+8. **Pengujian & Keamanan Terverifikasi**
+   - **31/31** pengujian otomatis lulus (`21` unit domain/RBAC/CSV/router/guidance + `10` integrasi keamanan & alur kerja API).
+   - `tsc --noEmit` lulus dengan `0` galat, build produksi `vite build && esbuild` sukses, serta verifikasi browser Playwright pada Desktop (`1440x900` Light/Dark) dan Mobile (`390x844`) dengan `0` galat konsol maupun luapan horizontal.
+

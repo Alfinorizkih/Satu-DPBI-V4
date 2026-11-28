@@ -20,6 +20,7 @@ import {
 import { calculateAlumniWindow, csvSafeCell, ROLE_LABELS } from '../src/lib/rbac';
 import { PROVINCE_BY_CODE } from '../src/lib/provinces';
 import type { RoleCode } from '../src/lib/types';
+import { sendTransactionalEmail } from './email';
 
 export function registerModuleRoutes(app: Express): void {
   // ==================== TASKS ====================
@@ -1137,7 +1138,7 @@ export function registerModuleRoutes(app: Express): void {
   app.get('/api/settings/users', requireAuth, requirePermission('pengaturan', 'manage'), (_req: AuthenticatedRequest, res: Response) => {
     const db = getDb();
     const users = db
-      .prepare('SELECT id, email, full_name, role, bidang, province_code, account_status, last_login_at, created_at FROM users ORDER BY created_at DESC')
+      .prepare('SELECT id, email, full_name, role, bidang, province_code, account_status, suspended_reason, personnel_id, last_login_at, created_at FROM users ORDER BY created_at DESC')
       .all() as Record<string, unknown>[];
     res.json({
       users: users.map((u) => ({
@@ -1150,6 +1151,8 @@ export function registerModuleRoutes(app: Express): void {
         provinceCode: u.province_code ? String(u.province_code) : null,
         provinceName: u.province_code ? PROVINCE_BY_CODE.get(String(u.province_code))?.name ?? null : null,
         accountStatus: String(u.account_status),
+        suspendedReason: u.suspended_reason ? String(u.suspended_reason) : null,
+        personnelId: u.personnel_id ? String(u.personnel_id) : null,
         lastLoginAt: u.last_login_at ? String(u.last_login_at) : null,
       })),
     });
@@ -1254,21 +1257,105 @@ export function registerModuleRoutes(app: Express): void {
     res.status(201).json({ ok: true, id: userId, personnelId: finalPersId, linkMode: mode });
   });
 
-  app.patch('/api/settings/users/:id/status', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {
-    const { accountStatus, role } = req.body ?? {};
+  app.patch('/api/settings/users/:id/status', requireAuth, requirePermission('pengaturan', 'manage'), async (req: AuthenticatedRequest, res: Response) => {
+    const { accountStatus, role, suspendedReason, lockedUntil } = req.body ?? {};
+    const validStatuses = new Set(['aktif', 'nonaktif', 'terkunci', 'ditangguhkan', 'dibatalkan', 'menunggu_aktivasi', 'alumni_terbatas']);
+    if (accountStatus !== undefined && !validStatuses.has(String(accountStatus))) {
+      res.status(422).json({ error: 'Status akun tidak valid.' });
+      return;
+    }
+    if (role !== undefined && !ROLE_LABELS[String(role) as RoleCode]) {
+      res.status(422).json({ error: 'Peran pengguna tidak dikenal.' });
+      return;
+    }
+
     const db = getDb();
     const targetId = String(req.params.id);
-    db.prepare('UPDATE users SET account_status = COALESCE(?, account_status), role = COALESCE(?, role) WHERE id = ?').run(
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as Record<string, unknown> | undefined;
+    if (!target) {
+      res.status(404).json({ error: 'Akun pengguna tidak ditemukan.' });
+      return;
+    }
+
+    const currentRole = String(target.role);
+    const currentStatus = String(target.account_status);
+    const nextRole = role ? String(role) : currentRole;
+    const nextStatus = accountStatus ? String(accountStatus) : currentStatus;
+
+    // Hard safeguard: never allow disabling/suspending/downgrading the last active super_admin
+    if (currentRole === 'super_admin' && currentStatus === 'aktif' && (nextRole !== 'super_admin' || nextStatus !== 'aktif')) {
+      const activeSuperCount = (
+        db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'super_admin' AND account_status = 'aktif'").get() as { c: number }
+      ).c;
+      if (activeSuperCount <= 1) {
+        res.status(409).json({
+          error: 'Tidak dapat menonaktifkan, menangguhkan, atau menurunkan peran Super Admin aktif terakhir di sistem.',
+          code: 409,
+        });
+        return;
+      }
+    }
+
+    const reasonText = suspendedReason !== undefined ? String(suspendedReason).trim() : (nextStatus === 'aktif' ? null : (target.suspended_reason ? String(target.suspended_reason) : null));
+    db.prepare(
+      `UPDATE users SET
+        account_status = COALESCE(?, account_status),
+        role = COALESCE(?, role),
+        suspended_reason = ?,
+        locked_until = COALESCE(?, locked_until)
+       WHERE id = ?`
+    ).run(
       accountStatus ?? null,
       role ?? null,
+      reasonText,
+      lockedUntil ?? null,
       targetId
     );
-    // Security rule: invalidate existing sessions immediately whenever role or account status changes
-    if (accountStatus || role) {
+    if (nextStatus === 'aktif') {
+      db.prepare('UPDATE users SET locked_until = NULL, suspended_reason = NULL WHERE id = ?').run(targetId);
+    }
+
+    // Security rule: invalidate existing sessions immediately whenever role or non-active status changes
+    if ((accountStatus && accountStatus !== currentStatus) || (role && role !== currentRole)) {
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
     }
-    writeAuditLog(db, req.authUser!, 'UPDATE_USER_ACCOUNT', 'user', targetId, 'berhasil', `${accountStatus || ''} ${role || ''}`);
-    res.json({ ok: true });
+
+    if (accountStatus && accountStatus !== currentStatus) {
+      const targetEmail = String(target.email);
+      const targetName = String(target.full_name);
+      const provName = target.province_code ? PROVINCE_BY_CODE.get(String(target.province_code))?.name ?? 'Nasional' : 'Nasional';
+      if (['ditangguhkan', 'terkunci', 'nonaktif'].includes(nextStatus)) {
+        await sendTransactionalEmail(db, {
+          templateCode: 'akun_ditangguhkan',
+          toEmail: targetEmail,
+          toName: targetName,
+          userId: targetId,
+          role: ROLE_LABELS[nextRole as RoleCode] ?? nextRole,
+          provinsi: provName,
+          catatanPemeriksa: reasonText || `Status akun diubah menjadi ${nextStatus}.`,
+          fallbackSubject: `[SATU DPBI] Pemberitahuan Status Akun — ${targetName}`,
+          fallbackBody: `Yth. ${targetName},\n\nStatus akun ${targetEmail} berubah menjadi ${nextStatus}. Catatan: ${reasonText || '-'}`,
+          actorId: req.authUser!.id,
+          actorName: req.authUser!.fullName,
+        });
+      } else if (nextStatus === 'aktif' && currentStatus !== 'aktif') {
+        await sendTransactionalEmail(db, {
+          templateCode: 'akun_diaktifkan_kembali',
+          toEmail: targetEmail,
+          toName: targetName,
+          userId: targetId,
+          role: ROLE_LABELS[nextRole as RoleCode] ?? nextRole,
+          provinsi: provName,
+          fallbackSubject: `[SATU DPBI] Akun Anda Diaktifkan Kembali — ${targetName}`,
+          fallbackBody: `Yth. ${targetName},\n\nAkun ${targetEmail} kini berstatus aktif kembali.`,
+          actorId: req.authUser!.id,
+          actorName: req.authUser!.fullName,
+        });
+      }
+    }
+
+    writeAuditLog(db, req.authUser!, 'UPDATE_USER_ACCOUNT', 'user', targetId, 'berhasil', `${accountStatus || ''} ${role || ''} ${reasonText ? `| ${reasonText}` : ''}`);
+    res.json({ ok: true, accountStatus: nextStatus, role: nextRole });
   });
 
   app.get('/api/settings/users/:id/sessions', requireAuth, requirePermission('pengaturan', 'manage'), (req: AuthenticatedRequest, res: Response) => {
@@ -1343,6 +1430,9 @@ export function registerModuleRoutes(app: Express): void {
     'eval_weight_coordination',
     'session_ttl_hours',
     'idle_timeout_minutes',
+    'duta_auto_approve',
+    'invite_expiry_hours',
+    'require_sekretariat_duta_review',
   ]);
 
   app.patch('/api/system/settings', requireAuth, requirePermission('sistem', 'configure'), (req: AuthenticatedRequest, res: Response) => {
@@ -1378,6 +1468,15 @@ export function registerModuleRoutes(app: Express): void {
           return;
         }
         cleanVal = String(Math.round(num));
+      } else if (k === 'invite_expiry_hours') {
+        const num = Number(cleanVal);
+        if (!Number.isFinite(num) || num < 12 || num > 336) {
+          res.status(422).json({ error: 'Masa berlaku tautan undangan (invite_expiry_hours) wajib antara 12 sampai 336 jam.' });
+          return;
+        }
+        cleanVal = String(Math.round(num));
+      } else if (k === 'duta_auto_approve' || k === 'require_sekretariat_duta_review') {
+        cleanVal = cleanVal === 'true' ? 'true' : 'false';
       }
       stmt.run(k, cleanVal, now);
       updatedKeys.push(k);

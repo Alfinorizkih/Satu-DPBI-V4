@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Calendar, CheckSquare, Download, Edit3, Eye, FileText, History, Info, Plus, Printer, Send } from 'lucide-react';
-import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
+import { AlertTriangle, Calendar, CheckSquare, Download, Edit3, Eye, FileText, History, Info, Plus, Printer, RefreshCw, RotateCcw, Send, Trash2 } from 'lucide-react';
+import { ApiError, apiGet, apiPatch, apiPost, apiUrl, generateIdempotencyKey } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
@@ -13,6 +13,8 @@ import {
   Pagination,
   StatusIndicator,
 } from '../components/ui';
+import { GuidedFieldHint, GuidedStepperForm } from '../components/GuidedStepperForm';
+import { ProcessTracker } from '../components/ProcessTracker';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { FlagshipProgramRecord, ProposalRecord } from '../lib/types';
 import { formatTanggalIndonesia, OFFICIAL_BIDANGS, ROLE_LABELS } from '../lib/rbac';
@@ -56,10 +58,17 @@ export function ProposalsPage({
   const { showConfirmDialog, guardAction, confirmLeave, cancelLeave } = useUnsavedChanges(formDirty);
   const [statusFilter, setStatusFilter] = useState('');
   const [bidangOnly, setBidangOnly] = useState(false);
+  const [includeTrash, setIncludeTrash] = useState(false);
   const [page, setPage] = useState(1);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [formStep, setFormStep] = useState(0);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [autosavedAt, setAutosavedAt] = useState<string | null>(null);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState<string | null>(null);
+  const [conflictLatest, setConflictLatest] = useState<Record<string, unknown> | null>(null);
+  const [confirmTrashProposal, setConfirmTrashProposal] = useState<ProposalRecord | null>(null);
   const [selected, setSelected] = useState<ProposalRecord | null>(null);
   const [versions, setVersions] = useState<Record<string, unknown>[]>([]);
   const [decisionNote, setDecisionNote] = useState('');
@@ -103,10 +112,14 @@ export function ProposalsPage({
       .catch(() => setPrograms([]));
   }, []);
 
-  const load = (onlyMyBidang = bidangOnly) => {
+  const load = (onlyMyBidang = bidangOnly, withTrash = includeTrash) => {
     setLoading(true);
+    const qs = new URLSearchParams();
+    if (onlyMyBidang) qs.set('bidangOnly', '1');
+    if (withTrash) qs.set('includeDeleted', '1');
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
     apiGet<{ proposals: (ProposalRecord & { bidangRelevant?: boolean })[]; matrixRules: Record<string, unknown>[] }>(
-      `/api/proposals${onlyMyBidang ? '?bidangOnly=1' : ''}`
+      `/api/proposals${suffix}`
     )
       .then((res) => {
         setProposals(res.proposals);
@@ -116,15 +129,19 @@ export function ProposalsPage({
   };
 
   useEffect(() => {
-    load(bidangOnly);
-  }, [bidangOnly]);
+    load(bidangOnly, includeTrash);
+  }, [bidangOnly, includeTrash]);
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, bidangOnly]);
+  }, [statusFilter, bidangOnly, includeTrash]);
 
   useEffect(() => {
     if (initialMode === 'create' && can('proposal', 'create')) {
       setEditingDraftId(null);
+      setEditingUpdatedAt(null);
+      setConflictLatest(null);
+      setFormStep(0);
+      setFormErrors([]);
       setForm(defaultForm);
       setFormDirty(false);
       setCreateOpen(true);
@@ -157,6 +174,10 @@ export function ProposalsPage({
 
   const openEditDraft = (p: ProposalRecord) => {
     setEditingDraftId(p.id);
+    setEditingUpdatedAt(p.updatedAt);
+    setConflictLatest(null);
+    setFormStep(0);
+    setFormErrors([]);
     setOfflineDraftBanner(null);
     setForm({
       title: p.title,
@@ -182,13 +203,17 @@ export function ProposalsPage({
 
   const updateProposalForm = (patch: Partial<typeof defaultForm>) => {
     setFormDirty(true);
+    setFormErrors([]);
     setForm((prev) => ({ ...prev, ...patch }));
   };
 
   useEffect(() => {
     if (!createOpen || editingDraftId || !formDirty) return;
     const t = window.setTimeout(() => {
-      saveOfflineDraft(user?.id, 'proposal_form', form);
+      const savedIso = saveOfflineDraft(user?.id, 'proposal_form', form);
+      if (savedIso) {
+        setAutosavedAt(new Date(savedIso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+      }
     }, 500);
     return () => window.clearTimeout(t);
   }, [createOpen, editingDraftId, formDirty, form, user?.id]);
@@ -226,16 +251,34 @@ export function ProposalsPage({
     });
   };
 
+  const validateProposal = (saveAsDraft: boolean): string[] => {
+    const errs: string[] = [];
+    if (!form.title.trim() || form.title.trim().length < 4) {
+      errs.push('Judul kegiatan minimal 4 karakter.');
+    }
+    if (!saveAsDraft) {
+      if (!form.eventDate) errs.push('Tanggal pelaksanaan kegiatan wajib diisi.');
+      if (!form.location.trim()) errs.push('Lokasi gedung/sekolah atau platform daring wajib diisi.');
+      if (!form.objective.trim() || form.objective.trim().length < 10) {
+        errs.push('Tujuan & sasaran kegiatan wajib diisi minimal 10 karakter sebelum dikirim.');
+      }
+      if (!form.estimatedParticipants || form.estimatedParticipants < 1) {
+        errs.push('Estimasi jumlah peserta minimal 1 orang.');
+      }
+    }
+    return errs;
+  };
+
   const submitProposal = async (saveAsDraft: boolean) => {
     if (submitting) return;
-    if (!form.title.trim()) {
-      notify('Judul kegiatan wajib diisi.', 'error');
+    const errs = validateProposal(saveAsDraft);
+    if (errs.length > 0) {
+      setFormErrors(errs);
+      notify(errs[0], 'error');
       return;
     }
-    if (!saveAsDraft && (!form.objective.trim() || !form.location.trim())) {
-      notify('Tujuan dan lokasi kegiatan wajib diisi sebelum dikirim.', 'error');
-      return;
-    }
+    setFormErrors([]);
+    setConflictLatest(null);
     setSubmitting(true);
     try {
       if (editingDraftId) {
@@ -243,17 +286,23 @@ export function ProposalsPage({
           ...form,
           programId: form.programId || null,
           submitNow: !saveAsDraft,
+          expectedUpdatedAt: editingUpdatedAt || undefined,
         });
         notify(
           saveAsDraft ? 'Draft proposal diperbarui.' : 'Draft proposal berhasil dikirim untuk pemeriksaan.',
           'success'
         );
       } else {
-        const res = await apiPost<{ referenceNumber: string; assignedApproverRole: string }>('/api/proposals', {
-          ...form,
-          programId: form.programId || null,
-          saveAsDraft,
-        });
+        const res = await apiPost<{ referenceNumber: string; assignedApproverRole: string }>(
+          '/api/proposals',
+          {
+            ...form,
+            programId: form.programId || null,
+            saveAsDraft,
+          },
+          false,
+          { idempotencyKey: generateIdempotencyKey('prop') }
+        );
         clearOfflineDraft(user?.id, 'proposal_form');
         setOfflineDraftBanner(null);
         notify(
@@ -266,13 +315,39 @@ export function ProposalsPage({
       setFormDirty(false);
       setCreateOpen(false);
       setEditingDraftId(null);
+      setEditingUpdatedAt(null);
       setForm(defaultForm);
       navigate('/proposal');
       load();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.conflict) {
+        setConflictLatest(err.latestRecord || { status: 'diperbarui' });
+      }
       notify(err instanceof Error ? err.message : 'Gagal menyimpan proposal.', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSoftDeleteDraft = async (p: ProposalRecord) => {
+    try {
+      await apiPost(`/api/proposals/${p.id}/soft-delete`, {});
+      notify(`Draft ${p.referenceNumber} dipindahkan ke Tempat Sampah Draft.`, 'info');
+      setConfirmTrashProposal(null);
+      if (selected?.id === p.id) setSelected(null);
+      load(bidangOnly, includeTrash);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menghapus draft proposal.', 'error');
+    }
+  };
+
+  const handleRestoreDraft = async (p: ProposalRecord) => {
+    try {
+      await apiPost(`/api/proposals/${p.id}/restore`, {});
+      notify(`Draft ${p.referenceNumber} berhasil dipulihkan.`, 'success');
+      load(bidangOnly, includeTrash);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memulihkan draft proposal.', 'error');
     }
   };
 
@@ -332,6 +407,10 @@ export function ProposalsPage({
               type="button"
               onClick={() => {
                 setEditingDraftId(null);
+                setEditingUpdatedAt(null);
+                setConflictLatest(null);
+                setFormStep(0);
+                setFormErrors([]);
                 setForm(defaultForm);
                 setFormDirty(false);
                 const saved = loadOfflineDraft<typeof defaultForm>(user?.id, 'proposal_form');
@@ -372,28 +451,42 @@ export function ProposalsPage({
           ))}
         </div>
 
-        {user?.role === 'pengurus_nasional' && user.bidang && (
-          <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
-            <button
-              type="button"
-              onClick={() => setBidangOnly(false)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
-                !bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              Semua Bidang
-            </button>
-            <button
-              type="button"
-              onClick={() => setBidangOnly(true)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
-                bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-[#0EA5E9]' : 'text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              Hanya Bidang Saya ({user.bidang.replace(/^Bidang\s+/i, '')})
-            </button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIncludeTrash((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+              includeTrash
+                ? 'border-[#0EA5E9] bg-sky-50 dark:bg-sky-950/40 text-[#0EA5E9]'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5" /> {includeTrash ? 'Sembunyikan Draft Terhapus' : 'Lihat Sampah Draft'}
+          </button>
+
+          {user?.role === 'pengurus_nasional' && user.bidang && (
+            <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800/80 gap-1">
+              <button
+                type="button"
+                onClick={() => setBidangOnly(false)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  !bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                Semua Bidang
+              </button>
+              <button
+                type="button"
+                onClick={() => setBidangOnly(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  bidangOnly ? 'bg-white dark:bg-slate-900 shadow-xs text-[#0EA5E9]' : 'text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                Hanya Bidang Saya ({user.bidang.replace(/^Bidang\s+/i, '')})
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <GlassCard className="p-5 space-y-4">
@@ -438,24 +531,53 @@ export function ProposalsPage({
                         <p>{formatTanggalIndonesia(p.eventDate)}</p>
                         <p className="text-[11px] text-slate-500">{p.estimatedParticipants} peserta</p>
                       </td>
-                      <td className="py-3 pr-4"><StatusIndicator status={p.status} /></td>
-                      <td className="py-3 text-right space-x-1.5 whitespace-nowrap">
-                        {p.status === 'draft' && can('proposal', 'edit') && (
-                          <button
-                            type="button"
-                            onClick={() => openEditDraft(p)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
-                          </button>
+                      <td className="py-3 pr-4">
+                        <StatusIndicator status={p.softDeletedAt ? 'diarsipkan' : p.status} />
+                        {p.softDeletedAt && (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Di Tempat Sampah Draft</p>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => openDetail(p)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white font-semibold transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> Detail
-                        </button>
+                      </td>
+                      <td className="py-3 text-right space-x-1.5 whitespace-nowrap">
+                        {p.softDeletedAt ? (
+                          can('proposal', 'edit') && (
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreDraft(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-semibold"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" /> Pulihkan
+                            </button>
+                          )
+                        ) : (
+                          <>
+                            {p.status === 'draft' && can('proposal', 'edit') && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditDraft(p)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] font-semibold"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmTrashProposal(p)}
+                                  aria-label={`Hapus draft ${p.referenceNumber}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-rose-200 dark:border-rose-800/70 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 font-semibold"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openDetail(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-[#0EA5E9] hover:text-white font-semibold transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Detail
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -473,25 +595,39 @@ export function ProposalsPage({
                       <p className="text-sm font-bold text-slate-900 dark:text-white">{p.title}</p>
                       <p className="text-[11px] text-slate-500">{p.applicantName} · {p.provinceName}</p>
                     </div>
-                    <StatusIndicator status={p.status} />
+                    <StatusIndicator status={p.softDeletedAt ? 'diarsipkan' : p.status} />
                   </div>
                   <div className="flex items-center gap-2 pt-1">
-                    {p.status === 'draft' && can('proposal', 'edit') && (
-                      <button
-                        type="button"
-                        onClick={() => openEditDraft(p)}
-                        className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
-                      </button>
+                    {p.softDeletedAt ? (
+                      can('proposal', 'edit') && (
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreDraft(p)}
+                          className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-semibold"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> Pulihkan Draft
+                        </button>
+                      )
+                    ) : (
+                      <>
+                        {p.status === 'draft' && can('proposal', 'edit') && (
+                          <button
+                            type="button"
+                            onClick={() => openEditDraft(p)}
+                            className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> Lanjutkan Draft
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openDetail(p)}
+                          className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Tinjau Proposal
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => openDetail(p)}
-                      className="flex-1 min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Tinjau Proposal
-                    </button>
                   </div>
                 </div>
               ))}
@@ -502,47 +638,46 @@ export function ProposalsPage({
         )}
       </GlassCard>
 
-      {/* Create / Edit Draft Proposal Modal */}
+      {/* Create / Edit Draft Proposal Modal (4-Step Guided Stepper) */}
       <Modal
         open={createOpen}
         onClose={closeCreateModal}
         title={editingDraftId ? 'Lanjutkan Draft Proposal' : 'Ajukan Proposal Kegiatan Baru'}
+        subtitle="Ikuti 4 langkah terstruktur di bawah agar proposal lengkap dan cepat ditinjau."
+        maxWidth="max-w-3xl"
       >
         <div className="space-y-4 text-xs">
-          {offlineDraftBanner && !editingDraftId && (
-            <div className="rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/80 dark:bg-sky-950/40 p-3 flex flex-wrap items-center justify-between gap-2">
+          {conflictLatest && (
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 flex flex-wrap items-center justify-between gap-2 text-rose-900 dark:text-rose-200"
+            >
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">Draf Lokal Tersimpan Otomatis</p>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                  Tersimpan pada {formatTanggalIndonesia(offlineDraftBanner.savedAt, true)}. Pulihkan isian sebelumnya?
+                <p className="font-bold">Konflik Versi Terdeteksi (409)</p>
+                <p className="text-[11px]">
+                  Proposal ini baru saja diperbarui di sesi lain. Muat ulang versi terbaru agar tidak menimpa data terbaru.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForm({ ...defaultForm, ...offlineDraftBanner.data });
-                    setFormDirty(true);
-                    setOfflineDraftBanner(null);
-                    notify('Draf proposal lokal dipulihkan.', 'info');
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-[#0EA5E9] text-white font-semibold"
-                >
-                  Pulihkan
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearOfflineDraft(user?.id, 'proposal_form');
-                    setOfflineDraftBanner(null);
-                  }}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 font-semibold"
-                >
-                  Hapus Draf
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const fresh = await apiGet<{ proposals: ProposalRecord[] }>('/api/proposals');
+                  const match = fresh.proposals.find((x) => x.id === editingDraftId);
+                  setProposals(fresh.proposals);
+                  if (match) {
+                    openEditDraft(match);
+                    notify('Versi proposal terbaru berhasil dimuat ulang.', 'info');
+                  } else {
+                    setConflictLatest(null);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white font-semibold"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Muat Versi Terbaru
+              </button>
             </div>
           )}
+
           {duplicateMatches.length > 0 && (
             <div
               role="alert"
@@ -558,113 +693,198 @@ export function ProposalsPage({
               ))}
             </div>
           )}
-          <div>
-            <label className="block font-semibold mb-1">Judul Kegiatan *</label>
-            <input type="text" required value={form.title} onChange={(e) => updateProposalForm({ title: e.target.value })} placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
-            <select
-              value={form.programId}
-              onChange={(e) => updateProposalForm({ programId: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
-            >
-              <option value="">-- Tidak Terkait Program Khusus / Reguler --</option>
-              {programs.map((prog) => (
-                <option key={prog.id} value={prog.id}>
-                  {prog.name} ({prog.periodLabel})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Bidang</label>
-              <select value={form.bidang} onChange={(e) => updateProposalForm({ bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                {!OFFICIAL_BIDANGS.some((b) => b.id === form.bidang) && form.bidang && (
-                  <option value={form.bidang}>{form.bidang}</option>
-                )}
-                {OFFICIAL_BIDANGS.map((b) => (
-                  <option key={b.code} value={b.id}>
-                    {b.number}. {b.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Kategori</label>
-              <input type="text" required value={form.category} onChange={(e) => updateProposalForm({ category: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Tingkat Risiko</label>
-              <select value={form.riskLevel} onChange={(e) => updateProposalForm({ riskLevel: e.target.value as 'rendah' | 'sedang' | 'tinggi' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                <option value="rendah">Rendah</option>
-                <option value="sedang">Sedang</option>
-                <option value="tinggi">Tinggi</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Tanggal Kegiatan</label>
-              <input type="date" required value={form.eventDate} onChange={(e) => updateProposalForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Moda Pelaksanaan</label>
-              <select value={form.activityMode} onChange={(e) => updateProposalForm({ activityMode: e.target.value as 'luring' | 'daring' | 'hibrida' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                <option value="luring">Luring (Tatap Muka)</option>
-                <option value="daring">Daring (Online)</option>
-                <option value="hibrida">Hibrida</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Estimasi Peserta</label>
-              <input type="number" min={1} required value={form.estimatedParticipants} onChange={(e) => updateProposalForm({ estimatedParticipants: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Lokasi / Platform Kegiatan</label>
-            <input type="text" value={form.location} onChange={(e) => updateProposalForm({ location: e.target.value })} placeholder="Nama gedung/sekolah atau platform daring" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Tujuan & Sasaran Kegiatan *</label>
-            <textarea rows={3} required value={form.objective} onChange={(e) => updateProposalForm({ objective: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-          </div>
-          <div className="flex flex-wrap gap-4">
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={form.usesDpbiIdentity} onChange={(e) => updateProposalForm({ usesDpbiIdentity: e.target.checked })} />
-              <span>Menggunakan Identitas Resmi DPBI</span>
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={form.externalPermitNeeded} onChange={(e) => updateProposalForm({ externalPermitNeeded: e.target.checked })} />
-              <span>Memerlukan Izin Eksternal / Mitra</span>
-            </label>
-          </div>
-          <FileDropzone
-            label="Unggah Dokumen Proposal Utama (PDF)"
-            accept=".pdf,application/pdf"
-            moduleName="proposal"
-            uploadedFileName={form.pdfFileName}
-            onUploaded={(res) => updateProposalForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
-          />
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => submitProposal(true)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold hover:border-[#0EA5E9] disabled:opacity-50"
-            >
-              {submitting ? 'Menyimpan...' : 'Simpan Draft'}
-            </button>
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => submitProposal(false)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold hover:bg-sky-600 disabled:opacity-60"
-            >
-              <Send className="w-3.5 h-3.5" /> {submitting ? 'Mengirim...' : 'Kirim Pengajuan'}
-            </button>
-          </div>
+
+          <GuidedStepperForm
+            steps={[
+              { id: 'identitas', title: 'Identitas & Program', description: 'Judul, bidang, kategori & risiko' },
+              { id: 'jadwal', title: 'Jadwal & Lokasi', description: 'Tanggal, moda & estimasi peserta' },
+              { id: 'tujuan', title: 'Tujuan & Berkas PDF', description: 'Sasaran, kepatuhan & lampiran' },
+              { id: 'konfirmasi', title: 'Ringkasan & Kirim', description: 'Periksa akhir sebelum pengajuan' },
+            ]}
+            currentStep={formStep}
+            onStepChange={(next) => {
+              setFormErrors([]);
+              setFormStep(next);
+            }}
+            checklist={[
+              { label: 'Judul kegiatan (min. 4 huruf)', ok: form.title.trim().length >= 4 },
+              { label: 'Jadwal & lokasi terisi', ok: Boolean(form.eventDate && form.location.trim()) },
+              { label: 'Tujuan kegiatan (min. 10 huruf)', ok: form.objective.trim().length >= 10 },
+              { label: 'Dokumen PDF terunggah (disarankan)', ok: Boolean(form.pdfFileId) },
+            ]}
+            autosavedAt={!editingDraftId ? autosavedAt : null}
+            hasDraftRecovery={Boolean(offlineDraftBanner && !editingDraftId)}
+            draftSavedAtLabel={offlineDraftBanner ? formatTanggalIndonesia(offlineDraftBanner.savedAt, true) : undefined}
+            onRecoverDraft={() => {
+              if (!offlineDraftBanner) return;
+              setForm({ ...defaultForm, ...offlineDraftBanner.data });
+              setFormDirty(true);
+              setOfflineDraftBanner(null);
+              notify('Draf proposal lokal dipulihkan.', 'info');
+            }}
+            onDiscardDraft={() => {
+              clearOfflineDraft(user?.id, 'proposal_form');
+              setOfflineDraftBanner(null);
+            }}
+            errors={formErrors}
+            submitting={submitting}
+            submitLabel={editingDraftId ? 'Kirim Pengajuan dari Draft' : 'Konfirmasi & Kirim Proposal'}
+            saveDraftLabel={editingDraftId ? 'Perbarui Draft' : 'Simpan Draft'}
+            onSaveDraft={() => submitProposal(true)}
+            onSubmit={() => submitProposal(false)}
+          >
+            {formStep === 0 && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="prop-title" className="block font-semibold mb-1">Judul Kegiatan *</label>
+                  <input
+                    id="prop-title"
+                    type="text"
+                    required
+                    value={form.title}
+                    onChange={(e) => updateProposalForm({ title: e.target.value })}
+                    placeholder="Contoh: Gelar Sastra & Aksara Daerah Pelajar"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <GuidedFieldHint
+                    hint="Gunakan nama kegiatan yang spesifik agar mudah ditelusuri di pusat persetujuan."
+                    example="Lokakarya Aksara Nusantara SMA Se-Jawa Barat"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="prop-prog" className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+                  <select
+                    id="prop-prog"
+                    value={form.programId}
+                    onChange={(e) => updateProposalForm({ programId: e.target.value })}
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  >
+                    <option value="">-- Tidak Terkait Program Khusus / Reguler --</option>
+                    {programs.map((prog) => (
+                      <option key={prog.id} value={prog.id}>
+                        {prog.name} ({prog.periodLabel})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label htmlFor="prop-bidang" className="block font-semibold mb-1">Bidang</label>
+                    <select id="prop-bidang" value={form.bidang} onChange={(e) => updateProposalForm({ bidang: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                      {!OFFICIAL_BIDANGS.some((b) => b.id === form.bidang) && form.bidang && (
+                        <option value={form.bidang}>{form.bidang}</option>
+                      )}
+                      {OFFICIAL_BIDANGS.map((b) => (
+                        <option key={b.code} value={b.id}>
+                          {b.number}. {b.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="prop-cat" className="block font-semibold mb-1">Kategori</label>
+                    <input id="prop-cat" type="text" required value={form.category} onChange={(e) => updateProposalForm({ category: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label htmlFor="prop-risk" className="block font-semibold mb-1">Tingkat Risiko</label>
+                    <select id="prop-risk" value={form.riskLevel} onChange={(e) => updateProposalForm({ riskLevel: e.target.value as 'rendah' | 'sedang' | 'tinggi' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                      <option value="rendah">Rendah (Internal / Kecil)</option>
+                      <option value="sedang">Sedang (Lintas Sekolah)</option>
+                      <option value="tinggi">Tinggi (Publik / Mitra Besar)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {formStep === 1 && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label htmlFor="prop-date" className="block font-semibold mb-1">Tanggal Kegiatan *</label>
+                    <input id="prop-date" type="date" required value={form.eventDate} onChange={(e) => updateProposalForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label htmlFor="prop-time" className="block font-semibold mb-1">Waktu Pelaksanaan</label>
+                    <input id="prop-time" type="text" value={form.eventTime} onChange={(e) => updateProposalForm({ eventTime: e.target.value })} placeholder="09:00 - 13:00 WIB" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label htmlFor="prop-mode" className="block font-semibold mb-1">Moda Pelaksanaan</label>
+                    <select id="prop-mode" value={form.activityMode} onChange={(e) => updateProposalForm({ activityMode: e.target.value as 'luring' | 'daring' | 'hibrida' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                      <option value="luring">Luring (Tatap Muka)</option>
+                      <option value="daring">Daring (Online)</option>
+                      <option value="hibrida">Hibrida</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label htmlFor="prop-loc" className="block font-semibold mb-1">Lokasi / Platform Kegiatan *</label>
+                    <input id="prop-loc" type="text" value={form.location} onChange={(e) => updateProposalForm({ location: e.target.value })} placeholder="Nama gedung/sekolah atau platform daring" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    <GuidedFieldHint
+                      hint="Cantumkan nama sekolah/gedung beserta kota atau nama platform siaran."
+                      example="Aula SMAN 3 Bandung / Zoom Meeting Nasional"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="prop-part" className="block font-semibold mb-1">Estimasi Peserta *</label>
+                    <input id="prop-part" type="number" min={1} required value={form.estimatedParticipants} onChange={(e) => updateProposalForm({ estimatedParticipants: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {formStep === 2 && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="prop-target" className="block font-semibold mb-1">Sasaran Peserta</label>
+                  <input id="prop-target" type="text" value={form.targetAudience} onChange={(e) => updateProposalForm({ targetAudience: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div>
+                  <label htmlFor="prop-obj" className="block font-semibold mb-1">Tujuan &amp; Sasaran Kegiatan *</label>
+                  <textarea id="prop-obj" rows={3} required value={form.objective} onChange={(e) => updateProposalForm({ objective: e.target.value })} placeholder="Jelaskan tujuan, manfaat budaya bagi pelajar, dan keluaran terukur..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div className="flex flex-wrap gap-4 py-1">
+                  <label className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={form.usesDpbiIdentity} onChange={(e) => updateProposalForm({ usesDpbiIdentity: e.target.checked })} />
+                    <span>Menggunakan Identitas Resmi DPBI</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={form.externalPermitNeeded} onChange={(e) => updateProposalForm({ externalPermitNeeded: e.target.checked })} />
+                    <span>Memerlukan Izin Eksternal / Mitra</span>
+                  </label>
+                </div>
+                <FileDropzone
+                  label="Unggah Dokumen Proposal Utama (PDF)"
+                  accept=".pdf,application/pdf"
+                  moduleName="proposal"
+                  uploadedFileName={form.pdfFileName}
+                  onUploaded={(res) => updateProposalForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
+                />
+              </div>
+            )}
+
+            {formStep === 3 && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 p-4 space-y-2.5">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white">Ringkasan Akhir Sebelum Dikirim</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <p><strong>Judul:</strong> {form.title || '—'}</p>
+                    <p><strong>Bidang:</strong> {form.bidang}</p>
+                    <p><strong>Kategori &amp; Risiko:</strong> {form.category} ({form.riskLevel})</p>
+                    <p><strong>Jadwal:</strong> {form.eventDate ? formatTanggalIndonesia(form.eventDate) : '—'} ({form.eventTime})</p>
+                    <p><strong>Moda &amp; Lokasi:</strong> {form.activityMode} · {form.location || '—'}</p>
+                    <p><strong>Estimasi Peserta:</strong> {form.estimatedParticipants} orang</p>
+                    <p className="sm:col-span-2"><strong>Berkas PDF:</strong> {form.pdfFileName || 'Belum diunggah (dapat menyusul jika draft)'}</p>
+                    <p className="sm:col-span-2"><strong>Tujuan:</strong> {form.objective || '—'}</p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+                  <strong>Apa yang terjadi setelah dikirim?</strong> Sistem menerbitkan nomor referensi otomatis, menetapkan batas SLA 72 jam kepada peninjau ({form.riskLevel === 'tinggi' || form.externalPermitNeeded ? 'Pengurus Nasional' : 'Koordinator Wilayah'}), dan mencatat setiap tahap pada Pelacak Proses.
+                </div>
+              </div>
+            )}
+          </GuidedStepperForm>
         </div>
       </Modal>
 
@@ -738,6 +958,9 @@ export function ProposalsPage({
                 )}
               </div>
             </div>
+
+            {/* Rich Process Tracker */}
+            <ProcessTracker entityType="proposal" entityId={selected.id} />
 
             {/* Clear Next Action Guidance */}
             <div className="rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60 p-3 space-y-2">
@@ -942,6 +1165,19 @@ export function ProposalsPage({
           if (dec) handleDecide(dec);
         }}
         onCancel={() => setPendingDecision(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmTrashProposal)}
+        title="Pindahkan Draft Proposal ke Tempat Sampah?"
+        message={`Draft "${confirmTrashProposal?.title || ''}" akan dipindahkan ke Tempat Sampah Draft dan masih dapat dipulihkan kapan saja.`}
+        confirmLabel="Pindahkan ke Sampah"
+        cancelLabel="Batal"
+        danger
+        onConfirm={() => {
+          if (confirmTrashProposal) handleSoftDeleteDraft(confirmTrashProposal);
+        }}
+        onCancel={() => setConfirmTrashProposal(null)}
       />
 
       <A4PrintModal

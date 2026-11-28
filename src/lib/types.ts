@@ -122,7 +122,7 @@ export interface AuthUser {
   provinceName: string | null;
   batchId: string | null;
   personnelId: string | null;
-  accountStatus: 'aktif' | 'nonaktif' | 'terkunci' | 'menunggu_persetujuan' | 'alumni_terbatas';
+  accountStatus: 'aktif' | 'nonaktif' | 'terkunci' | 'ditangguhkan' | 'dibatalkan' | 'menunggu_aktivasi' | 'menunggu_persetujuan' | 'alumni_terbatas';
   alumniAccessExpiresAt: string | null;
   permissions: Record<ModuleCode, PermissionAction[]>;
   activeDelegations: DelegationRecord[];
@@ -229,7 +229,7 @@ export interface PersonnelRecord {
   appointedAt: string;
   termStartsAt: string;
   termEndsAt: string;
-  personnelStatus: 'aktif' | 'menunggu_penetapan' | 'menyelesaikan_masa_jabatan' | 'alumni' | 'mengundurkan_diri' | 'diberhentikan';
+  personnelStatus: 'aktif' | 'menunggu_verifikasi' | 'menunggu_penetapan' | 'selesai_masa_jabatan' | 'menyelesaikan_masa_jabatan' | 'alumni' | 'mengundurkan_diri' | 'diberhentikan' | 'diarsipkan';
   verificationStatus: ProfileVerificationStatus;
   verificationNote: string | null;
   culturalInterests: string;
@@ -247,6 +247,8 @@ export interface PersonnelRecord {
     suratKesediaan: boolean;
   };
   avatarFileId?: string | null;
+  archivedAt?: string | null;
+  archivedReason?: string | null;
   completenessScore: number;
   restrictedFieldsMasked?: boolean;
 }
@@ -303,6 +305,7 @@ export interface ProposalRecord {
   escalatedAt?: string | null;
   cancelledReason?: string | null;
   programId?: string | null;
+  softDeletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -372,6 +375,8 @@ export interface TaskRecord {
   category?: string | null;
   isTemplate: boolean;
   recurrence: 'tidak' | 'bulanan' | 'mingguan';
+  version?: number;
+  updatedAt?: string;
   commentCount: number;
   createdAt: string;
 }
@@ -469,6 +474,17 @@ export interface ApprovalQueueItem {
   summary: string;
 }
 
+export interface EmailAttachmentRecord {
+  id: string;
+  ownerType: 'template' | 'campaign';
+  ownerId: string;
+  fileId: string;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+  createdAt: string;
+}
+
 export interface EmailTemplateRecord {
   id: string;
   code: string;
@@ -479,6 +495,7 @@ export interface EmailTemplateRecord {
   bodyHtml?: string | null;
   version?: number;
   isActive: boolean;
+  attachments?: EmailAttachmentRecord[];
   updatedAt: string;
 }
 
@@ -498,10 +515,13 @@ export interface EmailCampaignRecord {
     manualEmails?: string[];
   };
   deliveryMode: 'smtp_live' | 'sandbox_outbox';
-  status: 'draft' | 'terjadwal' | 'terkirim' | 'sebagian_gagal' | 'dibatalkan';
+  status: 'draft' | 'terjadwal' | 'dalam_antrean' | 'sedang_dikirim' | 'terkirim' | 'sebagian_gagal' | 'gagal' | 'dibatalkan';
+  paused?: boolean;
+  queuedCount?: number;
   totalRecipients: number;
   sentCount: number;
   failedCount: number;
+  attachments?: EmailAttachmentRecord[];
   scheduledAt: string | null;
   sentAt: string | null;
   createdByName: string;

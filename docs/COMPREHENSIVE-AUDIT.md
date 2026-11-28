@@ -53,5 +53,26 @@
    - Tidak ada antarmuka dan API pengiriman email terpadu maupun manajemen sesi per pengguna dari panel Super Admin.
 3. **Kualitas Umpan Balik Frontend & Link Berkas**
    - Toast di `AuthContext.tsx` hanya mendukung `success | error | info`, tanpa tombol tutup manual (`X`), tanpa varian `warning`/`loading`, dan durasi error terlalu singkat (`4.5` detik).
-   - Beberapa pemanggilan tautan berkas di `CoordinatorReportsPage.tsx`, `TasksAndDocsPages.tsx`, dan `SafetyEvalArchivePages.tsx` masih memakai path mentah `/api/files/...` tanpa pembungkus `apiUrl(...)`.
+- Beberapa pemanggilan tautan berkas di `CoordinatorReportsPage.tsx`, `TasksAndDocsPages.tsx`, dan `SafetyEvalArchivePages.tsx` masih memakai path mentah `/api/files/...` tanpa pembungkus `apiUrl(...)`.
    - Beberapa aksi destruktif/penolakan belum menggunakan `ConfirmDialog` sebelum dieksekusi, dan belum ada kompresi gambar sisi klien sebelum unggah foto LKL/dokumen.
+
+---
+
+## 3. Penutupan Temuan & Status Verifikasi Terkini
+
+Seluruh temuan pada Bagian 2 telah ditutup dan diperkuat dengan lapisan pengendalian tambahan:
+
+1. **Keamanan & Kontrol Akses**:
+   - Seluruh kueri SQL dinamis pada Dashboard, Global Search, dan Laporan terparameterisasi penuh (`?`).
+   - File upload dan unduhan dilindungi melalui tabel `file_access_grants`, verifikasi kepemilikan/cakupan provinsi di `canAccessStoredFile()`, dan rute `/api/files/:id/download`.
+   - TTL sesi dibatasi keras maksimal `24 jam`, `PATCH /api/system/settings` memakai *allowlist* kunci resmi, blokir *self-approval* (`HTTP 403`), guard `super_admin` terakhir (`HTTP 409`), proteksi formula CSV (`csvSafeCell`), *HTML escaping* (`escapeHtml`), *idempotency keys*, dan *optimistic locking* (`version`).
+2. **Alur Kerja Terhubung & Skalabilitas Operasional**:
+   - Proposal disetujui otomatis membangkitkan jadwal kalender dan 4 tugas bertahap; LKL memvalidasi proposal disetujui dan memperbarui status tugas serta kesiapan evaluasi; Laporan Koordinator mendukung alur revisi.
+   - Pusat Persetujuan Terpadu (`/persetujuan`), Pusat Email (`50` templat resmi, `20` variabel, lampiran `email_attachments`, antrean batch `email_queue` dengan jeda/lanjut/batal, parser RFC-4180 CSV), Program Unggulan (`/program`), Persuratan & Disposisi (`/persuratan`), serta Handover Koordinator paket lengkap telah aktif.
+3. **Zero-Confusion UX & Integritas Tampilan**:
+   - Ruang kerja personal `/beranda` per peran (menjadi rute pendaratan baku pasca-login), form 4 langkah bertahap dengan autosave dan *draft recovery*, `ProcessTracker` timeline lengkap, Pusat Bantuan kontekstual + tur peran, Pusat Kendala (`/kendala`), tab `Tampilan & Preferensi`, serta penyematan logo resmi DPBI (`icon-app-sd`, `icon-utama`, `logotp`).
+4. **Verifikasi Otomatis & Browser**:
+   - `npm run lint` (`tsc --noEmit`): **0 galat**.
+   - `npx --yes tsx --test src/lib/domain.test.ts server/api.security.test.ts`: **31/31 LULUS** (`21` unit + `10` integrasi API).
+   - `playwright-cli` pada Desktop (`1440x900` Light/Dark) & Mobile (`390x844`): **0 galat konsol**, **0 luapan horizontal**, dan **0 kegagalan HTTP 5xx**.
+

@@ -26,6 +26,8 @@ import { AlumniPage } from './pages/AlumniPage';
 import { ApprovalCenterPage } from './pages/ApprovalCenterPage';
 import { EmailCenterPage } from './pages/EmailCenterPage';
 import { ProgramsPage, CorrespondencePage } from './pages/ProgramsAndCorrespondencePages';
+import { BerandaPage } from './pages/BerandaPage';
+import { SupportCenterPage } from './pages/SupportCenterPage';
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -63,6 +65,8 @@ class AppErrorBoundary extends React.Component<
 
 function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
   switch (route.kind) {
+    case 'beranda':
+      return <BerandaPage />;
     case 'dashboard':
       return <DashboardPage />;
     case 'my_activity':
@@ -113,6 +117,8 @@ function renderMatchedPage(route: MatchedPrivateRoute): React.ReactNode {
       return <SettingsPage initialTab={route.initialTab} />;
     case 'help':
       return <HelpPage />;
+    case 'support':
+      return <SupportCenterPage />;
     case 'legal':
       return <PublicLegalPage section={route.section} />;
   }
@@ -131,9 +137,11 @@ function AppRouter() {
     setAccountPending,
     pendingRedirectPath,
     setPendingRedirectPath,
+    preferences,
   } = useAuth();
 
   const normalizedPath = normalizePathname(currentPath);
+  const homePath = preferences.startPage || '/beranda';
 
   useEffect(() => {
     if (!loading && user && normalizedPath === '/login') {
@@ -142,10 +150,10 @@ function AppRouter() {
         setPendingRedirectPath(null);
         navigate(dest);
       } else {
-        navigate('/dashboard');
+        navigate(homePath);
       }
     }
-  }, [loading, user, normalizedPath, navigate, pendingRedirectPath, setPendingRedirectPath]);
+  }, [loading, user, normalizedPath, navigate, pendingRedirectPath, setPendingRedirectPath, homePath]);
 
   if (loading) {
     return (
@@ -153,8 +161,8 @@ function AppRouter() {
         <div className="w-full max-w-md space-y-4">
           <div className="flex items-center gap-3">
             <img
-              src="/assets/aistudio/logosd_69efa81d.jpg"
-              alt="Logo DPBI"
+              src="/assets/aistudio/icon-app-sd_f7fda3a9.png"
+              alt="Ikon Aplikasi SATU DPBI"
               className="w-10 h-10 rounded-xl object-cover border border-slate-200 dark:border-slate-800"
             />
             <div>
@@ -287,7 +295,7 @@ function AppRouter() {
   }
 
   const effectivePath =
-    normalizedPath === '/' || normalizedPath === '/login' ? '/dashboard' : normalizedPath;
+    normalizedPath === '/' || normalizedPath === '/login' ? homePath : normalizedPath;
   const route = matchPrivateRoute(effectivePath);
 
   if (!route) {
@@ -296,7 +304,8 @@ function AppRouter() {
         <ErrorView
           code={404}
           message={`Modul untuk rute "${effectivePath}" tidak tersedia di dalam sistem.`}
-          onBack={() => navigate('/dashboard')}
+          onBack={() => navigate('/beranda')}
+          onReportIssue={() => navigate(`/kendala?from=${encodeURIComponent(effectivePath)}`)}
         />
       </AppShell>
     );
@@ -307,7 +316,8 @@ function AppRouter() {
       <AppShell>
         <ErrorView
           code={403}
-          onBack={() => navigate('/dashboard')}
+          onBack={() => navigate('/beranda')}
+          onReportIssue={() => navigate(`/kendala?from=${encodeURIComponent(effectivePath)}`)}
         />
       </AppShell>
     );
@@ -316,7 +326,11 @@ function AppRouter() {
   if (effectivePath === '/pengaturan/pengguna' && !can('pengaturan', 'manage')) {
     return (
       <AppShell>
-        <ErrorView code={403} onBack={() => navigate('/dashboard')} />
+        <ErrorView
+          code={403}
+          onBack={() => navigate('/beranda')}
+          onReportIssue={() => navigate(`/kendala?from=${encodeURIComponent(effectivePath)}`)}
+        />
       </AppShell>
     );
   }
@@ -329,7 +343,11 @@ function AppRouter() {
   if ((effectivePath === '/pengaturan/cms' || effectivePath === '/cms') && !canCmsAccess) {
     return (
       <AppShell>
-        <ErrorView code={403} onBack={() => navigate('/dashboard')} />
+        <ErrorView
+          code={403}
+          onBack={() => navigate('/beranda')}
+          onReportIssue={() => navigate(`/kendala?from=${encodeURIComponent(effectivePath)}`)}
+        />
       </AppShell>
     );
   }

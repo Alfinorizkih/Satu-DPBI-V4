@@ -370,21 +370,59 @@ export function SystemAdminPage({
 
       {tab === 'kesehatan' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-            <GlassCard className="p-5 space-y-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+            <GlassCard className="p-5 space-y-1.5">
               <Activity className="w-5 h-5 text-emerald-500" />
-              <p className="font-bold text-sm mt-2">Database SQLite WAL</p>
+              <p className="font-bold text-sm mt-1">Database SQLite ({data.health.dbJournalMode || 'WAL'})</p>
               <StatusIndicator status={data.health.database} />
+              <p className="text-slate-500 font-mono tabular-nums">
+                Latensi: {data.health.dbLatencyMs ?? '—'} ms · Migrasi: {data.health.migrationsApplied ?? 0}
+              </p>
+              {data.health.latestMigration && (
+                <p className="text-[11px] text-slate-400 truncate" title={data.health.latestMigration.name}>
+                  Terakhir: #{data.health.latestMigration.version} {data.health.latestMigration.name}
+                </p>
+              )}
             </GlassCard>
-            <GlassCard className="p-5 space-y-1">
+
+            <GlassCard className="p-5 space-y-1.5">
+              <HardDrive className="w-5 h-5 text-[#0EA5E9]" />
+              <p className="font-bold text-sm mt-1">Penyimpanan &amp; Backup</p>
+              <StatusIndicator status={data.health.storage || 'sehat'} />
+              <p className="text-slate-500 font-mono tabular-nums">
+                Terpakai: {data.storage?.percentUsed ?? 0}% ({data.storage?.fileCount ?? 0} file)
+              </p>
+              <p className="text-[11px] text-slate-400 tabular-nums">
+                Backup terakhir: {data.health.lastBackupAt ? formatTanggalIndonesia(data.health.lastBackupAt, true) : 'Belum ada'}
+                {data.health.lastBackupStatus ? ` (${data.health.lastBackupStatus})` : ''}
+              </p>
+            </GlassCard>
+
+            <GlassCard className="p-5 space-y-1.5">
               <Shield className="w-5 h-5 text-emerald-500" />
-              <p className="font-bold text-sm mt-2">Autentikasi &amp; RBAC Server</p>
-              <StatusIndicator status={data.health.authSessionEngine} />
+              <p className="font-bold text-sm mt-1">Antrean Email &amp; Kendala</p>
+              <StatusIndicator
+                status={data.health.authSessionEngine}
+                customLabel={data.health.emailQueue?.mode === 'smtp_live' ? 'SMTP Aktif' : 'Sandbox Outbox'}
+              />
+              <p className="text-slate-500 font-mono tabular-nums">
+                Antre: {data.health.emailQueue?.pending ?? 0} · Terkirim: {data.health.emailQueue?.sent ?? 0} · Gagal: {data.health.emailQueue?.failed ?? 0}
+              </p>
+              <p className="text-[11px] text-slate-400 tabular-nums">
+                Tiket kendala terbuka: {data.health.openSupportTickets ?? 0}
+              </p>
             </GlassCard>
-            <GlassCard className="p-5 space-y-1">
+
+            <GlassCard className="p-5 space-y-1.5">
               <CheckCircle2 className="w-5 h-5 text-[#0EA5E9]" />
-              <p className="font-bold text-sm mt-2">Uptime Layanan (v{data.version || '4.1.0'})</p>
+              <p className="font-bold text-sm mt-1">Layanan API (v{data.version || '4.1.0'})</p>
               <p className="font-mono text-lg font-bold tabular-nums">{data.health.uptimeSeconds} detik</p>
+              <p className="text-slate-500 font-mono tabular-nums">
+                Permintaan: {data.health.apiMetrics?.totalRequests ?? 0} · Rata-rata: {data.health.apiMetrics?.avgLatencyMs ?? 0} ms
+              </p>
+              <p className="text-[11px] text-slate-400 font-mono tabular-nums">
+                HTTP 5xx: {data.health.apiMetrics?.error5xxCount ?? 0} · Error log: {data.health.recentSystemErrorsCount ?? 0}
+              </p>
             </GlassCard>
           </div>
 
@@ -605,7 +643,20 @@ export function SettingsPage({
     if (t === 'organisasi') return 'sistem';
     return t;
   };
-  const { user, can, theme, toggleTheme, notify, logout, refreshUser, navigate } = useAuth();
+  const {
+    user,
+    can,
+    theme,
+    toggleTheme,
+    notify,
+    logout,
+    refreshUser,
+    navigate,
+    preferences,
+    updatePreferences,
+    toggleFavoritePath,
+    setTourOpen,
+  } = useAuth();
   const [tab, setTab] = useState<'profil' | 'keamanan' | 'sesi' | 'tampilan' | 'pengguna' | 'rbac' | 'sistem' | 'cms'>(
     mapTab(initialTab)
   );
@@ -842,18 +893,27 @@ export function SettingsPage({
       notify('Batas tidak aktif (idle) wajib berada di antara 5 hingga 480 menit.', 'error');
       return;
     }
+    const inviteExpiry = Number(config.settings.invite_expiry_hours || 72);
+    if (!Number.isFinite(inviteExpiry) || inviteExpiry < 12 || inviteExpiry > 336) {
+      notify('Masa berlaku tautan undangan wajib berada di antara 12 hingga 336 jam.', 'error');
+      return;
+    }
     try {
       await apiPatch('/api/system/settings', {
         settings: {
           session_ttl_hours: String(Math.round(ttl)),
           idle_timeout_minutes: String(Math.round(idleMin)),
+          invite_expiry_hours: String(Math.round(inviteExpiry)),
+          duta_auto_approve: config.settings.duta_auto_approve === 'true' ? 'true' : 'false',
+          require_sekretariat_duta_review:
+            config.settings.require_sekretariat_duta_review === 'false' ? 'false' : 'true',
           public_stats_approved: config.settings.public_stats_approved || 'true',
           ...(config.settings.public_show_duta_count !== undefined
             ? { public_show_duta_count: config.settings.public_show_duta_count }
             : {}),
         },
       });
-      notify('Konfigurasi organisasi dan kebijakan sesi disimpan.', 'success');
+      notify('Konfigurasi organisasi, onboarding, dan kebijakan sesi disimpan.', 'success');
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menyimpan konfigurasi.', 'error');
@@ -922,7 +982,7 @@ export function SettingsPage({
     { key: 'profil', label: 'Profil & Notifikasi', icon: UserCheck },
     { key: 'keamanan', label: 'Kata Sandi', icon: KeyRound },
     { key: 'sesi', label: `Sesi Aktif (${sessions.length})`, icon: Laptop },
-    { key: 'tampilan', label: 'Tampilan', icon: SlidersHorizontal },
+    { key: 'tampilan', label: 'Tampilan & Preferensi', icon: SlidersHorizontal },
     ...(can('pengaturan', 'manage') ? [{ key: 'pengguna', label: `Pengguna (${users.length})`, icon: Users }] : []),
     ...(canManageCms ? [{ key: 'cms', label: 'CMS Publik', icon: Globe }] : []),
     { key: 'rbac', label: 'Hak Akses', icon: Shield },
@@ -1152,38 +1212,169 @@ export function SettingsPage({
       )}
 
       {tab === 'tampilan' && (
-        <GlassCard className="p-6 max-w-xl space-y-4 text-xs">
-          <h2 className="text-base font-bold text-slate-900 dark:text-white">Preferensi Tema Antarmuka</h2>
-          <p className="text-slate-500">
-            Pilih tema yang paling nyaman digunakan dalam jangka waktu lama. Pengaturan diterapkan konsisten di seluruh halaman.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => theme === 'dark' && toggleTheme()}
-              className={`p-4 rounded-xl border text-left transition-all ${
-                theme === 'light'
-                  ? 'border-[#0EA5E9] bg-sky-50/60 dark:bg-sky-950/30'
-                  : 'border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              <p className="font-bold text-sm text-slate-900 dark:text-white">Mode Terang (Light)</p>
-              <p className="text-slate-500 mt-1">Latar bersih #F1F5F9 dengan permukaan putih lembut untuk pencahayaan siang hari.</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => theme === 'light' && toggleTheme()}
-              className={`p-4 rounded-xl border text-left transition-all ${
-                theme === 'dark'
-                  ? 'border-[#0EA5E9] bg-sky-50/60 dark:bg-sky-950/30'
-                  : 'border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              <p className="font-bold text-sm text-slate-900 dark:text-white">Mode Gelap (Dark)</p>
-              <p className="text-slate-500 mt-1">Latar slate gelap kontras tinggi untuk mengurangi silau pada ruang redup.</p>
-            </button>
-          </div>
-        </GlassCard>
+        <div className="space-y-5 max-w-3xl text-xs">
+          <GlassCard className="p-6 space-y-4">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Tema Antarmuka</h2>
+            <p className="text-slate-500">
+              Pilih tema yang paling nyaman digunakan dalam jangka waktu lama. Pengaturan diterapkan konsisten di seluruh halaman.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => theme === 'dark' && toggleTheme()}
+                className={`p-4 rounded-xl border text-left transition-all ${
+                  theme === 'light'
+                    ? 'border-[#0EA5E9] bg-sky-50/60 dark:bg-sky-950/30'
+                    : 'border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <p className="font-bold text-sm text-slate-900 dark:text-white">Mode Terang (Light)</p>
+                <p className="text-slate-500 mt-1">Latar bersih #F1F5F9 dengan permukaan putih lembut untuk pencahayaan siang hari.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => theme === 'light' && toggleTheme()}
+                className={`p-4 rounded-xl border text-left transition-all ${
+                  theme === 'dark'
+                    ? 'border-[#0EA5E9] bg-sky-50/60 dark:bg-sky-950/30'
+                    : 'border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <p className="font-bold text-sm text-slate-900 dark:text-white">Mode Gelap (Dark)</p>
+                <p className="text-slate-500 mt-1">Latar slate gelap kontras tinggi untuk mengurangi silau pada ruang redup.</p>
+              </button>
+            </div>
+          </GlassCard>
+
+          <GlassCard className="p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Skala Tampilan &amp; Keterbacaan</h2>
+              <p className="text-slate-500 mt-0.5">
+                Sesuaikan ukuran teks dasar di seluruh portal untuk kenyamanan membaca.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {(
+                [
+                  ['ringkas', 'Ringkas (14px)', 'Padat untuk tampilan tabel dan daftar data banyak.'],
+                  ['nyaman', 'Nyaman (15px)', 'Standar seimbang untuk operasional harian.'],
+                  ['besar', 'Besar (16.5px)', 'Teks lebih besar dan mudah dibaca di segala layar.'],
+                ] as const
+              ).map(([scaleVal, lbl, desc]) => (
+                <button
+                  key={scaleVal}
+                  type="button"
+                  onClick={async () => {
+                    await updatePreferences({ displayScale: scaleVal });
+                    notify(`Skala tampilan diubah ke "${lbl}".`, 'success');
+                  }}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    preferences.displayScale === scaleVal
+                      ? 'border-[#0EA5E9] bg-sky-50/60 dark:bg-sky-950/30'
+                      : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <p className="font-bold text-sm text-slate-900 dark:text-white">{lbl}</p>
+                  <p className="text-slate-500 mt-1">{desc}</p>
+                </button>
+              ))}
+            </div>
+          </GlassCard>
+
+          <GlassCard className="p-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="pref-start-page" className="block text-sm font-bold text-slate-900 dark:text-white mb-1">
+                  Halaman Awal Setelah Masuk
+                </label>
+                <p className="text-slate-500 mb-2">Halaman utama yang dibuka otomatis setelah Anda login.</p>
+                <select
+                  id="pref-start-page"
+                  value={preferences.startPage || '/beranda'}
+                  onChange={async (e) => {
+                    await updatePreferences({ startPage: e.target.value });
+                    notify('Halaman awal setelah login berhasil diperbarui.', 'success');
+                  }}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                >
+                  <option value="/beranda">Beranda Saya (Ringkasan Peran)</option>
+                  <option value="/dashboard">Dashboard Utama</option>
+                  <option value="/aktivitas-saya">Aktivitas Saya</option>
+                  <option value="/tugas-saya">Tugas Saya</option>
+                  <option value="/proposal">Proposal Kegiatan</option>
+                  <option value="/laporan-kegiatan">Laporan Kegiatan (LKL)</option>
+                  {can('persetujuan', 'view') && <option value="/persetujuan">Pusat Persetujuan</option>}
+                  {can('persuratan', 'view') && <option value="/persuratan">Persuratan &amp; Disposisi</option>}
+                </select>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-900 dark:text-white mb-1">Tur Panduan Interaktif</p>
+                <p className="text-slate-500 mb-2">
+                  Status untuk peran Anda:{' '}
+                  <strong>
+                    {user && preferences.tourCompletedRoles.includes(user.role) ? 'Sudah Selesai' : 'Belum Selesai'}
+                  </strong>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTourOpen(true)}
+                    className="px-3.5 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold"
+                  >
+                    Mulai Ulang Tur Peran
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await updatePreferences({ tourCompletedRoles: [] });
+                      notify('Riwayat penyelesaian tur berhasil direset.', 'info');
+                    }}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                  >
+                    Reset Status Tur
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+              <div>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">Menu Favorit Bilah Samping (Maks. 8)</p>
+                <p className="text-slate-500">Pilih halaman yang paling sering Anda akses agar selalu muncul di bagian atas navigasi.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { path: '/beranda', label: 'Beranda Saya' },
+                  { path: '/dashboard', label: 'Dashboard' },
+                  { path: '/proposal', label: 'Proposal' },
+                  { path: '/laporan-kegiatan', label: 'LKL Kegiatan' },
+                  { path: '/tugas-saya', label: 'Tugas Saya' },
+                  ...(can('persetujuan', 'view') ? [{ path: '/persetujuan', label: 'Pusat Persetujuan' }] : []),
+                  ...(can('persuratan', 'view') ? [{ path: '/persuratan', label: 'Persuratan' }] : []),
+                  { path: '/kendala', label: 'Pusat Kendala' },
+                  { path: '/bantuan', label: 'Pusat Bantuan' },
+                ].map((item) => {
+                  const active = preferences.favoritePaths.includes(item.path);
+                  return (
+                    <button
+                      key={item.path}
+                      type="button"
+                      onClick={() => toggleFavoritePath(item.path)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                        active
+                          ? 'bg-[#0EA5E9] border-[#0EA5E9] text-white'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-[#0EA5E9]'
+                      }`}
+                    >
+                      {active ? '★ ' : '+ '}
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </GlassCard>
+        </div>
       )}
 
       {tab === 'pengguna' && can('pengaturan', 'manage') && (
@@ -1383,6 +1574,50 @@ export function SettingsPage({
                   <option value="true">Disetujui Tampil di Halaman Publik</option>
                   <option value="false">Disembunyikan (Khusus Internal)</option>
                 </select>
+              </div>
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <p className="font-bold text-slate-900 dark:text-white">Kebijakan Onboarding &amp; Undangan Duta</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1">Masa Berlaku Undangan (Jam)</label>
+                    <input
+                      type="number"
+                      min={12}
+                      max={336}
+                      disabled={!can('sistem', 'configure')}
+                      value={config.settings.invite_expiry_hours || '72'}
+                      onChange={(e) => setConfig({ ...config, settings: { ...config.settings, invite_expiry_hours: e.target.value } })}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 tabular-nums"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">Rentang 12–336 jam (default 72 jam).</p>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Persetujuan Otomatis Duta</label>
+                    <select
+                      disabled={!can('sistem', 'configure')}
+                      value={config.settings.duta_auto_approve || 'false'}
+                      onChange={(e) => setConfig({ ...config, settings: { ...config.settings, duta_auto_approve: e.target.value } })}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    >
+                      <option value="false">Nonaktif (Verifikasi Manual)</option>
+                      <option value="true">Aktif Jika Berkas Lengkap</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!can('sistem', 'configure')}
+                    checked={(config.settings.require_sekretariat_duta_review ?? 'true') === 'true'}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        settings: { ...config.settings, require_sekretariat_duta_review: e.target.checked ? 'true' : 'false' },
+                      })
+                    }
+                  />
+                  <span>Wajib verifikasi Sekretariat Nasional sebelum undangan Duta diterbitkan</span>
+                </label>
               </div>
               {can('sistem', 'configure') && (
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2">

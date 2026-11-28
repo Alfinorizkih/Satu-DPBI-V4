@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Download, Eye, FileText, MapPin, Plus, Printer, RotateCcw, Save } from 'lucide-react';
-import { apiGet, apiPost, apiUrl } from '../lib/api';
+import { CheckCircle2, Download, Eye, FileText, MapPin, Plus, Printer, RotateCcw } from 'lucide-react';
+import { apiGet, apiPost, apiUrl, generateIdempotencyKey } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
@@ -13,6 +13,8 @@ import {
   Pagination,
   StatusIndicator,
 } from '../components/ui';
+import { GuidedFieldHint, GuidedStepperForm } from '../components/GuidedStepperForm';
+import { ProcessTracker } from '../components/ProcessTracker';
 import { LocationVerifyModal } from '../components/LocationVerifyModal';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
 import type { FlagshipProgramRecord, LklRecord, ProposalRecord } from '../lib/types';
@@ -37,6 +39,9 @@ export function LklPage({
   const { showConfirmDialog, guardAction, confirmLeave, cancelLeave } = useUnsavedChanges(formDirty);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const [formStep, setFormStep] = useState(0);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [autosavedAt, setAutosavedAt] = useState<string | null>(null);
   const [selected, setSelected] = useState<LklRecord | null>(null);
   const [previewPdfId, setPreviewPdfId] = useState<string | null>(null);
   const [lightboxPhotoId, setLightboxPhotoId] = useState<string | null>(null);
@@ -106,6 +111,8 @@ export function LklPage({
 
   const openCreateModal = (updateUrl = true) => {
     setForm(defaultForm);
+    setFormStep(0);
+    setFormErrors([]);
     const saved = loadOfflineDraft<typeof defaultForm>(user?.id, 'lkl_form');
     if (saved && saved.data && (saved.data.activityName || saved.data.summary || saved.data.outcomes)) {
       setOfflineDraftBanner(saved);
@@ -126,7 +133,10 @@ export function LklPage({
   useEffect(() => {
     if (!createOpen || !formDirty) return;
     const t = window.setTimeout(() => {
-      saveOfflineDraft(user?.id, 'lkl_form', form);
+      const savedIso = saveOfflineDraft(user?.id, 'lkl_form', form);
+      if (savedIso) {
+        setAutosavedAt(new Date(savedIso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+      }
     }, 500);
     return () => window.clearTimeout(t);
   }, [createOpen, formDirty, form, user?.id]);
@@ -155,6 +165,7 @@ export function LklPage({
 
   const updateLklForm = (patch: Partial<typeof defaultForm>) => {
     setFormDirty(true);
+    setFormErrors([]);
     setForm((prev) => ({ ...prev, ...patch }));
   };
 
@@ -170,21 +181,57 @@ export function LklPage({
     const savedAt = saveOfflineDraft(user?.id, 'lkl_form', form);
     if (savedAt) {
       setFormDirty(false);
+      setAutosavedAt(new Date(savedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
       notify('Draft LKL tersimpan di perangkat Anda dan akan dipulihkan saat formulir dibuka lagi.', 'info');
     } else {
       notify('Tidak dapat menyimpan draft lokal.', 'error');
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateLkl = (): string[] => {
+    const errs: string[] = [];
+    if (!form.activityName.trim() || form.activityName.trim().length < 4) {
+      errs.push('Nama kegiatan wajib diisi minimal 4 karakter.');
+    }
+    if (form.activityMode === 'luring') {
+      if (!form.regency.trim() || !form.venueName.trim()) {
+        errs.push('Kabupaten/Kota dan Nama Tempat wajib diisi untuk kegiatan luring.');
+      }
+    } else if (!form.platformName.trim()) {
+      errs.push('Nama platform daring wajib diisi.');
+    }
+    if (!form.eventDate) errs.push('Tanggal pelaksanaan wajib diisi.');
+    if (!form.participantCount || form.participantCount < 1) errs.push('Jumlah peserta minimal 1 orang.');
+    if (!form.summary.trim() || form.summary.trim().length < 10) {
+      errs.push('Ringkasan pelaksanaan wajib diisi minimal 10 karakter.');
+    }
+    if (!form.outcomes.trim() || form.outcomes.trim().length < 5) {
+      errs.push('Hasil & capaian kegiatan wajib diisi.');
+    }
+    return errs;
+  };
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (submitting) return;
+    const errs = validateLkl();
+    if (errs.length > 0) {
+      setFormErrors(errs);
+      notify(errs[0], 'error');
+      return;
+    }
+    setFormErrors([]);
     setSubmitting(true);
     try {
-      const res = await apiPost<{ referenceNumber: string }>('/api/lkl', {
-        ...form,
-        programId: form.programId || null,
-      });
+      const res = await apiPost<{ referenceNumber: string }>(
+        '/api/lkl',
+        {
+          ...form,
+          programId: form.programId || null,
+        },
+        false,
+        { idempotencyKey: generateIdempotencyKey('lkl') }
+      );
       clearOfflineDraft(user?.id, 'lkl_form');
       setOfflineDraftBanner(null);
       setFormDirty(false);
@@ -371,218 +418,240 @@ export function LklPage({
         )}
       </GlassCard>
 
-      {/* Create LKL Modal */}
-      <Modal open={createOpen} onClose={closeCreateModal} title="Kirim Laporan Kegiatan Lapangan (LKL)">
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {offlineDraftBanner && (
-            <div className="rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sky-900 dark:text-sky-100">
-                Tersimpan draft LKL lokal ({formatTanggalIndonesia(offlineDraftBanner.savedAt, true)}). Pulihkan isian sebelumnya?
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForm({ ...defaultForm, ...offlineDraftBanner.data });
-                    setOfflineDraftBanner(null);
-                    setFormDirty(true);
-                    notify('Draft LKL lokal dipulihkan.', 'info');
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-[#0EA5E9] text-white font-semibold"
-                >
-                  Pulihkan Draft
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearOfflineDraft(user?.id, 'lkl_form');
-                    setOfflineDraftBanner(null);
-                  }}
-                  className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 font-semibold"
-                >
-                  Hapus Draft
-                </button>
+      {/* Create LKL Modal (4-Step Guided Stepper) */}
+      <Modal
+        open={createOpen}
+        onClose={closeCreateModal}
+        title="Kirim Laporan Kegiatan Lapangan (LKL)"
+        subtitle="Lengkapi 4 langkah pelaporan agar Koordinator Wilayah dapat memverifikasi capaian kegiatan Anda."
+        maxWidth="max-w-3xl"
+      >
+        <div className="space-y-4 text-xs">
+          <GuidedStepperForm
+            steps={[
+              { id: 'identitas', title: 'Identitas & Proposal', description: 'Nama kegiatan, proposal & program' },
+              { id: 'moda', title: 'Moda, Jadwal & Lokasi', description: 'Tempat luring/daring & peserta' },
+              { id: 'capaian', title: 'Capaian & Berkas', description: 'Ringkasan, hasil, PDF & foto' },
+              { id: 'konfirmasi', title: 'Ringkasan & Kirim', description: 'Periksa kelengkapan sebelum kirim' },
+            ]}
+            currentStep={formStep}
+            onStepChange={(next) => {
+              setFormErrors([]);
+              setFormStep(next);
+            }}
+            checklist={[
+              { label: 'Nama kegiatan terisi', ok: form.activityName.trim().length >= 4 },
+              {
+                label: 'Lokasi / platform terisi',
+                ok: form.activityMode === 'luring' ? Boolean(form.regency.trim() && form.venueName.trim()) : Boolean(form.platformName.trim()),
+              },
+              { label: 'Ringkasan & capaian terisi', ok: form.summary.trim().length >= 10 && form.outcomes.trim().length >= 5 },
+              { label: 'PDF atau foto dokumentasi', ok: Boolean(form.pdfFileId || form.photoFileIds.length > 0) },
+            ]}
+            autosavedAt={autosavedAt}
+            hasDraftRecovery={Boolean(offlineDraftBanner)}
+            draftSavedAtLabel={offlineDraftBanner ? formatTanggalIndonesia(offlineDraftBanner.savedAt, true) : undefined}
+            onRecoverDraft={() => {
+              if (!offlineDraftBanner) return;
+              setForm({ ...defaultForm, ...offlineDraftBanner.data });
+              setOfflineDraftBanner(null);
+              setFormDirty(true);
+              notify('Draft LKL lokal dipulihkan.', 'info');
+            }}
+            onDiscardDraft={() => {
+              clearOfflineDraft(user?.id, 'lkl_form');
+              setOfflineDraftBanner(null);
+            }}
+            errors={formErrors}
+            submitting={submitting}
+            submitLabel="Konfirmasi & Kirim LKL"
+            saveDraftLabel="Simpan Draft Lokal"
+            onSaveDraft={saveLocalDraft}
+            onSubmit={() => handleSubmit()}
+          >
+            {formStep === 0 && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="lkl-name" className="block font-semibold mb-1">Nama Kegiatan *</label>
+                  <input
+                    id="lkl-name"
+                    type="text"
+                    required
+                    value={form.activityName}
+                    onChange={(e) => updateLklForm({ activityName: e.target.value })}
+                    placeholder="Contoh: Sosialisasi Budaya Masuk Sekolah SMAN 1"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <GuidedFieldHint
+                    hint="Samakan dengan judul proposal jika kegiatan ini tindak lanjut proposal yang telah disetujui."
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="lkl-prop" className="block font-semibold mb-1">Hubungkan ke Proposal Disetujui (Opsional)</label>
+                    <select
+                      id="lkl-prop"
+                      value={form.proposalId}
+                      onChange={(e) => {
+                        const chosenId = e.target.value;
+                        const prop = approvedProposals.find((p) => p.id === chosenId);
+                        if (prop) {
+                          updateLklForm({
+                            proposalId: chosenId,
+                            programId: prop.programId || form.programId,
+                            activityName: form.activityName || prop.title,
+                            eventDate: prop.eventDate || form.eventDate,
+                            category: prop.category || form.category,
+                            activityMode: prop.activityMode === 'daring' ? 'daring' : 'luring',
+                            participantCount: prop.estimatedParticipants || form.participantCount,
+                          });
+                        } else {
+                          updateLklForm({ proposalId: chosenId });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    >
+                      <option value="">Kegiatan Non-Proposal (Mandiri)</option>
+                      {approvedProposals.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.referenceNumber} — {p.title}
+                        </option>
+                      ))}
+                    </select>
+                    {approvedProposals.length === 0 && (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Hanya proposal berstatus <strong>Disetujui</strong> yang dapat ditautkan ke LKL.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label htmlFor="lkl-prog" className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
+                    <select
+                      id="lkl-prog"
+                      value={form.programId}
+                      onChange={(e) => updateLklForm({ programId: e.target.value })}
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                    >
+                      <option value="">Kegiatan Umum / Non-Program Unggulan</option>
+                      {programs.map((pr) => (
+                        <option key={pr.id} value={pr.id}>
+                          {pr.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div>
-            <label className="block font-semibold mb-1">Nama Kegiatan</label>
-            <input type="text" required value={form.activityName} onChange={(e) => updateLklForm({ activityName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm" />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Hubungkan ke Proposal Disetujui (Opsional)</label>
-              <select
-                value={form.proposalId}
-                onChange={(e) => {
-                  const chosenId = e.target.value;
-                  const prop = approvedProposals.find((p) => p.id === chosenId);
-                  if (prop) {
-                    updateLklForm({
-                      proposalId: chosenId,
-                      programId: prop.programId || form.programId,
-                      activityName: form.activityName || prop.title,
-                      eventDate: prop.eventDate || form.eventDate,
-                      category: prop.category || form.category,
-                      activityMode: prop.activityMode === 'daring' ? 'daring' : 'luring',
-                      participantCount: prop.estimatedParticipants || form.participantCount,
-                    });
-                  } else {
-                    updateLklForm({ proposalId: chosenId });
-                  }
-                }}
-                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
-              >
-                <option value="">Kegiatan Non-Proposal (Mandiri)</option>
-                {approvedProposals.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.referenceNumber} — {p.title}
-                  </option>
-                ))}
-              </select>
-              {approvedProposals.length === 0 && (
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Hanya proposal berstatus <strong>Disetujui</strong> yang dapat ditautkan ke LKL.
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Moda Kegiatan</label>
-              <select value={form.activityMode} onChange={(e) => updateLklForm({ activityMode: e.target.value as 'luring' | 'daring' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
-                <option value="luring">Luring (Lokasi Fisik)</option>
-                <option value="daring">Daring (Platform Digital)</option>
-              </select>
-            </div>
-          </div>
+            {formStep === 1 && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label htmlFor="lkl-mode" className="block font-semibold mb-1">Moda Kegiatan</label>
+                    <select id="lkl-mode" value={form.activityMode} onChange={(e) => updateLklForm({ activityMode: e.target.value as 'luring' | 'daring' })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
+                      <option value="luring">Luring (Lokasi Fisik)</option>
+                      <option value="daring">Daring (Platform Digital)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="lkl-date" className="block font-semibold mb-1">Tanggal *</label>
+                    <input id="lkl-date" type="date" required value={form.eventDate} onChange={(e) => updateLklForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label htmlFor="lkl-time" className="block font-semibold mb-1">Waktu Mulai</label>
+                    <input id="lkl-time" type="time" value={form.startTime} onChange={(e) => updateLklForm({ startTime: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                  <div>
+                    <label htmlFor="lkl-count" className="block font-semibold mb-1">Jumlah Peserta *</label>
+                    <input id="lkl-count" type="number" min={1} required value={form.participantCount} onChange={(e) => updateLklForm({ participantCount: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                  </div>
+                </div>
 
-          <div>
-            <label className="block font-semibold mb-1">Program Unggulan Terkait (Opsional)</label>
-            <select
-              value={form.programId}
-              onChange={(e) => updateLklForm({ programId: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
-            >
-              <option value="">Kegiatan Umum / Non-Program Unggulan</option>
-              {programs.map((pr) => (
-                <option key={pr.id} value={pr.id}>
-                  {pr.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {form.activityMode === 'luring' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40">
-              <div>
-                <label className="block font-semibold mb-1">Kabupaten / Kota</label>
-                <input required value={form.regency} onChange={(e) => updateLklForm({ regency: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                {form.activityMode === 'luring' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40">
+                    <div>
+                      <label htmlFor="lkl-reg" className="block font-semibold mb-1">Kabupaten / Kota *</label>
+                      <input id="lkl-reg" required value={form.regency} onChange={(e) => updateLklForm({ regency: e.target.value })} placeholder="Contoh: Kota Bandung" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label htmlFor="lkl-venue" className="block font-semibold mb-1">Nama Tempat *</label>
+                      <input id="lkl-venue" required value={form.venueName} onChange={(e) => updateLklForm({ venueName: e.target.value })} placeholder="Contoh: Aula SMAN 3 Bandung" className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label htmlFor="lkl-addr" className="block font-semibold mb-1">Alamat Lengkap Tempat Kegiatan</label>
+                      <input id="lkl-addr" value={form.venueAddress} onChange={(e) => updateLklForm({ venueAddress: e.target.value })} placeholder="Nama jalan, kecamatan..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-sky-50/60 dark:bg-sky-950/30">
+                    <div>
+                      <label htmlFor="lkl-plat" className="block font-semibold mb-1">Platform Daring *</label>
+                      <input id="lkl-plat" required value={form.platformName} onChange={(e) => updateLklForm({ platformName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    </div>
+                    <div>
+                      <label htmlFor="lkl-link" className="block font-semibold mb-1">Tautan Kegiatan (Opsional)</label>
+                      <input id="lkl-link" value={form.platformLink} onChange={(e) => updateLklForm({ platformLink: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block font-semibold mb-1">Nama Tempat</label>
-                <input required value={form.venueName} onChange={(e) => updateLklForm({ venueName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            )}
+
+            {formStep === 2 && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="lkl-sum" className="block font-semibold mb-1">Ringkasan Pelaksanaan *</label>
+                  <textarea id="lkl-sum" rows={3} required value={form.summary} onChange={(e) => updateLklForm({ summary: e.target.value })} placeholder="Uraikan jalannya acara, narasumber, dan keterlibatan pelajar..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div>
+                  <label htmlFor="lkl-out" className="block font-semibold mb-1">Hasil &amp; Capaian Kegiatan *</label>
+                  <textarea id="lkl-out" rows={2} required value={form.outcomes} onChange={(e) => updateLklForm({ outcomes: e.target.value })} placeholder="Dampak nyata, karya budaya, atau tindak lanjut peserta..." className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FileDropzone
+                    label="PDF LKL Resmi"
+                    accept=".pdf,application/pdf"
+                    moduleName="lkl"
+                    uploadedFileName={form.pdfFileName}
+                    onUploaded={(res) => updateLklForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
+                  />
+                  <FileDropzone
+                    label="Foto Dokumentasi (JPG/PNG/WebP)"
+                    accept="image/jpeg,image/png,image/webp"
+                    moduleName="lkl"
+                    uploadedFileName={form.photoNames.join(', ')}
+                    onUploaded={(res) =>
+                      updateLklForm({
+                        photoFileIds: [...form.photoFileIds, res.fileId],
+                        photoNames: [...form.photoNames, res.fileName],
+                      })
+                    }
+                  />
+                </div>
               </div>
-              <div className="sm:col-span-2">
-                <label className="block font-semibold mb-1">Alamat Lengkap Tempat Kegiatan</label>
-                <input required value={form.venueAddress} onChange={(e) => updateLklForm({ venueAddress: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            )}
+
+            {formStep === 3 && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 p-4 space-y-2">
+                  <p className="font-bold text-slate-900 dark:text-white">Ringkasan Akhir LKL Sebelum Dikirim</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <p><strong>Kegiatan:</strong> {form.activityName || '—'}</p>
+                    <p><strong>Moda &amp; Lokasi:</strong> {form.activityMode === 'daring' ? `Daring (${form.platformName})` : `Luring (${form.venueName || '—'}, ${form.regency || '—'})`}</p>
+                    <p><strong>Tanggal &amp; Peserta:</strong> {form.eventDate ? formatTanggalIndonesia(form.eventDate) : '—'} · {form.participantCount} orang</p>
+                    <p><strong>Lampiran:</strong> PDF {form.pdfFileName ? '✓' : 'Belum'} · {form.photoFileIds.length} foto</p>
+                    <p className="sm:col-span-2"><strong>Ringkasan:</strong> {form.summary || '—'}</p>
+                    <p className="sm:col-span-2"><strong>Capaian:</strong> {form.outcomes || '—'}</p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3 text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+                  <strong>Alur setelah dikirim:</strong> Koordinator Wilayah memeriksa kelengkapan PDF &amp; foto dokumentasi. Bila diterima, statistik program &amp; wilayah terbarui otomatis serta tugas pelaporan terkait ditandai selesai.
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-sky-50/60 dark:bg-sky-950/30">
-              <div>
-                <label className="block font-semibold mb-1">Platform Daring</label>
-                <input required value={form.platformName} onChange={(e) => updateLklForm({ platformName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Tautan Kegiatan (Opsional)</label>
-                <input value={form.platformLink} onChange={(e) => updateLklForm({ platformLink: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block font-semibold mb-1">Tanggal</label>
-              <input type="date" required value={form.eventDate} onChange={(e) => updateLklForm({ eventDate: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Waktu Mulai</label>
-              <input type="time" value={form.startTime} onChange={(e) => updateLklForm({ startTime: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-            <div>
-              <label className="block font-semibold mb-1">Jumlah Peserta</label>
-              <input type="number" min={1} required value={form.participantCount} onChange={(e) => updateLklForm({ participantCount: Number(e.target.value) })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-semibold mb-1">Ringkasan Pelaksanaan</label>
-            <textarea rows={3} required value={form.summary} onChange={(e) => updateLklForm({ summary: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">Hasil & Capaian Kegiatan</label>
-            <textarea rows={2} required value={form.outcomes} onChange={(e) => updateLklForm({ outcomes: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FileDropzone
-              label="PDF LKL Resmi"
-              accept=".pdf,application/pdf"
-              moduleName="lkl"
-              uploadedFileName={form.pdfFileName}
-              onUploaded={(res) => updateLklForm({ pdfFileId: res.fileId, pdfFileName: res.fileName })}
-            />
-            <FileDropzone
-              label="Foto Dokumentasi (JPG/PNG/WebP)"
-              accept="image/jpeg,image/png,image/webp"
-              moduleName="lkl"
-              uploadedFileName={form.photoNames.join(', ')}
-              onUploaded={(res) =>
-                updateLklForm({
-                  photoFileIds: [...form.photoFileIds, res.fileId],
-                  photoNames: [...form.photoNames, res.fileName],
-                })
-              }
-            />
-          </div>
-
-          {/* Pre-submit readiness checklist */}
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 p-3 space-y-1.5">
-            <p className="font-semibold text-slate-800 dark:text-slate-200">Daftar Periksa Kelengkapan Sebelum Kirim</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className={`w-3.5 h-3.5 ${form.summary.trim() ? 'text-emerald-600' : 'text-slate-400'}`} />
-                Ringkasan &amp; capaian terisi
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className={`w-3.5 h-3.5 ${form.pdfFileId ? 'text-emerald-600' : 'text-slate-400'}`} />
-                PDF laporan resmi {form.pdfFileId ? 'terunggah' : '(disarankan)'}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className={`w-3.5 h-3.5 ${form.photoFileIds.length > 0 ? 'text-emerald-600' : 'text-slate-400'}`} />
-                Foto dokumentasi ({form.photoFileIds.length} berkas)
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className={`w-3.5 h-3.5 ${form.proposalId ? 'text-emerald-600' : 'text-slate-400'}`} />
-                {form.proposalId ? 'Tautan proposal disetujui' : 'Kegiatan non-proposal'}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={saveLocalDraft}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
-            >
-              <Save className="w-3.5 h-3.5" /> Simpan Draft Lokal
-            </button>
-            <button type="submit" disabled={submitting} className="px-4 py-2.5 rounded-xl bg-[#0EA5E9] text-white font-semibold disabled:opacity-60">
-              {submitting ? 'Mengirim LKL...' : 'Kirim LKL'}
-            </button>
-          </div>
-        </form>
+            )}
+          </GuidedStepperForm>
+        </div>
       </Modal>
 
       {/* Review LKL Modal with Responsive PDF Preview & Photo Lightbox */}
@@ -652,6 +721,9 @@ export function LklPage({
                 )}
               </div>
             </div>
+
+            {/* Rich Process Tracker */}
+            <ProcessTracker entityType="lkl" entityId={selected.id} />
 
             {previewPdfId && (
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-950">

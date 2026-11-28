@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, CheckSquare, Download, Edit3, Eye, Plus, Printer, Upload, UserCheck } from 'lucide-react';
-import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
+import { AlertTriangle, Archive, CheckSquare, Download, Edit3, Eye, Plus, Printer, RotateCcw, Trash2, Upload, UserCheck } from 'lucide-react';
+import { apiDelete, apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
+import { parseCsvObjects } from '../lib/csvParser';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import { A4PrintModal, type PrintDocumentConfig } from '../components/print/A4PrintEngine';
@@ -39,10 +40,17 @@ interface AccountRequest {
   phone: string;
   provinceCode: string;
   provinceName: string;
+  batchId?: string;
   schoolName: string;
+  schoolNpsn?: string;
+  guardianName?: string;
+  docsChecklist?: Record<string, boolean>;
+  revisionCount?: number;
+  autoApproved?: boolean;
   requestedByName: string;
   status: string;
   decisionNote: string | null;
+  decidedBy?: string | null;
   createdAt: string;
 }
 
@@ -83,6 +91,7 @@ export function PersonnelPage({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [provFilter, setProvFilter] = useState('');
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [page, setPage] = useState(1);
 
   const [selected, setSelected] = useState<PersonnelRecord | null>(null);
@@ -100,7 +109,24 @@ export function PersonnelPage({
   const [reqOpen, setReqOpen] = useState(false);
   const [verifyNote, setVerifyNote] = useState('');
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
-  const [confirmRejectReq, setConfirmRejectReq] = useState<{ id: string; fullName: string } | null>(null);
+  const [reqDecisionModal, setReqDecisionModal] = useState<{
+    id: string;
+    fullName: string;
+    decision: 'perlu_revisi' | 'ditolak';
+    note: string;
+  } | null>(null);
+  const [resubmitReqModal, setResubmitReqModal] = useState<AccountRequest | null>(null);
+  const [resubmitForm, setResubmitForm] = useState({
+    fullName: '',
+    phone: '',
+    schoolName: '',
+    schoolNpsn: '',
+    guardianName: '',
+    docsChecklist: { pasFoto: false, kartuPelajar: false, suratSekolah: false, izinWali: false },
+  });
+  const [confirmArchive, setConfirmArchive] = useState<{ id: string; fullName: string; reason: string } | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<{ id: string; fullName: string } | null>(null);
+  const [confirmDeletePerm, setConfirmDeletePerm] = useState<{ id: string; fullName: string } | null>(null);
   const [printConfig, setPrintConfig] = useState<PrintDocumentConfig | null>(null);
 
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
@@ -147,7 +173,15 @@ export function PersonnelPage({
   const [personForm, setPersonForm] = useState(emptyPersonForm);
 
   const [newReq, setNewReq] = useState({
-    fullName: '', email: '', phone: '', provinceCode: user?.provinceCode || '32', schoolName: '',
+    fullName: '',
+    email: '',
+    phone: '',
+    provinceCode: user?.provinceCode || '32',
+    batchId: 'batch-3',
+    schoolName: '',
+    schoolNpsn: '',
+    guardianName: '',
+    docsChecklist: { pasFoto: false, kartuPelajar: false, suratSekolah: false, izinWali: false },
   });
 
   // Bulk CSV Import state & column mapping
@@ -187,7 +221,7 @@ export function PersonnelPage({
     setLoading(true);
     try {
       const [pRes, rRes, invRes, batchRes] = await Promise.all([
-        apiGet<{ personnel: PersonnelRecord[] }>('/api/personnel'),
+        apiGet<{ personnel: PersonnelRecord[] }>(`/api/personnel${includeArchived ? '?includeArchived=1' : ''}`),
         apiGet<{ requests: AccountRequest[] }>('/api/account-requests'),
         apiGet<{ invitations: (InvitationRecord & { roleLabel?: string; provinceName?: string })[] }>('/api/invitations').catch(() => ({ invitations: [] })),
         apiGet<{ batches: ImportBatchRecord[] }>('/api/personnel/import-batches').catch(() => ({ batches: [] })),
@@ -201,7 +235,7 @@ export function PersonnelPage({
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [includeArchived]);
 
   useEffect(() => {
     setPage(1);
@@ -434,39 +468,126 @@ export function PersonnelPage({
   const handleCreateReq = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await apiPost<{ referenceNumber: string }>('/api/account-requests', newReq);
-      notify(`Permintaan akun ${res.referenceNumber} diajukan ke Sekretariat Nasional.`, 'success');
+      const res = await apiPost<{
+        referenceNumber: string;
+        status?: string;
+        autoApproved?: boolean;
+        inviteToken?: string | null;
+      }>('/api/account-requests', newReq);
+      if (res.autoApproved && res.inviteToken) {
+        setIssuedToken(res.inviteToken);
+        notify(`Permintaan ${res.referenceNumber} disetujui otomatis dan token undangan diterbitkan.`, 'success');
+      } else {
+        notify(`Permintaan akun ${res.referenceNumber} diajukan ke Sekretariat Nasional.`, 'success');
+      }
       setReqOpen(false);
+      setNewReq({
+        fullName: '',
+        email: '',
+        phone: '',
+        provinceCode: user?.provinceCode || '32',
+        batchId: 'batch-3',
+        schoolName: '',
+        schoolNpsn: '',
+        guardianName: '',
+        docsChecklist: { pasFoto: false, kartuPelajar: false, suratSekolah: false, izinWali: false },
+      });
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal mengirim permintaan akun.', 'error');
     }
   };
 
-  const handleDecideReq = async (id: string, decision: 'disetujui' | 'ditolak') => {
+  const handleDecideReq = async (id: string, decision: 'disetujui' | 'perlu_revisi' | 'ditolak', customNote?: string) => {
     try {
+      const note =
+        customNote?.trim() ||
+        (decision === 'disetujui'
+          ? 'Disetujui dan tautan undangan satu kali pakai diterbitkan.'
+          : decision === 'perlu_revisi'
+          ? 'Mohon lengkapi berkas atau perbaiki data calon Duta.'
+          : 'Pengajuan akun belum memenuhi persyaratan verifikasi.');
       const res = await apiPost<{ inviteToken?: string | null }>(`/api/account-requests/${id}/decide`, {
         decision,
-        note: decision === 'disetujui' ? 'Disetujui dan tautan undangan satu kali pakai diterbitkan.' : 'Perlu kelengkapan berkas.',
+        note,
       });
       if (res.inviteToken) setIssuedToken(res.inviteToken);
-      notify(`Permintaan akun ${decision}.`, 'success');
+      notify(
+        decision === 'disetujui'
+          ? 'Permintaan akun disetujui dan undangan aktivasi diterbitkan.'
+          : decision === 'perlu_revisi'
+          ? 'Permintaan akun dikembalikan untuk revisi.'
+          : 'Permintaan akun ditolak.',
+        'success'
+      );
       load();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal memproses permintaan.', 'error');
     }
   };
 
+  const handleResubmitReq = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resubmitReqModal) return;
+    try {
+      await apiPatch(`/api/account-requests/${resubmitReqModal.id}/resubmit`, resubmitForm);
+      notify(`Permintaan ${resubmitReqModal.referenceNumber} diperbarui dan diajukan ulang.`, 'success');
+      setResubmitReqModal(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengajukan ulang permintaan akun.', 'error');
+    }
+  };
+
+  const handleArchivePerson = async () => {
+    if (!confirmArchive) return;
+    try {
+      await apiPost(`/api/personnel/${confirmArchive.id}/archive`, {
+        reason: confirmArchive.reason.trim() || 'Diarsipkan dari direktori aktif operasional',
+      });
+      notify(`Data personel ${confirmArchive.fullName} dipindahkan ke arsip.`, 'info');
+      setConfirmArchive(null);
+      setSelected(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal mengarsipkan personel.', 'error');
+    }
+  };
+
+  const handleRestorePerson = async () => {
+    if (!confirmRestore) return;
+    try {
+      await apiPost(`/api/personnel/${confirmRestore.id}/restore`);
+      notify(`Data personel ${confirmRestore.fullName} dipulihkan ke direktori aktif.`, 'success');
+      setConfirmRestore(null);
+      setSelected(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal memulihkan personel.', 'error');
+    }
+  };
+
+  const handleDeletePersonPerm = async () => {
+    if (!confirmDeletePerm) return;
+    try {
+      await apiDelete(`/api/personnel/${confirmDeletePerm.id}`);
+      notify(`Data personel ${confirmDeletePerm.fullName} dihapus permanen.`, 'info');
+      setConfirmDeletePerm(null);
+      setSelected(null);
+      load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Gagal menghapus permanen personel.', 'error');
+    }
+  };
+
   const parseCsvPreview = (rawInput?: string, customMap?: Record<string, number>) => {
     const raw = (rawInput ?? csvText).trim();
-    const allLines = raw.split(/\r?\n/).filter((l) => l.trim());
-    if (allLines.length === 0) {
+    const { headers, records } = parseCsvObjects(raw, { maxRows: 1000 });
+    if (headers.length === 0) {
       setCsvHeaders([]);
       setCsvPreview([]);
       return;
     }
-    const splitRow = (line: string) => line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
-    const headers = splitRow(allLines[0]);
     setCsvHeaders(headers);
     let colMap = customMap ?? csvColumnMap;
     if (!customMap) {
@@ -486,19 +607,22 @@ export function PersonnelPage({
       setCsvColumnMap(autoMap);
     }
 
-    const dataLines = allLines.slice(1);
-    const parsed = dataLines
-      .map((line) => splitRow(line))
-      .filter((cols) => cols.length >= 2 && (cols[colMap.fullName] || cols[colMap.email]))
-      .map((cols) => ({
-        fullName: cols[colMap.fullName] || '',
-        email: cols[colMap.email] || '',
-        provinceCode: cols[colMap.provinceCode] || user?.provinceCode || '31',
-        schoolName: cols[colMap.schoolName] || '',
-        batchId: colMap.batchId !== undefined ? cols[colMap.batchId] || 'batch-3' : 'batch-3',
-        nisn: colMap.nisn !== undefined ? cols[colMap.nisn] || '' : '',
-        phone: colMap.phone !== undefined ? cols[colMap.phone] || '' : '',
-        regency: colMap.regency !== undefined ? cols[colMap.regency] || '' : '',
+    const pick = (data: Record<string, string>, idx: number | undefined) => {
+      if (idx === undefined || idx < 0 || idx >= headers.length) return '';
+      return (data[headers[idx]] || '').trim();
+    };
+
+    const parsed = records
+      .filter(({ data }) => Boolean(pick(data, colMap.fullName) || pick(data, colMap.email)))
+      .map(({ data }) => ({
+        fullName: pick(data, colMap.fullName),
+        email: pick(data, colMap.email),
+        provinceCode: pick(data, colMap.provinceCode) || user?.provinceCode || '31',
+        schoolName: pick(data, colMap.schoolName),
+        batchId: colMap.batchId !== undefined ? pick(data, colMap.batchId) || 'batch-3' : 'batch-3',
+        nisn: colMap.nisn !== undefined ? pick(data, colMap.nisn) : '',
+        phone: colMap.phone !== undefined ? pick(data, colMap.phone) : '',
+        regency: colMap.regency !== undefined ? pick(data, colMap.regency) : '',
       }));
     setCsvPreview(parsed);
     setImportResult(null);
@@ -644,7 +768,7 @@ export function PersonnelPage({
       {tab === 'direktori' && (
         <GlassCard className="p-5 space-y-4">
           {user?.role !== 'duta' && (
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <input
                 type="search"
                 value={search}
@@ -662,6 +786,19 @@ export function PersonnelPage({
                   <option key={pr.code} value={pr.code}>{pr.name}</option>
                 ))}
               </select>
+              {['super_admin', 'wakil_super_admin', 'sekretariat_nasional', 'koordinator_wilayah'].includes(user?.role || '') && (
+                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer px-2 py-1.5">
+                  <input
+                    type="checkbox"
+                    checked={includeArchived}
+                    onChange={(e) => {
+                      setIncludeArchived(e.target.checked);
+                      setPage(1);
+                    }}
+                  />
+                  <span>Tampilkan Arsip</span>
+                </label>
+              )}
             </div>
           )}
 
@@ -684,7 +821,7 @@ export function PersonnelPage({
                   </thead>
                   <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
                     {paged.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                      <tr key={p.id} className={`hover:bg-slate-50/70 dark:hover:bg-slate-800/40 ${p.archivedAt ? 'opacity-75' : ''}`}>
                         <td className="py-3 pr-4 font-mono tabular-nums">{p.memberNumber}</td>
                         <td className="py-3 pr-4">
                           <div className="flex items-center gap-2.5">
@@ -701,7 +838,10 @@ export function PersonnelPage({
                             )}
                             <div>
                               <p className="font-semibold text-slate-900 dark:text-white">{p.fullName}</p>
-                              <p className="text-[11px] text-slate-500">{p.positionTitle} · {p.batchName}</p>
+                              <p className="text-[11px] text-slate-500">
+                                {p.positionTitle} · {p.batchName}
+                                {p.archivedAt ? ' · Diarsipkan' : ''}
+                              </p>
                             </div>
                           </div>
                         </td>
@@ -710,15 +850,46 @@ export function PersonnelPage({
                           <p className="text-[11px] text-slate-500">{p.schoolName || 'Sekolah belum diisi'}</p>
                         </td>
                         <td className="py-3 pr-4 font-mono tabular-nums">{p.completenessScore}%</td>
-                        <td className="py-3 pr-4"><StatusIndicator status={p.verificationStatus} /></td>
+                        <td className="py-3 pr-4">
+                          <StatusIndicator status={p.archivedAt ? 'diarsipkan' : p.verificationStatus} />
+                        </td>
                         <td className="py-3 text-right space-x-1.5 whitespace-nowrap">
-                          {can('personalia', 'edit') && (
+                          {can('personalia', 'edit') && !p.archivedAt && (
                             <button
                               type="button"
                               onClick={() => openEditForm(p, true)}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#0EA5E9] text-xs font-semibold"
                             >
                               <Edit3 className="w-3.5 h-3.5" /> Ubah
+                            </button>
+                          )}
+                          {can('personalia', 'edit') && !['duta', 'alumni'].includes(user?.role || '') && (
+                            p.archivedAt ? (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmRestore({ id: p.id, fullName: p.fullName })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" /> Pulihkan
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmArchive({ id: p.id, fullName: p.fullName, reason: '' })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-semibold"
+                              >
+                                <Archive className="w-3.5 h-3.5" /> Arsipkan
+                              </button>
+                            )
+                          )}
+                          {user?.role === 'super_admin' && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeletePerm({ id: p.id, fullName: p.fullName })}
+                              aria-label={`Hapus permanen ${p.fullName}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 text-xs font-semibold"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           )}
                           <button
@@ -743,19 +914,22 @@ export function PersonnelPage({
               {/* Mobile Cards (< md) */}
               <div className="md:hidden divide-y divide-slate-200/70 dark:divide-slate-800">
                 {paged.map((p) => (
-                  <div key={p.id} className="py-3.5 space-y-2 text-xs">
+                  <div key={p.id} className={`py-3.5 space-y-2 text-xs ${p.archivedAt ? 'opacity-75' : ''}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="font-mono text-[11px] text-[#0EA5E9] tabular-nums">{p.memberNumber}</p>
                         <p className="text-sm font-bold text-slate-900 dark:text-white">{p.fullName}</p>
-                        <p className="text-[11px] text-slate-500">{p.positionTitle} · {p.provinceName}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {p.positionTitle} · {p.provinceName}
+                          {p.archivedAt ? ' · Diarsipkan' : ''}
+                        </p>
                       </div>
-                      <StatusIndicator status={p.verificationStatus} />
+                      <StatusIndicator status={p.archivedAt ? 'diarsipkan' : p.verificationStatus} />
                     </div>
                     <p className="text-slate-600 dark:text-slate-400">
                       {p.schoolName || 'Sekolah belum diisi'} · Kelengkapan <span className="font-mono tabular-nums font-semibold">{p.completenessScore}%</span>
                     </p>
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -767,7 +941,7 @@ export function PersonnelPage({
                       >
                         <Eye className="w-3.5 h-3.5" /> Detail Profil
                       </button>
-                      {can('personalia', 'edit') && (
+                      {can('personalia', 'edit') && !p.archivedAt && (
                         <button
                           type="button"
                           onClick={() => openEditForm(p)}
@@ -775,6 +949,25 @@ export function PersonnelPage({
                         >
                           <Edit3 className="w-3.5 h-3.5" /> Ubah
                         </button>
+                      )}
+                      {can('personalia', 'edit') && !['duta', 'alumni'].includes(user?.role || '') && (
+                        p.archivedAt ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmRestore({ id: p.id, fullName: p.fullName })}
+                            className="min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-semibold"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" /> Pulihkan
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmArchive({ id: p.id, fullName: p.fullName, reason: '' })}
+                            className="min-h-[40px] inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 font-semibold"
+                          >
+                            <Archive className="w-3.5 h-3.5" /> Arsipkan
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -789,44 +982,102 @@ export function PersonnelPage({
 
       {tab === 'permintaan' && (
         <GlassCard className="p-5 space-y-4">
+          <div className="rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-800/60 p-3.5 text-xs space-y-1">
+            <p className="font-bold text-slate-900 dark:text-white">
+              Jalur 1 Onboarding Duta (Korwil → Verifikasi Sekretariat/Nasional → Undangan Aktivasi)
+            </p>
+            <p className="text-slate-600 dark:text-slate-300">
+              Pengurus &amp; Admin juga dapat menerbitkan akun secara langsung melalui <strong>Jalur 2 (Tab Undangan Akun)</strong>. Jika kebijakan persetujuan otomatis aktif di Pengaturan Sistem dan syarat Duta lengkap, token undangan langsung terbit.
+            </p>
+          </div>
           {issuedToken && (
             <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-xs">
               <p className="font-bold text-emerald-900 dark:text-emerald-200">Token Undangan Satu Kali Pakai Diterbitkan:</p>
               <p className="font-mono mt-1 select-all break-all">{issuedToken}</p>
-              <p className="text-emerald-700 dark:text-emerald-300 mt-1">Berlaku 72 jam. Calon Duta menggunakannya pada tab Aktivasi Undangan di halaman login untuk membuat kata sandi sendiri.</p>
+              <p className="text-emerald-700 dark:text-emerald-300 mt-1">Calon Duta menggunakannya pada halaman Aktivasi Undangan untuk membuat kata sandi sendiri.</p>
             </div>
           )}
           {requests.length === 0 ? (
             <EmptyState title="Belum ada permintaan akun" description="Pengajuan pembuatan akun Duta oleh Koordinator Wilayah akan tampil di sini." />
           ) : (
             <div className="divide-y divide-slate-200/60 dark:divide-slate-800">
-              {requests.map((r) => (
-                <div key={r.id} className="py-3.5 flex flex-wrap items-center justify-between gap-4 text-xs">
-                  <div className="space-y-1">
-                    <p className="font-mono text-[11px] text-[#0EA5E9]">{r.referenceNumber}</p>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">{r.fullName}</p>
-                    <p className="text-slate-500">{r.email} · {r.provinceName} · {r.schoolName}</p>
-                    <p className="text-[11px] text-slate-400">Diajukan oleh: {r.requestedByName}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusIndicator status={r.status} />
-                    {r.status === 'menunggu' && ['super_admin', 'wakil_super_admin', 'sekretariat_nasional'].includes(user?.role || '') && (
-                      <>
-                        <button type="button" onClick={() => handleDecideReq(r.id, 'disetujui')} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold">
-                          Setujui & Buat Undangan
-                        </button>
+              {requests.map((r) => {
+                const canDecide = r.status === 'menunggu' && ['super_admin', 'wakil_super_admin', 'sekretariat_nasional'].includes(user?.role || '');
+                const canResubmit = r.status === 'perlu_revisi' && can('personalia', 'create');
+                return (
+                  <div key={r.id} className="py-3.5 flex flex-wrap items-start justify-between gap-4 text-xs">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <p className="font-mono text-[11px] text-[#0EA5E9]">
+                        {r.referenceNumber}
+                        {r.revisionCount ? ` · Revisi ke-${r.revisionCount}` : ''}
+                        {r.autoApproved ? ' · Disetujui Otomatis' : ''}
+                      </p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{r.fullName}</p>
+                      <p className="text-slate-500">
+                        {r.email} · {r.provinceName} · {r.schoolName}
+                        {r.schoolNpsn ? ` (NPSN ${r.schoolNpsn})` : ''}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Diajukan oleh: {r.requestedByName}
+                        {r.guardianName ? ` · Wali: ${r.guardianName}` : ''}
+                      </p>
+                      {r.decisionNote && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium pt-0.5">
+                          Catatan Pemeriksa: {r.decisionNote}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <StatusIndicator status={r.status} />
+                      {canDecide && (
+                        <>
+                          <button type="button" onClick={() => handleDecideReq(r.id, 'disetujui')} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold">
+                            Setujui &amp; Buat Undangan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReqDecisionModal({ id: r.id, fullName: r.fullName, decision: 'perlu_revisi', note: '' })}
+                            className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 dark:text-amber-300 font-semibold"
+                          >
+                            Minta Revisi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReqDecisionModal({ id: r.id, fullName: r.fullName, decision: 'ditolak', note: '' })}
+                            className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-semibold"
+                          >
+                            Tolak
+                          </button>
+                        </>
+                      )}
+                      {canResubmit && (
                         <button
                           type="button"
-                          onClick={() => setConfirmRejectReq({ id: r.id, fullName: r.fullName })}
-                          className="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 font-semibold"
+                          onClick={() => {
+                            setResubmitReqModal(r);
+                            setResubmitForm({
+                              fullName: r.fullName,
+                              phone: r.phone || '',
+                              schoolName: r.schoolName || '',
+                              schoolNpsn: r.schoolNpsn || '',
+                              guardianName: r.guardianName || '',
+                              docsChecklist: {
+                                pasFoto: Boolean(r.docsChecklist?.pasFoto),
+                                kartuPelajar: Boolean(r.docsChecklist?.kartuPelajar),
+                                suratSekolah: Boolean(r.docsChecklist?.suratSekolah),
+                                izinWali: Boolean(r.docsChecklist?.izinWali),
+                              },
+                            });
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-[#0EA5E9] text-white font-semibold"
                         >
-                          Tolak
+                          Perbaiki &amp; Ajukan Ulang
                         </button>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </GlassCard>
@@ -836,9 +1087,9 @@ export function PersonnelPage({
         <GlassCard className="p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Siklus Hidup Undangan Aktivasi Akun</h2>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Jalur 2 Onboarding — Undangan Aktivasi Akun Langsung</h2>
               <p className="text-xs text-slate-500">
-                Pantau status undangan (terkirim, dibuka, aktif, kedaluwarsa, dibatalkan), kirim ulang dengan jeda 60 detik, atau batalkan sebelum dipakai.
+                Terbitkan tautan aktivasi langsung oleh Pengurus/Sekretariat/Super Admin, pantau status (terkirim, dibuka, aktif, kedaluwarsa, dibatalkan), kirim ulang dengan jeda 60 detik, atau batalkan sebelum dipakai.
               </p>
             </div>
             {can('personalia', 'create') && (
@@ -855,7 +1106,7 @@ export function PersonnelPage({
           {latestInviteLink && (
             <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 p-4 text-xs space-y-1">
               <p className="font-bold text-emerald-900 dark:text-emerald-200">
-                Tautan Aktivasi Undangan untuk {latestInviteLink.email} (Simulasi):
+                Tautan Aktivasi Undangan untuk {latestInviteLink.email}:
               </p>
               {latestInviteLink.link && <p className="font-mono select-all break-all">{latestInviteLink.link}</p>}
               {latestInviteLink.token && <p className="font-mono select-all break-all">Token: {latestInviteLink.token}</p>}
@@ -1643,54 +1894,246 @@ export function PersonnelPage({
       />
 
       {/* Account Request Modal */}
-      <Modal open={reqOpen} onClose={() => setReqOpen(false)} title="Ajukan Permintaan Akun Duta Baru">
+      <Modal open={reqOpen} onClose={() => setReqOpen(false)} title="Ajukan Permintaan Akun Duta Baru (Jalur 1)">
         <form onSubmit={handleCreateReq} className="space-y-3 text-xs">
           <div>
-            <label className="block font-semibold mb-1">Nama Calon Duta</label>
+            <label className="block font-semibold mb-1">Nama Calon Duta *</label>
             <input required value={newReq.fullName} onChange={(e) => setNewReq({ ...newReq, fullName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold mb-1">Email</label>
+              <label className="block font-semibold mb-1">Email *</label>
               <input type="email" required value={newReq.email} onChange={(e) => setNewReq({ ...newReq, email: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
             <div>
-              <label className="block font-semibold mb-1">Telepon</label>
-              <input value={newReq.phone} onChange={(e) => setNewReq({ ...newReq, phone: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              <label className="block font-semibold mb-1">Telepon / WhatsApp *</label>
+              <input required value={newReq.phone} onChange={(e) => setNewReq({ ...newReq, phone: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold mb-1">Provinsi</label>
+              <label className="block font-semibold mb-1">Provinsi *</label>
               <select value={newReq.provinceCode} onChange={(e) => setNewReq({ ...newReq, provinceCode: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2">
                 {INDONESIA_PROVINCES.map((pr) => <option key={pr.code} value={pr.code}>{pr.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block font-semibold mb-1">Asal Sekolah</label>
+              <label className="block font-semibold mb-1">Asal Sekolah *</label>
               <input required value={newReq.schoolName} onChange={(e) => setNewReq({ ...newReq, schoolName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
             </div>
           </div>
-          <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim ke Sekretariat Nasional</button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">NPSN Sekolah (Opsional)</label>
+              <input value={newReq.schoolNpsn} onChange={(e) => setNewReq({ ...newReq, schoolNpsn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Nama Orang Tua / Wali</label>
+              <input value={newReq.guardianName} onChange={(e) => setNewReq({ ...newReq, guardianName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+          </div>
+          <div className="pt-1 space-y-1.5">
+            <p className="font-semibold text-slate-700 dark:text-slate-300">Kelengkapan Berkas Calon Duta:</p>
+            <div className="flex flex-wrap gap-3">
+              {(
+                [
+                  ['pasFoto', 'Pas Foto'],
+                  ['kartuPelajar', 'Kartu Pelajar'],
+                  ['suratSekolah', 'Surat Sekolah'],
+                  ['izinWali', 'Izin Orang Tua/Wali'],
+                ] as const
+              ).map(([k, lbl]) => (
+                <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(newReq.docsChecklist[k])}
+                    onChange={(e) =>
+                      setNewReq({
+                        ...newReq,
+                        docsChecklist: { ...newReq.docsChecklist, [k]: e.target.checked },
+                      })
+                    }
+                  />
+                  <span>{lbl}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setReqOpen(false)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">Batal</button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Kirim Permintaan Akun</button>
+          </div>
         </form>
       </Modal>
 
+      {/* Account Request Revision / Reject Modal */}
+      <Modal
+        open={Boolean(reqDecisionModal)}
+        onClose={() => setReqDecisionModal(null)}
+        title={reqDecisionModal?.decision === 'perlu_revisi' ? 'Minta Revisi Permintaan Akun Duta' : 'Tolak Permintaan Akun Duta'}
+        subtitle={reqDecisionModal?.fullName || ''}
+      >
+        {reqDecisionModal && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!reqDecisionModal.note.trim()) {
+                notify('Alasan atau catatan pemeriksa wajib diisi.', 'error');
+                return;
+              }
+              const target = reqDecisionModal;
+              setReqDecisionModal(null);
+              await handleDecideReq(target.id, target.decision, target.note);
+            }}
+            className="space-y-3 text-xs"
+          >
+            <div>
+              <label className="block font-semibold mb-1">
+                {reqDecisionModal.decision === 'perlu_revisi' ? 'Catatan Bagian yang Perlu Diperbaiki *' : 'Alasan Penolakan *'}
+              </label>
+              <textarea
+                rows={4}
+                required
+                value={reqDecisionModal.note}
+                onChange={(e) => setReqDecisionModal({ ...reqDecisionModal, note: e.target.value })}
+                placeholder="Tuliskan penjelasan yang jelas agar Koordinator Wilayah dapat menindaklanjuti..."
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setReqDecisionModal(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">Batal</button>
+              <button
+                type="submit"
+                className={`px-4 py-2 rounded-xl text-white font-semibold ${
+                  reqDecisionModal.decision === 'perlu_revisi' ? 'bg-amber-600' : 'bg-rose-600'
+                }`}
+              >
+                {reqDecisionModal.decision === 'perlu_revisi' ? 'Kembalikan untuk Revisi' : 'Tolak Permintaan'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Account Request Resubmit Modal */}
+      <Modal
+        open={Boolean(resubmitReqModal)}
+        onClose={() => setResubmitReqModal(null)}
+        title="Perbaiki & Ajukan Ulang Permintaan Akun Duta"
+        subtitle={resubmitReqModal?.referenceNumber || ''}
+      >
+        {resubmitReqModal && (
+          <form onSubmit={handleResubmitReq} className="space-y-3 text-xs">
+            {resubmitReqModal.decisionNote && (
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-3 text-amber-800 dark:text-amber-200">
+                <p className="font-bold">Catatan Revisi Pemeriksa:</p>
+                <p className="mt-0.5">{resubmitReqModal.decisionNote}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1">Nama Calon Duta *</label>
+                <input required value={resubmitForm.fullName} onChange={(e) => setResubmitForm({ ...resubmitForm, fullName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Telepon / WhatsApp *</label>
+                <input required value={resubmitForm.phone} onChange={(e) => setResubmitForm({ ...resubmitForm, phone: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Asal Sekolah *</label>
+                <input required value={resubmitForm.schoolName} onChange={(e) => setResubmitForm({ ...resubmitForm, schoolName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">NPSN Sekolah</label>
+                <input value={resubmitForm.schoolNpsn} onChange={(e) => setResubmitForm({ ...resubmitForm, schoolNpsn: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono" />
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Nama Orang Tua / Wali</label>
+              <input value={resubmitForm.guardianName} onChange={(e) => setResubmitForm({ ...resubmitForm, guardianName: e.target.value })} className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2" />
+            </div>
+            <div className="flex flex-wrap gap-3 pt-1">
+              {(
+                [
+                  ['pasFoto', 'Pas Foto'],
+                  ['kartuPelajar', 'Kartu Pelajar'],
+                  ['suratSekolah', 'Surat Sekolah'],
+                  ['izinWali', 'Izin Orang Tua/Wali'],
+                ] as const
+              ).map(([k, lbl]) => (
+                <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(resubmitForm.docsChecklist[k])}
+                    onChange={(e) =>
+                      setResubmitForm({
+                        ...resubmitForm,
+                        docsChecklist: { ...resubmitForm.docsChecklist, [k]: e.target.checked },
+                      })
+                    }
+                  />
+                  <span>{lbl}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setResubmitReqModal(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">Batal</button>
+              <button type="submit" className="px-4 py-2 rounded-xl bg-[#0EA5E9] text-white font-semibold">Simpan &amp; Ajukan Ulang</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Archive Personnel Modal */}
+      <Modal
+        open={Boolean(confirmArchive)}
+        onClose={() => setConfirmArchive(null)}
+        title="Arsipkan Data Personel?"
+        subtitle={confirmArchive?.fullName || ''}
+      >
+        {confirmArchive && (
+          <div className="space-y-3 text-xs">
+            <p className="text-slate-600 dark:text-slate-300">
+              Data yang diarsipkan akan disembunyikan dari direktori operasional harian namun seluruh riwayat proposal, LKL, dan evaluasinya tetap terjaga dan dapat dipulihkan sewaktu-waktu.
+            </p>
+            <div>
+              <label className="block font-semibold mb-1">Alasan Pengarsipan</label>
+              <input
+                value={confirmArchive.reason}
+                onChange={(e) => setConfirmArchive({ ...confirmArchive, reason: e.target.value })}
+                placeholder="Misal: Selesai masa tugas / pindah domisili"
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setConfirmArchive(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">Batal</button>
+              <button type="button" onClick={handleArchivePerson} className="px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold">Ya, Arsipkan</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <ConfirmDialog
-        open={Boolean(confirmRejectReq)}
-        title="Tolak Permintaan Akun Duta?"
+        open={Boolean(confirmRestore)}
+        title="Pulihkan Personel dari Arsip?"
+        message={confirmRestore ? `Kembalikan ${confirmRestore.fullName} ke daftar direktori personel aktif?` : ''}
+        confirmLabel="Ya, Pulihkan"
+        onConfirm={handleRestorePerson}
+        onCancel={() => setConfirmRestore(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmDeletePerm)}
+        title="Hapus Permanen Data Personel?"
         message={
-          confirmRejectReq
-            ? `Tolak pengajuan akun atas nama ${confirmRejectReq.fullName}? Calon anggota tidak akan menerima tautan undangan aktivasi.`
+          confirmDeletePerm
+            ? `Hapus permanen data ${confirmDeletePerm.fullName}? Operasi ini hanya diizinkan jika personel belum memiliki riwayat akun, proposal, LKL, atau evaluasi terkait.`
             : ''
         }
-        confirmLabel="Ya, Tolak Permintaan"
+        confirmLabel="Ya, Hapus Permanen"
         danger
-        onConfirm={() => {
-          const target = confirmRejectReq;
-          setConfirmRejectReq(null);
-          if (target) handleDecideReq(target.id, 'ditolak');
-        }}
-        onCancel={() => setConfirmRejectReq(null)}
+        onConfirm={handleDeletePersonPerm}
+        onCancel={() => setConfirmDeletePerm(null)}
       />
 
       <Modal open={invModalOpen} onClose={() => setInvModalOpen(false)} title="Kirim Undangan Aktivasi Akun Resmi">

@@ -1081,7 +1081,69 @@ function initSchema(db: DatabaseSync): void {
     );
   `);
 
-  // Record schema migration versions cleanly (1..13)
+  // Migration 14: Email Attachments, Chunked Email Queue, Personnel Archival, Account Lifecycle & Duta Approval Policy
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_attachments (
+      id TEXT PRIMARY KEY,
+      owner_type TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      uploaded_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(owner_type, owner_id, file_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_att_owner ON email_attachments(owner_type, owner_id);
+
+    CREATE TABLE IF NOT EXISTS email_queue (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      recipient_user_id TEXT,
+      recipient_email TEXT NOT NULL,
+      recipient_name TEXT NOT NULL DEFAULT '',
+      subject_rendered TEXT NOT NULL DEFAULT '',
+      body_rendered TEXT NOT NULL DEFAULT '',
+      html_rendered TEXT,
+      queue_status TEXT NOT NULL DEFAULT 'dalam_antrean',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      processed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_queue_campaign_qstatus ON email_queue(campaign_id, queue_status);
+  `);
+  addColumnIfMissing('email_attachments', 'uploaded_by', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing('email_queue', 'subject_rendered', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing('email_queue', 'body_rendered', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing('email_queue', 'html_rendered', 'TEXT');
+  addColumnIfMissing('email_queue', 'queue_status', "TEXT NOT NULL DEFAULT 'dalam_antrean'");
+  addColumnIfMissing('email_campaigns', 'paused', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('email_campaigns', 'cancelled_at', 'TEXT');
+  addColumnIfMissing('email_campaigns', 'queued_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('personnel', 'archived_at', 'TEXT');
+  addColumnIfMissing('personnel', 'archived_reason', 'TEXT');
+  addColumnIfMissing('personnel', 'archived_by', 'TEXT');
+  addColumnIfMissing('users', 'suspended_reason', 'TEXT');
+  addColumnIfMissing('users', 'locked_until', 'TEXT');
+  addColumnIfMissing('account_requests', 'school_npsn', "TEXT DEFAULT ''");
+  addColumnIfMissing('account_requests', 'guardian_name', "TEXT DEFAULT ''");
+  addColumnIfMissing('account_requests', 'docs_checklist_json', "TEXT DEFAULT '{}'");
+  addColumnIfMissing('account_requests', 'revision_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('account_requests', 'auto_approved', 'INTEGER NOT NULL DEFAULT 0');
+
+  db.prepare(
+    "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('duta_auto_approve', 'false', ?)"
+  ).run(migNow);
+  db.prepare(
+    "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('invite_expiry_hours', '72', ?)"
+  ).run(migNow);
+  db.prepare(
+    "INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('require_sekretariat_duta_review', 'true', ?)"
+  ).run(migNow);
+
+  // Record schema migration versions cleanly (1..14)
   const migStmt = db.prepare('INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)');
   migStmt.run(1, 'baseline_satu_dpbi_v4', migNow);
   migStmt.run(2, 'security_hardening_file_grants_and_24h_session_cap', migNow);
@@ -1096,6 +1158,7 @@ function initSchema(db: DatabaseSync): void {
   migStmt.run(11, 'support_tickets_and_error_center', migNow);
   migStmt.run(12, 'idempotency_optimistic_concurrency_and_soft_delete', migNow);
   migStmt.run(13, 'user_preferences_and_accessibility', migNow);
+  migStmt.run(14, 'master_directive_email_attachments_queue_lifecycle_policy', migNow);
 }
 
 export function createWalSafeSqliteSnapshot(db: DatabaseSync, destFilePath: string): void {

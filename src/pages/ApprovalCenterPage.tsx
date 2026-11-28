@@ -33,6 +33,7 @@ import {
   StatusIndicator,
   Textarea,
 } from '../components/ui';
+import { ProcessTracker } from '../components/ProcessTracker';
 
 const TYPE_LABELS: Record<ApprovalQueueItem['itemType'], string> = {
   proposal: 'Proposal Kegiatan',
@@ -557,6 +558,10 @@ export function ApprovalCenterPage() {
                 )}
               </div>
             </div>
+
+            {(selected.itemType === 'proposal' || selected.itemType === 'lkl') && (
+              <ProcessTracker entityType={selected.itemType} entityId={selected.id} />
+            )}
 
             <div className="flex items-center justify-between">
               <button

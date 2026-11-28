@@ -654,13 +654,31 @@ export const ALLOWED_EMAIL_VARIABLES = [
   'jabatan',
   'role',
   'provinsi',
+  'kabupaten',
   'angkatan',
+  'nomor_anggota',
+  'nomor_pengajuan',
   'nomor_surat',
+  'nama_program',
   'tanggal',
   'tenggat',
   'tautan',
+  'tautan_aktivasi',
+  'tautan_dokumen',
+  'catatan_pemeriksa',
+  'nama_pemeriksa',
+  'nama_organisasi',
   'referensi',
 ] as const;
+
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export function validateEmailTemplatePlaceholders(template: string): {
   valid: boolean;
@@ -668,7 +686,7 @@ export function validateEmailTemplatePlaceholders(template: string): {
   invalidVariables: string[];
   unclosedBraces: boolean;
 } {
-  const stripped = template.replace(/\{\{[a-z0-9_]+\}\}/gi, '');
+  const stripped = template.replace(/\{\{\s*[a-z0-9_]+\s*\}\}/gi, '');
   const unclosedBraces = stripped.includes('{{') || stripped.includes('}}');
   const matches = [...template.matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)].map((m) => m[1].toLowerCase());
   const unique = [...new Set(matches)];
@@ -682,10 +700,15 @@ export function validateEmailTemplatePlaceholders(template: string): {
   };
 }
 
-export function renderEmailTemplate(template: string, vars: Record<string, string>): string {
+export function renderEmailTemplate(
+  template: string,
+  vars: Record<string, string>,
+  options?: { htmlEscape?: boolean }
+): string {
   return template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_full, key: string) => {
     const k = key.toLowerCase();
-    return vars[k] ?? '';
+    const raw = vars[k] ?? '';
+    return options?.htmlEscape ? escapeHtml(raw) : raw;
   });
 }
 

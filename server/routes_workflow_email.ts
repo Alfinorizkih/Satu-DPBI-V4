@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import type { Express } from 'express';
-import { getDb } from './db';
+import { getDb, IS_DEMO_MODE, nextReferenceNumber } from './db';
 import {
   AuthenticatedRequest,
+  canAccessStoredFile,
   checkGenericThrottle,
   createNotificationIdempotent,
   hasScopedUserPermission,
@@ -17,12 +19,21 @@ import {
   executeEmailCampaign,
   exportCampaignLogsCsv,
   getEmailRuntimeStatus,
+  processQueuedCampaignChunk,
+  resolveEmailAttachmentsForOwner,
   resolveEmailAudience,
   retryCampaignFailedLogs,
+  scheduleCampaignQueueTick,
+  sendTransactionalEmail,
 } from './email';
+import { buildCsvErrorReport, parseEmailRecipientsCsv } from '../src/lib/csvParser';
 import { PROVINCE_BY_CODE } from '../src/lib/provinces';
-import { validateEmailTemplatePlaceholders } from '../src/lib/rbac';
+import { ROLE_LABELS, validateEmailTemplatePlaceholders } from '../src/lib/rbac';
 import type { ApprovalQueueItem, RoleCode } from '../src/lib/types';
+
+const BLOCKED_ATTACHMENT_EXTS = new Set([
+  '.exe', '.bat', '.cmd', '.sh', '.msi', '.dll', '.js', '.mjs', '.cjs', '.vbs', '.ps1', '.php', '.py', '.rb', '.jar',
+]);
 
 function computeDefaultSla(createdAt: string, hours: number): string {
   const base = Date.parse(createdAt);
@@ -208,7 +219,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         if (filterStatus === 'pending' || filterStatus === 'overdue') {
           aConds.push("status = 'menunggu'");
         } else if (filterStatus === 'revisi') {
-          aConds.push('1 = 0');
+          aConds.push("status = 'perlu_revisi'");
         }
         if (isKorwil && user.provinceCode) {
           aConds.push('province_code = ?');
@@ -361,7 +372,7 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
     '/api/approval-center/:type/:id/action',
     requireAuth,
     requirePermission('persetujuan', 'review'),
-    (req: AuthenticatedRequest, res) => {
+    async (req: AuthenticatedRequest, res) => {
       const db = getDb();
       const user = req.authUser!;
       const itemType = String(req.params.type);
@@ -677,11 +688,20 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           res.status(404).json({ error: 'Permintaan akun tidak ditemukan.', code: 404 });
           return;
         }
-        if (String(reqRow.status) !== 'menunggu') {
+        if (!['menunggu', 'perlu_revisi'].includes(String(reqRow.status))) {
           res.status(409).json({ error: 'Permintaan akun ini sudah diproses sebelumnya.', code: 409 });
           return;
         }
-        const nextStatus = action === 'approve' ? 'disetujui' : 'ditolak';
+        const nextStatus =
+          action === 'approve'
+            ? 'disetujui'
+            : action === 'revise' || action === 'request_revision'
+            ? 'perlu_revisi'
+            : 'ditolak';
+        if ((nextStatus === 'ditolak' || nextStatus === 'perlu_revisi') && !reason) {
+          res.status(422).json({ error: 'Catatan alasan wajib diisi saat menolak atau meminta revisi permohonan akun.', code: 422 });
+          return;
+        }
         db.prepare('UPDATE account_requests SET status = ?, decided_by = ?, decision_note = ?, decided_at = ? WHERE id = ?').run(
           nextStatus,
           user.fullName,
@@ -690,26 +710,94 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           itemId
         );
         let inviteToken: string | null = null;
+        const cleanEmail = String(reqRow.email).trim().toLowerCase();
+        const provCode = String(reqRow.province_code);
+        const provName = PROVINCE_BY_CODE.get(provCode)?.name ?? provCode;
+
         if (nextStatus === 'disetujui') {
+          let linkedPers = db.prepare('SELECT id FROM personnel WHERE LOWER(email) = ? LIMIT 1').get(cleanEmail) as { id: string } | undefined;
+          let personnelId = linkedPers?.id ?? null;
+          if (!personnelId) {
+            personnelId = crypto.randomUUID();
+            const persRef = nextReferenceNumber(db, 'PERS');
+            const memberNo = `DPBI-${new Date().getFullYear()}-${String(Math.floor(1000 + Math.random() * 8999))}`;
+            db.prepare(
+              `INSERT INTO personnel (id, member_number, reference_number, full_name, email, phone, province_code, school_name, npsn, batch_id, position_title, bidang, role_code, guardian_name, docs_checklist_json, personnel_status, verification_status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Duta Pelajar Berbudaya', 'Bidang Pendidikan & Kebudayaan', 'duta', ?, ?, 'aktif', 'terverifikasi', ?, ?)`
+            ).run(
+              personnelId,
+              memberNo,
+              persRef,
+              String(reqRow.full_name),
+              cleanEmail,
+              String(reqRow.phone || ''),
+              provCode,
+              String(reqRow.school_name || ''),
+              String(reqRow.school_npsn || ''),
+              String(reqRow.batch_id || 'batch-3'),
+              String(reqRow.guardian_name || ''),
+              String(reqRow.docs_checklist_json || '{}'),
+              now,
+              now
+            );
+          }
+
+          const ttlSetting = db.prepare("SELECT value FROM system_settings WHERE key = 'invite_expiry_hours'").get() as { value: string } | undefined;
+          const ttlHours = Math.max(12, Math.min(336, Number(ttlSetting?.value || 72) || 72));
           inviteToken = crypto.randomBytes(20).toString('hex');
-          const exp = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+          const exp = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
           db.prepare(
-            `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, token_hash, expires_at, created_by, created_at)
-             VALUES (?, ?, ?, 'duta', ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO invitations (id, email, full_name, role, province_code, batch_id, personnel_id, token_hash, status, resend_count, last_sent_at, expires_at, created_by, created_at)
+             VALUES (?, ?, ?, 'duta', ?, ?, ?, ?, 'undangan_terkirim', 0, ?, ?, ?, ?)`
           ).run(
             crypto.randomUUID(),
-            String(reqRow.email),
+            cleanEmail,
             String(reqRow.full_name),
-            String(reqRow.province_code),
+            provCode,
             String(reqRow.batch_id || 'batch-3'),
+            personnelId,
             sha256(inviteToken),
+            now,
             exp,
             user.id,
             now
           );
+
+          const appUrl = (process.env.APP_URL || 'https://satu.dpbi.or.id').replace(/\/$/, '');
+          await sendTransactionalEmail(db, {
+            templateCode: 'undangan_akun',
+            toEmail: cleanEmail,
+            toName: String(reqRow.full_name),
+            role: ROLE_LABELS.duta,
+            provinsi: provName,
+            referenceCode: String(reqRow.reference_number),
+            tenggat: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(exp)),
+            tautan: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+            tautanAktivasi: `${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+            fallbackSubject: `[SATU DPBI] Undangan Aktivasi Akun Duta Pelajar — ${provName}`,
+            fallbackBody: `Yth. ${String(reqRow.full_name)},\n\nPengajuan akun Duta (${String(reqRow.reference_number)}) telah disetujui. Silakan aktivasi akun Anda melalui tautan: ${appUrl}/aktivasi-undangan?token=${inviteToken}`,
+            actorId: user.id,
+            actorName: user.fullName,
+          });
+        } else {
+          await sendTransactionalEmail(db, {
+            templateCode: nextStatus === 'perlu_revisi' ? 'permohonan_akun_revisi' : 'permohonan_akun_ditolak',
+            toEmail: cleanEmail,
+            toName: String(reqRow.full_name),
+            role: ROLE_LABELS.duta,
+            provinsi: provName,
+            referenceCode: String(reqRow.reference_number),
+            catatanPemeriksa: reason || 'Tidak memenuhi syarat administrasi.',
+            namaPemeriksa: user.fullName,
+            fallbackSubject: `[SATU DPBI] Status Permohonan Akun ${String(reqRow.reference_number)}`,
+            fallbackBody: `Yth. ${String(reqRow.full_name)},\n\nStatus permohonan akun ${String(reqRow.reference_number)}: ${nextStatus}. Catatan: ${reason || '-'}`,
+            actorId: user.id,
+            actorName: user.fullName,
+          });
         }
+
         writeAuditLog(db, user, `APPROVAL_CENTER_${action.toUpperCase()}`, 'account_request', String(reqRow.reference_number), 'berhasil', reason || nextStatus);
-        res.json({ ok: true, status: nextStatus, inviteToken });
+        res.json({ ok: true, status: nextStatus, inviteToken: IS_DEMO_MODE ? inviteToken : undefined });
         return;
       }
 
@@ -764,52 +852,62 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
   app.get('/api/email/overview', requireAuth, requirePermission('email', 'view'), (_req, res) => {
     const db = getDb();
-    const templates = db.prepare('SELECT * FROM email_templates ORDER BY name ASC').all() as Record<string, unknown>[];
+    const templates = db.prepare('SELECT * FROM email_templates ORDER BY category ASC, name ASC').all() as Record<string, unknown>[];
     const campaigns = db
       .prepare('SELECT * FROM email_campaigns ORDER BY created_at DESC LIMIT 50')
       .all() as Record<string, unknown>[];
     const logs = db
-      .prepare('SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 100')
+      .prepare('SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 120')
       .all() as Record<string, unknown>[];
 
     res.json({
       runtime: getEmailRuntimeStatus(),
-      templates: templates.map((t) => ({
-        id: String(t.id),
-        code: String(t.code),
-        name: String(t.name),
-        category: String(t.category),
-        subject: String(t.subject),
-        bodyText: String(t.body_text),
-        bodyHtml: t.body_html ? String(t.body_html) : null,
-        version: Number(t.version || 1),
-        isActive: Boolean(t.is_active),
-        updatedAt: String(t.updated_at),
-      })),
-      campaigns: campaigns.map((c) => ({
-        id: String(c.id),
-        title: String(c.title),
-        templateId: c.template_id ? String(c.template_id) : null,
-        subject: String(c.subject),
-        bodyText: String(c.body_text),
-        bodyHtml: c.body_html ? String(c.body_html) : null,
-        audienceFilter: (() => {
-          try {
-            return JSON.parse(String(c.audience_filter_json || '{}'));
-          } catch {
-            return { mode: 'single' };
-          }
-        })(),
-        deliveryMode: c.delivery_mode,
-        status: c.status,
-        totalRecipients: Number(c.total_recipients || 0),
-        sentCount: Number(c.sent_count || 0),
-        failedCount: Number(c.failed_count || 0),
-        scheduledAt: c.scheduled_at ? String(c.scheduled_at) : null,
-        sentAt: c.sent_at ? String(c.sent_at) : null,
-        createdByName: String(c.created_by_name),
-        createdAt: String(c.created_at),
-      })),
+      templates: templates.map((t) => {
+        const id = String(t.id);
+        return {
+          id,
+          code: String(t.code),
+          name: String(t.name),
+          category: String(t.category),
+          subject: String(t.subject),
+          bodyText: String(t.body_text),
+          bodyHtml: t.body_html ? String(t.body_html) : null,
+          version: Number(t.version || 1),
+          isActive: Boolean(t.is_active),
+          attachments: resolveEmailAttachmentsForOwner(db, 'template', id).records,
+          updatedAt: String(t.updated_at),
+        };
+      }),
+      campaigns: campaigns.map((c) => {
+        const id = String(c.id);
+        return {
+          id,
+          title: String(c.title),
+          templateId: c.template_id ? String(c.template_id) : null,
+          subject: String(c.subject),
+          bodyText: String(c.body_text),
+          bodyHtml: c.body_html ? String(c.body_html) : null,
+          audienceFilter: (() => {
+            try {
+              return JSON.parse(String(c.audience_filter_json || '{}'));
+            } catch {
+              return { mode: 'single' };
+            }
+          })(),
+          deliveryMode: c.delivery_mode,
+          status: c.status,
+          totalRecipients: Number(c.total_recipients || 0),
+          sentCount: Number(c.sent_count || 0),
+          failedCount: Number(c.failed_count || 0),
+          queuedCount: Number(c.queued_count || 0),
+          paused: Boolean(c.paused),
+          scheduledAt: c.scheduled_at ? String(c.scheduled_at) : null,
+          sentAt: c.sent_at ? String(c.sent_at) : null,
+          createdByName: String(c.created_by_name),
+          attachments: resolveEmailAttachmentsForOwner(db, 'campaign', id).records,
+          createdAt: String(c.created_at),
+        };
+      }),
       logs: logs.map((l) => ({
         id: String(l.id),
         campaignId: String(l.campaign_id),
@@ -932,23 +1030,121 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
     res.json({ history });
   });
 
+  app.patch('/api/email/templates/:id/status', requireAuth, requirePermission('email', 'edit'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const id = String(req.params.id);
+    const isActive = Boolean(req.body?.isActive);
+    const existing = db.prepare('SELECT id, name FROM email_templates WHERE id = ?').get(id) as { id: string; name: string } | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Templat email tidak ditemukan.', code: 404 });
+      return;
+    }
+    db.prepare('UPDATE email_templates SET is_active = ?, updated_at = ? WHERE id = ?').run(isActive ? 1 : 0, new Date().toISOString(), id);
+    writeAuditLog(db, user, 'TOGGLE_EMAIL_TEMPLATE_STATUS', 'email_template', id, 'berhasil', `${existing.name}: ${isActive ? 'aktif' : 'nonaktif'}`);
+    res.json({ ok: true, isActive });
+  });
+
+  app.post('/api/email/templates/:id/attachments', requireAuth, requirePermission('email', 'edit'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const templateId = String(req.params.id);
+    const fileId = String(req.body?.fileId || '').trim();
+    if (!fileId) {
+      res.status(422).json({ error: 'Pilih berkas lampiran yang valid.', code: 422 });
+      return;
+    }
+    const tpl = db.prepare('SELECT id FROM email_templates WHERE id = ?').get(templateId);
+    if (!tpl) {
+      res.status(404).json({ error: 'Templat email tidak ditemukan.', code: 404 });
+      return;
+    }
+    const fileRow = db.prepare('SELECT * FROM stored_files WHERE id = ?').get(fileId) as Record<string, unknown> | undefined;
+    if (!fileRow || Number(fileRow.is_archived || 0) === 1) {
+      res.status(404).json({ error: 'Berkas tidak ditemukan atau sudah diarsipkan.', code: 404 });
+      return;
+    }
+    if (!canAccessStoredFile(db, user, fileId).allowed) {
+      res.status(403).json({ error: 'Anda tidak memiliki izin menggunakan berkas ini.', code: 403 });
+      return;
+    }
+    const fileName = String(fileRow.original_name || 'lampiran');
+    if (BLOCKED_ATTACHMENT_EXTS.has(path.extname(fileName).toLowerCase())) {
+      res.status(422).json({ error: 'Jenis berkas eksekusi tidak diizinkan sebagai lampiran email.', code: 422 });
+      return;
+    }
+    const dup = db
+      .prepare("SELECT id FROM email_attachments WHERE owner_type = 'template' AND owner_id = ? AND file_id = ?")
+      .get(templateId, fileId);
+    if (dup) {
+      res.status(409).json({ error: 'Berkas ini sudah terpasang pada templat tersebut.', code: 409 });
+      return;
+    }
+    const attachmentId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO email_attachments (id, owner_type, owner_id, file_id, file_name, mime_type, size_bytes, uploaded_by, created_at)
+       VALUES (?, 'template', ?, ?, ?, ?, ?, ?, ?)`
+    ).run(attachmentId, templateId, fileId, fileName, String(fileRow.mime_type || 'application/octet-stream'), Number(fileRow.size_bytes || 0), user.id, now);
+    writeAuditLog(db, user, 'ATTACH_EMAIL_TEMPLATE_FILE', 'email_template', templateId, 'berhasil', fileName);
+    res.status(201).json({ ok: true, attachmentId });
+  });
+
+  app.delete('/api/email/templates/:id/attachments/:attachmentId', requireAuth, requirePermission('email', 'edit'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const user = req.authUser!;
+    const templateId = String(req.params.id);
+    const attachmentId = String(req.params.attachmentId);
+    const result = db
+      .prepare("DELETE FROM email_attachments WHERE id = ? AND owner_type = 'template' AND owner_id = ?")
+      .run(attachmentId, templateId);
+    if (Number(result.changes ?? 0) === 0) {
+      res.status(404).json({ error: 'Lampiran templat tidak ditemukan.', code: 404 });
+      return;
+    }
+    writeAuditLog(db, user, 'REMOVE_EMAIL_TEMPLATE_FILE', 'email_template', templateId, 'berhasil', attachmentId);
+    res.json({ ok: true });
+  });
+
   app.post('/api/email/parse-csv', requireAuth, requirePermission('email', 'create'), (req, res) => {
     const csvText = String(req.body?.csvText || '').trim();
+    const emailColumn = req.body?.emailColumn ? String(req.body.emailColumn) : undefined;
     if (!csvText) {
       res.status(400).json({ error: 'Konten CSV penerima kosong.', code: 400 });
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const tokens = csvText
-      .split(/[\r\n,;]+/)
-      .map((s) => s.trim().replace(/^["']|["']$/g, '').toLowerCase())
-      .filter(Boolean);
-    const validEmails = Array.from(new Set(tokens.filter((t) => emailRegex.test(t))));
-    const ignoredCount = tokens.filter((t) => !emailRegex.test(t) && t !== 'email').length;
+    const parsed = parseEmailRecipientsCsv(csvText, {
+      maxRows: 500,
+      columnMap: emailColumn ? { email: emailColumn } : undefined,
+    });
+    const db = getDb();
+    let matchedInSystem = 0;
+    const matchedEmails: string[] = [];
+    for (const r of parsed.validRecipients) {
+      const hit = db
+        .prepare('SELECT 1 FROM users WHERE LOWER(email) = ? UNION SELECT 1 FROM personnel WHERE LOWER(email) = ? LIMIT 1')
+        .get(r.email, r.email);
+      if (hit) {
+        matchedInSystem += 1;
+        matchedEmails.push(r.email);
+      }
+    }
+    const errorCsv = parsed.invalidRows.length > 0 ? buildCsvErrorReport(parsed.invalidRows) : '';
     res.json({
-      emails: validEmails.slice(0, 500),
-      totalValid: validEmails.length,
-      ignoredCount,
+      emails: parsed.validRecipients.map((r) => r.email),
+      totalValid: parsed.validRecipients.length,
+      ignoredCount: parsed.invalidRows.length + parsed.duplicateEmails.length,
+      delimiter: parsed.delimiter,
+      headers: parsed.headers,
+      detectedEmailColumn: parsed.detectedEmailColumn,
+      totalDataRows: parsed.totalDataRows,
+      validRecipients: parsed.validRecipients,
+      duplicateEmails: parsed.duplicateEmails,
+      invalidRows: parsed.invalidRows,
+      matchedInSystem,
+      matchedEmails,
+      errorCsv,
+      truncated: parsed.truncated,
     });
   });
 
@@ -1055,6 +1251,39 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         return;
       }
 
+      const attachmentFileIds = Array.isArray(req.body?.attachmentFileIds) ? req.body.attachmentFileIds.map(String).filter(Boolean) : [];
+      const attachmentFiles: { fileId: string; fileName: string; mimeType: string; sizeBytes: number }[] = [];
+      for (const fid of attachmentFileIds) {
+        const fRow = db.prepare('SELECT * FROM stored_files WHERE id = ?').get(fid) as Record<string, unknown> | undefined;
+        if (!fRow || Number(fRow.is_archived || 0) === 1) {
+          res.status(404).json({ error: `Berkas lampiran ${fid} tidak ditemukan atau sudah diarsipkan.`, code: 404 });
+          return;
+        }
+        if (!canAccessStoredFile(db, user, fid).allowed) {
+          res.status(403).json({ error: `Tidak ada izin akses untuk berkas lampiran ${String(fRow.original_name || fid)}.`, code: 403 });
+          return;
+        }
+        const fName = String(fRow.original_name || 'lampiran');
+        if (BLOCKED_ATTACHMENT_EXTS.has(path.extname(fName).toLowerCase())) {
+          res.status(422).json({ error: `Lampiran ${fName} memiliki ekstensi terlarang.`, code: 422 });
+          return;
+        }
+        attachmentFiles.push({
+          fileId: String(fRow.id),
+          fileName: fName,
+          mimeType: String(fRow.mime_type || 'application/octet-stream'),
+          sizeBytes: Number(fRow.size_bytes || 0),
+        });
+      }
+
+      if (templateId) {
+        const tplRow = db.prepare('SELECT is_active FROM email_templates WHERE id = ?').get(templateId) as { is_active: number } | undefined;
+        if (tplRow && Number(tplRow.is_active) === 0) {
+          res.status(409).json({ error: 'Templat yang dipilih berstatus nonaktif. Aktifkan templat terlebih dahulu atau kirim tanpa templat.', code: 409 });
+          return;
+        }
+      }
+
       try {
         const bodyHtml = req.body?.bodyHtml ? String(req.body.bodyHtml) : null;
         const result = await executeEmailCampaign(db, {
@@ -1064,6 +1293,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           bodyText,
           bodyHtml,
           nomorSurat: req.body?.nomorSurat ? String(req.body.nomorSurat) : undefined,
+          nomorPengajuan: req.body?.nomorPengajuan ? String(req.body.nomorPengajuan) : undefined,
+          namaProgram: req.body?.namaProgram ? String(req.body.namaProgram) : undefined,
           tenggat: req.body?.tenggat ? String(req.body.tenggat) : undefined,
           tautan: req.body?.tautan ? String(req.body.tautan) : undefined,
           audienceFilter: {
@@ -1080,6 +1311,8 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           scheduledAt,
           createdBy: user.id,
           createdByName: user.fullName,
+          attachmentFiles,
+          useQueue: Boolean(req.body?.useQueue),
         });
 
         writeAuditLog(
@@ -1089,13 +1322,75 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
           'email_campaign',
           result.campaignId,
           'berhasil',
-          `Mode: ${result.deliveryMode} | Penerima: ${result.totalRecipients} | Terkirim/Antre: ${result.sentCount}`
+          `Mode: ${result.deliveryMode} | Penerima: ${result.totalRecipients} | Terkirim: ${result.sentCount} | Antre: ${result.queuedCount} | Lampiran: ${attachmentFiles.length}`
         );
 
         res.status(201).json({ ok: true, ...result });
       } catch (err) {
         res.status(400).json({ error: err instanceof Error ? err.message : 'Gagal memproses pengiriman email.', code: 400 });
       }
+    }
+  );
+
+  app.post(
+    '/api/email/campaigns/:id/pause',
+    requireAuth,
+    requirePermission('email', 'create'),
+    (req: AuthenticatedRequest, res) => {
+      const db = getDb();
+      const user = req.authUser!;
+      const id = String(req.params.id);
+      const cmp = db.prepare('SELECT status FROM email_campaigns WHERE id = ?').get(id) as { status: string } | undefined;
+      if (!cmp) {
+        res.status(404).json({ error: 'Kampanye email tidak ditemukan.', code: 404 });
+        return;
+      }
+      if (!['sedang_dikirim', 'dalam_antrean'].includes(cmp.status)) {
+        res.status(409).json({ error: 'Hanya kampanye yang sedang dikirim atau mengantre yang dapat dijeda.', code: 409 });
+        return;
+      }
+      db.prepare('UPDATE email_campaigns SET paused = 1 WHERE id = ?').run(id);
+      writeAuditLog(db, user, 'EMAIL_CAMPAIGN_PAUSE', 'email_campaign', id, 'berhasil', 'Antrean kampanye dijeda');
+      res.json({ ok: true, paused: true });
+    }
+  );
+
+  app.post(
+    '/api/email/campaigns/:id/resume',
+    requireAuth,
+    requirePermission('email', 'create'),
+    async (req: AuthenticatedRequest, res) => {
+      const db = getDb();
+      const user = req.authUser!;
+      const id = String(req.params.id);
+      const cmp = db.prepare('SELECT status, cancelled_at FROM email_campaigns WHERE id = ?').get(id) as { status: string; cancelled_at: string | null } | undefined;
+      if (!cmp) {
+        res.status(404).json({ error: 'Kampanye email tidak ditemukan.', code: 404 });
+        return;
+      }
+      if (cmp.cancelled_at || cmp.status === 'dibatalkan') {
+        res.status(409).json({ error: 'Kampanye yang sudah dibatalkan tidak dapat dilanjutkan.', code: 409 });
+        return;
+      }
+      db.prepare("UPDATE email_campaigns SET paused = 0, status = 'sedang_dikirim' WHERE id = ?").run(id);
+      const chunk = await processQueuedCampaignChunk(db, id, 10);
+      if (chunk.remaining > 0 && chunk.status === 'sedang_dikirim') {
+        scheduleCampaignQueueTick(db, id, 250);
+      }
+      writeAuditLog(db, user, 'EMAIL_CAMPAIGN_RESUME', 'email_campaign', id, 'berhasil', `Diproses: ${chunk.processed}, Sisa: ${chunk.remaining}`);
+      res.json({ ok: true, ...chunk });
+    }
+  );
+
+  app.post(
+    '/api/email/campaigns/:id/process-next',
+    requireAuth,
+    requirePermission('email', 'create'),
+    async (req: AuthenticatedRequest, res) => {
+      const db = getDb();
+      const id = String(req.params.id);
+      const chunk = await processQueuedCampaignChunk(db, id, 10);
+      res.json({ ok: true, ...chunk });
     }
   );
 
@@ -1112,11 +1407,13 @@ export function registerWorkflowAndEmailRoutes(app: Express): void {
         res.status(404).json({ error: 'Kampanye email tidak ditemukan.', code: 404 });
         return;
       }
-      if (!['draft', 'terjadwal'].includes(cmp.status)) {
-        res.status(409).json({ error: 'Hanya draf atau kampanye terjadwal yang dapat dibatalkan.', code: 409 });
+      if (!['draft', 'terjadwal', 'dalam_antrean', 'sedang_dikirim'].includes(cmp.status)) {
+        res.status(409).json({ error: 'Hanya draf, terjadwal, atau kampanye yang sedang mengantre yang dapat dibatalkan.', code: 409 });
         return;
       }
-      db.prepare("UPDATE email_campaigns SET status = 'dibatalkan' WHERE id = ?").run(id);
+      const now = new Date().toISOString();
+      db.prepare("UPDATE email_campaigns SET status = 'dibatalkan', paused = 1, cancelled_at = ?, queued_count = 0 WHERE id = ?").run(now, id);
+      db.prepare("UPDATE email_queue SET queue_status = 'dibatalkan', processed_at = ? WHERE campaign_id = ? AND queue_status = 'dalam_antrean'").run(now, id);
       writeAuditLog(db, user, 'EMAIL_CAMPAIGN_CANCEL', 'email_campaign', id, 'berhasil', 'Dibatalkan oleh operator.');
       res.json({ ok: true });
     }

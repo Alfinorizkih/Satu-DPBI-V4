@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Clock, Command, Search, X } from 'lucide-react';
+import { ArrowRight, Clock, Command, Search, Star, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import type { ModuleCode } from '../lib/types';
 
 const QUICK_ROUTES: { label: string; path: string; module?: ModuleCode }[] = [
+  { label: 'Beranda Saya (Ruang Kerja Pribadi)', path: '/beranda', module: 'dashboard' },
   { label: 'Buka Dashboard & Command Center', path: '/dashboard', module: 'dashboard' },
   { label: 'Aktivitas Saya', path: '/aktivitas-saya', module: 'dashboard' },
   { label: 'Tugas Saya (Fokus Pribadi)', path: '/tugas-saya', module: 'tugas' },
@@ -30,6 +31,7 @@ const QUICK_ROUTES: { label: string; path: string; module?: ModuleCode }[] = [
   { label: 'Hak Akses & Peran (RBAC)', path: '/pengaturan/hak-akses', module: 'pengaturan' },
   { label: 'Pengaturan & Keamanan Akun', path: '/pengaturan', module: 'pengaturan' },
   { label: 'Pusat Bantuan Internal', path: '/bantuan' },
+  { label: 'Pusat Kendala & Laporan Error', path: '/kendala' },
 ];
 
 export function CommandPalette({
@@ -39,7 +41,7 @@ export function CommandPalette({
   open: boolean;
   onClose: () => void;
 }) {
-  const { navigate, can, recentlyViewed } = useAuth();
+  const { navigate, can, recentlyViewed, preferences, toggleFavoritePath } = useAuth();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<{ type: string; title: string; subtitle: string; path: string }[]>([]);
   const [searching, setSearching] = useState(false);
@@ -170,20 +172,32 @@ export function CommandPalette({
               Navigasi Cepat
             </p>
             <div className="space-y-1">
-              {filteredRoutes.map((route) => (
-                <button
-                  key={route.path}
-                  type="button"
-                  onClick={() => {
-                    navigate(route.path);
-                    onClose();
-                  }}
-                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <span className="text-sm text-slate-700 dark:text-slate-200">{route.label}</span>
-                  <span className="font-mono text-[11px] text-slate-400">{route.path}</span>
-                </button>
-              ))}
+              {filteredRoutes.map((route) => {
+                const isFav = preferences.favoritePaths.includes(route.path);
+                return (
+                  <div key={route.path} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(route.path);
+                        onClose();
+                      }}
+                      className="flex-1 min-w-0 flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{route.label}</span>
+                      <span className="font-mono text-[11px] text-slate-400 shrink-0">{route.path}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleFavoritePath(route.path)}
+                      aria-label={isFav ? `Hapus ${route.label} dari favorit` : `Sematkan ${route.label} ke favorit`}
+                      className="p-2 rounded-xl text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+                    >
+                      <Star className={`w-3.5 h-3.5 ${isFav ? 'text-amber-500 fill-amber-500' : ''}`} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

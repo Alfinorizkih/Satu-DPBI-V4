@@ -7,6 +7,7 @@ import {
   calculateProfileCompleteness,
   classifyRegencyPresence,
   csvSafeCell,
+  escapeHtml,
   formatReferenceNumber,
   getProvinceCount,
   hasPermission,
@@ -22,6 +23,18 @@ import {
   validateEmailTemplatePlaceholders,
   verifyCoordinateInProvince,
 } from './rbac';
+import {
+  buildCsvErrorReport,
+  parseCsvObjects,
+  parseEmailRecipientsCsv,
+  parseRfc4180Csv,
+} from './csvParser';
+import {
+  calculateChecklistCompleteness,
+  normalizeDisplayScale,
+  resolvePageHelp,
+  sanitizeFavoritePaths,
+} from './guidance';
 import {
   clearAllUserDrafts,
   clearOfflineDraft,
@@ -481,16 +494,37 @@ test('Approval Center and Email Center routes and BASE_ROLE_PERMISSIONS enforce 
   assert.equal(BASE_ROLE_PERMISSIONS.alumni.email, undefined);
 });
 
-test('v4.1.0: supports all 11 email template variables, Flagship Program & Persuratan routes/RBAC, and SURAT/PROG numbers', () => {
-  assert.equal(ALLOWED_EMAIL_VARIABLES.length, 11);
+test('v4.1.0: supports all 20 email template variables, Flagship Program & Persuratan routes/RBAC, and SURAT/PROG numbers', () => {
+  assert.equal(ALLOWED_EMAIL_VARIABLES.length, 20);
   assert.deepEqual(
     [...ALLOWED_EMAIL_VARIABLES],
-    ['nama', 'email', 'jabatan', 'role', 'provinsi', 'angkatan', 'nomor_surat', 'tanggal', 'tenggat', 'tautan', 'referensi']
+    [
+      'nama',
+      'email',
+      'jabatan',
+      'role',
+      'provinsi',
+      'kabupaten',
+      'angkatan',
+      'nomor_anggota',
+      'nomor_pengajuan',
+      'nomor_surat',
+      'nama_program',
+      'tanggal',
+      'tenggat',
+      'tautan',
+      'tautan_aktivasi',
+      'tautan_dokumen',
+      'catatan_pemeriksa',
+      'nama_pemeriksa',
+      'nama_organisasi',
+      'referensi',
+    ]
   );
   const allVarsTemplate = ALLOWED_EMAIL_VARIABLES.map((v) => `{{${v}}}`).join(' | ');
   const check = validateEmailTemplatePlaceholders(allVarsTemplate);
   assert.equal(check.valid, true);
-  assert.equal(check.variables.length, 11);
+  assert.equal(check.variables.length, 20);
 
   assert.equal(formatReferenceNumber('SURAT', 2026, 7), 'DPBI/SURAT/2026/0007');
   assert.equal(formatReferenceNumber('PROG', 2026, 3), 'DPBI/PROG/2026/0003');
@@ -563,5 +597,73 @@ test('v4.1.0: offlineDraft helper isolates drafts per user and clears cleanly', 
     (globalThis as { window?: unknown }).window = prevWindow;
   }
 });
+
+test('v4.2.0: escapeHtml & renderEmailTemplate htmlEscape prevent XSS injection in HTML bodies', () => {
+  assert.equal(
+    escapeHtml('<script>alert("xss")</script> & \'quote\''),
+    '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt; &amp; &#39;quote&#39;'
+  );
+  const safeHtml = renderEmailTemplate(
+    '<p>Yth. {{nama}} dari {{provinsi}}</p>',
+    { nama: '<img src=x onerror=alert(1)>', provinsi: 'Jawa & Bali' },
+    { htmlEscape: true }
+  );
+  assert.equal(
+    safeHtml,
+    '<p>Yth. &lt;img src=x onerror=alert(1)&gt; dari Jawa &amp; Bali</p>'
+  );
+});
+
+test('v4.2.0: RFC-4180 CSV parser handles semicolon delimiters, quoted commas, duplicates, invalid rows, and formula-safe error reports', () => {
+  const quotedCsv = '\uFEFFfullName,email,provinceCode,schoolName\n"Putri, Ayu",putri@dpbi.or.id,32,"SMAN 1, Bandung"\n"Rudi ""K""",rudi@dpbi.or.id,33,SMAN 2';
+  const raw = parseRfc4180Csv(quotedCsv);
+  assert.equal(raw.delimiter, ',');
+  assert.equal(raw.rows.length, 3);
+  assert.equal(raw.rows[1][0], 'Putri, Ayu');
+  assert.equal(raw.rows[1][3], 'SMAN 1, Bandung');
+  assert.equal(raw.rows[2][0], 'Rudi "K"');
+
+  const objRes = parseCsvObjects(quotedCsv);
+  assert.equal(objRes.records[0].data.fullName, 'Putri, Ayu');
+  assert.equal(objRes.records[0].data.schoolName, 'SMAN 1, Bandung');
+
+  const semiRecipients = [
+    'Nama Lengkap;Alamat Email;Provinsi;Jabatan',
+    'Sari;SARI@dpbi.or.id;Jawa Barat;Duta',
+    'Duplikat;sari@dpbi.or.id;Jawa Barat;Duta',
+    'Salah;=cmd@invalid;Jawa Tengah;Duta',
+    'Kosong;;Bali;Duta',
+  ].join('\n');
+  const parsed = parseEmailRecipientsCsv(semiRecipients);
+  assert.equal(parsed.delimiter, ';');
+  assert.equal(parsed.validRecipients.length, 1);
+  assert.equal(parsed.validRecipients[0].email, 'sari@dpbi.or.id');
+  assert.equal(parsed.validRecipients[0].fullName, 'Sari');
+  assert.deepEqual(parsed.duplicateEmails, ['sari@dpbi.or.id']);
+  assert.equal(parsed.invalidRows.length, 3);
+
+  const errCsv = buildCsvErrorReport(parsed.invalidRows);
+  assert.ok(errCsv.includes("'=cmd@invalid"));
+  assert.ok(errCsv.includes('Email duplikat di dalam berkas CSV'));
+});
+
+test('v4.2.0: Zero-Confusion guidance helpers resolve page help, normalize scale, sanitize favorites, and calculate completeness', () => {
+  assert.equal(resolvePageHelp('/proposal/baru').pathPrefix, '/proposal');
+  assert.equal(resolvePageHelp('/kendala').pathPrefix, '/kendala');
+  assert.equal(resolvePageHelp('/rute-lain').pathPrefix, '/rute-lain');
+
+  assert.equal(normalizeDisplayScale('besar'), 'besar');
+  assert.equal(normalizeDisplayScale('ringkas'), 'ringkas');
+  assert.equal(normalizeDisplayScale('tidak-valid'), 'nyaman');
+
+  const allowed = new Set(['/beranda', '/proposal', '/tugas-saya']);
+  const favs = sanitizeFavoritePaths(['/beranda', '/beranda', 'invalid', '/rahasia', '/proposal'], allowed);
+  assert.deepEqual(favs, ['/beranda', '/proposal']);
+
+  const comp = calculateChecklistCompleteness([{ ok: true }, { ok: false }, { ok: true }, { ok: true }]);
+  assert.deepEqual(comp, { completed: 3, total: 4, percent: 75 });
+  assert.deepEqual(calculateChecklistCompleteness([]), { completed: 0, total: 0, percent: 100 });
+});
+
 
 

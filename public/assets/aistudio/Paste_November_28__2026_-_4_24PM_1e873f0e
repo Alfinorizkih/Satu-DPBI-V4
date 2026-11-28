@@ -1,0 +1,1255 @@
+# MASTER ENGINEERING DIRECTIVE
+# SATU DPBI — TOTAL SYSTEM AUDIT, ARCHITECTURE REFINEMENT & ENTERPRISE-GRADE IMPLEMENTATION
+
+Repository: `Alfinorizkih/Satu-DPBI-V4`
+
+Application: SATU DPBI — Sistem Administrasi Terpadu Utama Duta Pelajar Berbudaya Indonesia.
+
+## A. MANDAT UTAMA
+
+Anda bertindak sebagai Principal Software Architect, Senior Full-Stack Engineer, Database Architect, Security Engineer, UX/UI Designer, QA Engineer, dan Product Engineer.
+
+Tugas Anda bukan hanya menambahkan fitur yang disebutkan dalam prompt ini.
+
+Anda harus melakukan audit menyeluruh terhadap repository, memahami sistem yang sudah dibangun, mengidentifikasi kekurangan, menemukan alur yang tidak konsisten, menemukan fitur yang belum berfungsi, memperbaiki kelemahan arsitektur, serta menyempurnakan aplikasi menjadi satu platform manajemen organisasi yang terintegrasi.
+
+Saya memberikan kewenangan kepada Anda untuk:
+- Memperbaiki mekanisme yang sudah ada.
+- Mengubah alur kerja yang tidak efektif.
+- Merombak komponen atau halaman yang diperlukan.
+- Menambahkan tabel dan relasi database.
+- Menambahkan API.
+- Mengembangkan modul baru.
+- Menggabungkan fitur yang tumpang tindih.
+- Menghapus implementasi lama yang benar-benar tidak digunakan setelah memastikan tidak ada ketergantungan.
+- Mengubah desain website publik.
+- Menambahkan fitur pendukung yang belum tercantum.
+- Menyusun kembali navigasi dan pengalaman pengguna.
+
+Namun, semua perubahan wajib mempertahankan data operasional, kompatibilitas, keamanan, dan fungsi yang masih diperlukan.
+
+**Jangan melakukan rewrite total tanpa alasan teknis. Jangan mengorbankan fitur yang sudah berfungsi. Jangan menghapus data produksi.**
+
+Target akhir adalah satu sistem yang menjadi pusat pengelolaan seluruh administrasi, keanggotaan, kepengurusan, kegiatan, program, persuratan, komunikasi, evaluasi, dan operasional DPBI.
+
+Prinsip utama:
+
+**One Organization. One Integrated System. One Source of Truth.**
+
+## B. TAHAP PERTAMA — AUDIT REPOSITORY WAJIB
+
+Sebelum mengubah kode, lakukan pemeriksaan seluruh repository.
+
+Jangan hanya membaca file yang disebut dalam prompt.
+
+Periksa:
+1. Struktur direktori.
+2. Seluruh halaman dan komponen frontend.
+3. Semua API endpoint.
+4. Seluruh service dan business logic.
+5. Skema database.
+6. Seluruh migrasi.
+7. Sistem autentikasi.
+8. Sistem RBAC dan permission.
+9. Relasi personel dan akun.
+10. Sistem undangan dan aktivasi.
+11. Sistem email.
+12. Sistem persetujuan.
+13. Sistem proposal dan LKL.
+14. Program unggulan.
+15. Struktur organisasi.
+16. Sistem dokumen dan file storage.
+17. Sistem notifikasi.
+18. Sistem backup.
+19. Dashboard dan analitik.
+20. Seluruh konfigurasi build dan deployment.
+21. Test yang tersedia.
+22. Fitur yang hanya berupa tampilan tetapi belum memiliki backend.
+23. Endpoint yang tidak digunakan atau memiliki implementasi ganda.
+24. Alur yang tidak mempunyai kondisi akhir yang jelas.
+
+Buat audit matrix dengan kolom:
+
+| Modul | Implementasi Saat Ini | Masalah | Perubahan | File Terkait | Status |
+|---|---|---|---|---|---|
+
+Identifikasi:
+- Fully implemented.
+- Partially implemented.
+- UI only.
+- Backend only.
+- Broken.
+- Duplicate.
+- Inconsistent.
+- Missing.
+
+Jangan menyatakan fitur selesai hanya karena halaman atau endpoint sudah tersedia.
+
+Lakukan penelusuran dari UI → API → service → database → hasil yang ditampilkan.
+
+Jika suatu fitur sudah ada, sempurnakan implementasinya. Jangan membuat fitur kedua dengan fungsi yang sama.
+
+## C. ARSITEKTUR DATA DAN IDENTITAS ORGANISASI
+
+Tetapkan tiga entitas yang berbeda:
+
+### 1. Personel
+
+Mewakili seseorang yang tercatat dalam organisasi.
+
+Personel memiliki:
+- Identitas.
+- Nomor anggota.
+- Nomor referensi.
+- Data kontak.
+- Data pendidikan jika relevan.
+- Wilayah.
+- Angkatan atau periode.
+- Jabatan.
+- Bidang.
+- Masa tugas.
+- Dokumen.
+- Status keanggotaan.
+- Riwayat organisasi.
+
+### 2. Akun Pengguna
+
+Mewakili akses login seseorang ke SATU DPBI.
+
+Akun memiliki:
+- Email login.
+- Password hash.
+- Role.
+- Permission.
+- Batas wilayah.
+- Status akun.
+- Sesi aktif.
+- Riwayat login.
+- Pengaturan pribadi.
+- Hubungan ke personel.
+
+Satu personel tidak boleh tanpa sengaja memiliki akun ganda yang tidak terhubung.
+
+Satu akun tidak boleh terhubung ke personel yang salah.
+
+### 3. Undangan Aktivasi
+
+Mewakili proses pemberian akses akun.
+
+Undangan memiliki:
+- Email penerima.
+- Personel terkait.
+- Role yang diberikan.
+- Wilayah.
+- Angkatan.
+- Token hash.
+- Masa berlaku.
+- Waktu pengiriman.
+- Jumlah pengiriman ulang.
+- Status.
+- Riwayat aktivasi.
+- Pembuat undangan.
+
+Ketiga entitas tersebut tidak boleh digabung menjadi satu tabel atau satu proses yang membingungkan.
+
+## D. DUA SISTEM PENGAJUAN AKUN YANG BERBEDA
+
+Ini merupakan persyaratan penting.
+
+Sediakan dua jalur terpisah:
+
+1. Pengajuan Akun Duta.
+2. Penambahan Akun Pengurus dan Personel Internal.
+
+Jangan menggunakan satu mekanisme persetujuan untuk kedua jenis tersebut.
+
+### D1. PENGAJUAN AKUN DUTA OLEH KORWIL
+
+Alur yang harus dibangun:
+
+1. Korwil masuk ke SATU DPBI.
+2. Korwil memilih menu Pengajuan Duta Baru.
+3. Korwil mengisi identitas calon Duta.
+4. Korwil memilih angkatan yang sesuai.
+5. Wilayah otomatis mengikuti cakupan Korwil dan tidak dapat dimanipulasi.
+6. Korwil melengkapi data sekolah dan informasi yang diwajibkan.
+7. Korwil mengunggah seluruh dokumen persyaratan.
+8. Sistem memeriksa kelengkapan, format, konsistensi, dan potensi duplikasi.
+9. Sistem membuat nomor referensi pengajuan.
+10. Sistem menyimpan seluruh data dan dokumen sebagai satu pengajuan.
+
+#### Mekanisme pemeriksaan
+
+Apabila semua persyaratan wajib lengkap dan lolos pemeriksaan otomatis:
+- Sistem dapat memberikan persetujuan otomatis sesuai kebijakan yang ditetapkan Super Admin.
+- Status menjadi disetujui.
+- Sistem membuat atau menghubungkan record personel.
+- Sistem membuat undangan aktivasi.
+- Sistem mengirim email undangan.
+- Sistem membuat notifikasi kepada Korwil.
+- Sistem mencatat seluruh proses dalam audit log.
+
+Persetujuan otomatis hanya boleh berlaku untuk jenis pengajuan Duta yang memang diizinkan dalam konfigurasi kebijakan.
+
+Jika terdapat ketidaksesuaian:
+- Status menjadi perlu revisi.
+- Sistem mencantumkan catatan yang jelas.
+- Bagian yang harus diperbaiki ditandai.
+- Korwil menerima notifikasi.
+- Korwil dapat memperbaiki dan mengirim ulang.
+- Versi sebelumnya tetap tersimpan.
+
+Jika ditemukan indikasi tidak memenuhi persyaratan dasar:
+- Pengajuan dapat ditolak oleh pemeriksa yang berwenang.
+- Alasan wajib dicatat.
+- Riwayat keputusan tidak boleh hilang.
+
+Sediakan opsi konfigurasi:
+- Auto-approval untuk pengajuan Duta yang memenuhi semua aturan.
+- Manual approval untuk wilayah atau kondisi tertentu.
+- Pemeriksaan tambahan oleh Sekretariat Nasional.
+
+Jangan pernah memberikan persetujuan hanya berdasarkan keberadaan kolom yang terisi. Validasi isi dan dokumen juga harus dilakukan sesuai kemampuan sistem.
+
+#### D2. Pengiriman kode undangan
+
+Setelah pengajuan disetujui:
+
+- Buat token acak kriptografis.
+- Simpan hanya hash token di database.
+- Kirim tautan aktivasi melalui email.
+- Token bersifat sekali pakai.
+- Masa berlaku dapat dikonfigurasi.
+- Tautan harus terikat pada email dan personel yang benar.
+- Pengiriman ulang mencabut token lama.
+- Jangan mengirim password sementara.
+- Jangan menyimpan token mentah di log.
+- Catat waktu pengiriman dan status provider.
+
+Penerima membuka tautan, memverifikasi undangan, membuat password, dan mengaktifkan akun.
+
+Setelah berhasil:
+- Status undangan menjadi aktif.
+- Akun dibuat atau diaktifkan.
+- Personel terhubung.
+- Notifikasi aktivasi dikirim.
+- Audit log tercatat.
+
+Jika token kedaluwarsa, pengguna dapat meminta pengiriman ulang melalui mekanisme resmi.
+
+### D3. PENAMBAHAN AKUN PENGURUS DAN PERSONEL INTERNAL
+
+Jalur ini hanya dapat dikelola oleh pihak yang memiliki kewenangan.
+
+Menu harus menyediakan:
+- Tambah personel.
+- Tambah akun pengguna.
+- Tambah personel sekaligus akun.
+- Hubungkan akun ke personel yang sudah ada.
+- Undang pengguna untuk mengaktifkan akun.
+- Impor personel massal.
+- Impor akun dengan aturan keamanan khusus.
+
+Role, jabatan organisasi, bidang, dan cakupan wilayah harus ditentukan secara terpisah.
+
+Contoh:
+- Sekretariat Nasional.
+- Pengurus Nasional.
+- Koordinator Wilayah.
+- Bidang Administrasi & Organisasi.
+- Bidang Program & Operasional.
+- Bidang Hubungan & Kemitraan.
+
+Akun dengan hak istimewa tinggi harus membutuhkan otorisasi tambahan.
+
+Dilarang memberikan role Super Admin melalui impor CSV biasa.
+
+Untuk pembuatan akun dengan privilege tinggi, wajib ada:
+- Pemeriksaan kewenangan pemberi akun.
+- Persetujuan tambahan sesuai kebijakan.
+- Audit trail.
+- Notifikasi kepada administrator yang berwenang.
+
+## E. HIERARKI ROLE DAN SUPER ADMIN
+
+Role tertinggi adalah Super Admin.
+
+Jangan memberikan hak akses tertinggi kepada role lain secara otomatis.
+
+Gunakan role yang sudah ada sebagai dasar:
+- super_admin
+- wakil_super_admin
+- penanggung_jawab
+- pengurus_nasional
+- sekretariat_nasional
+- koordinator_wilayah
+- duta
+- alumni
+
+Super Admin merupakan root administrator sistem.
+
+Wakil Super Admin memiliki kewenangan yang ditentukan secara eksplisit, bukan otomatis setara dengan Super Admin.
+
+Buat aturan:
+- Super Admin dapat mengelola konfigurasi sistem.
+- Super Admin dapat mengelola role dan permission.
+- Super Admin dapat mengelola akun.
+- Super Admin dapat mengakses audit log.
+- Super Admin dapat mengatur maintenance.
+- Super Admin dapat mengelola kebijakan approval.
+- Super Admin dapat mengelola email.
+- Super Admin dapat mengelola backup.
+
+Cegah:
+- Penghapusan akun Super Admin terakhir.
+- Penonaktifan Super Admin terakhir.
+- Penurunan role Super Admin terakhir.
+- Perubahan privilege oleh pengguna yang tidak berwenang.
+- Privilege escalation melalui API atau manipulasi frontend.
+
+Aksi sensitif harus memerlukan autentikasi ulang atau MFA sesuai kebijakan.
+
+## F. LIFECYCLE PERSONEL DAN AKUN
+
+Buat pengelolaan siklus hidup secara lengkap.
+
+Status akun minimal:
+- Menunggu aktivasi.
+- Aktif.
+- Nonaktif.
+- Terkunci.
+- Ditangguhkan.
+- Dibatalkan.
+
+Status personel minimal:
+- Menunggu verifikasi.
+- Aktif.
+- Menyelesaikan masa jabatan.
+- Alumni.
+- Mengundurkan diri.
+- Diberhentikan.
+- Diarsipkan.
+
+Sediakan tindakan:
+- Edit data.
+- Aktifkan akun.
+- Nonaktifkan akun.
+- Kunci akun.
+- Buka kunci akun.
+- Cabut seluruh sesi.
+- Kirim ulang undangan.
+- Ganti role.
+- Pindahkan wilayah.
+- Ubah jabatan.
+- Arsipkan personel.
+- Pulihkan personel.
+- Hapus data sesuai kebijakan retensi.
+
+### Penghapusan
+
+Pisahkan:
+1. Penghapusan akses akun.
+2. Pengarsipan personel.
+3. Penghapusan permanen.
+
+Penghapusan akun tidak otomatis menghapus riwayat kegiatan dan dokumen personel.
+
+Jika personel sudah memiliki proposal, LKL, surat, sertifikat, atau aktivitas lain, pertahankan referensi historis.
+
+Gunakan soft delete atau deactivation sebagai pilihan utama.
+
+Penghapusan permanen hanya boleh dilakukan dengan otorisasi khusus, pemeriksaan ketergantungan, dan audit log.
+
+## G. EMAIL CENTER — COMPLETE COMMUNICATION MANAGEMENT
+
+Kembangkan EmailCenterPage menjadi pusat komunikasi resmi DPBI.
+
+### G1. Template email wajib lengkap
+
+Jangan hanya menyediakan dua atau tiga template.
+
+Buat pustaka template resmi dengan kategori berikut:
+
+**Akun dan autentikasi**
+1. Undangan aktivasi akun Duta.
+2. Undangan aktivasi akun Pengurus.
+3. Pengiriman ulang undangan.
+4. Pemberitahuan undangan kedaluwarsa.
+5. Konfirmasi akun berhasil diaktifkan.
+6. Reset kata sandi.
+7. Konfirmasi kata sandi berhasil diubah.
+8. Pemberitahuan perubahan email.
+9. Pemberitahuan login baru.
+10. Pemberitahuan akun dinonaktifkan.
+11. Pemberitahuan akun diaktifkan kembali.
+12. Pemberitahuan perubahan role.
+
+**Pengajuan dan persetujuan**
+13. Pengajuan berhasil diterima.
+14. Pengajuan disetujui.
+15. Pengajuan perlu revisi.
+16. Pengajuan ditolak.
+17. Pengingat batas waktu revisi.
+18. Pengingat pengajuan belum dilengkapi.
+
+**Proposal dan LKL**
+19. Proposal diterima sistem.
+20. Proposal diteruskan ke pemeriksa.
+21. Proposal disetujui Korwil.
+22. Proposal diteruskan ke Sekretariat.
+23. Proposal disetujui nasional.
+24. Proposal perlu revisi.
+25. LKL berhasil dikirim.
+26. LKL diterima.
+27. LKL perlu revisi.
+28. LKL melewati tenggat.
+
+**Organisasi**
+29. Pengangkatan jabatan.
+30. Pemberhentian jabatan.
+31. Perubahan struktur organisasi.
+32. Undangan rapat.
+33. Pengumuman rapat.
+34. Pengingat tugas.
+35. Pemberitahuan serah terima jabatan.
+
+**Program dan kegiatan**
+36. Proposal program disetujui.
+37. Konfirmasi jadwal kegiatan.
+38. Pengingat kegiatan.
+39. Permintaan dokumentasi.
+40. Konfirmasi laporan kegiatan.
+41. Evaluasi pascakegiatan.
+
+**Dokumen dan komunikasi**
+42. Penerbitan surat.
+43. Penerbitan sertifikat.
+44. Dokumen perlu diperbaiki.
+45. Dokumen kedaluwarsa.
+46. Pengumuman resmi DPBI.
+47. Rekap kegiatan bulanan.
+48. Rekap kinerja Duta.
+49. Informasi alumni.
+50. Pemberitahuan pemeliharaan sistem.
+
+Tambahkan template lain yang dibutuhkan setelah audit.
+
+Template harus:
+- Menggunakan Bahasa Indonesia formal.
+- Memiliki identitas dan gaya komunikasi resmi DPBI.
+- Mendukung HTML dan plain text.
+- Memiliki subjek.
+- Memiliki kategori.
+- Memiliki preview.
+- Memiliki versi.
+- Memiliki status aktif/nonaktif.
+- Memiliki daftar variabel yang valid.
+- Memiliki riwayat perubahan.
+- Dapat diuji sebelum digunakan.
+
+### G2. Variabel template
+
+Gunakan placeholder terstandar, misalnya:
+
+{{nama}}
+{{email}}
+{{jabatan}}
+{{role}}
+{{provinsi}}
+{{kabupaten}}
+{{angkatan}}
+{{nomor_anggota}}
+{{nomor_pengajuan}}
+{{nomor_surat}}
+{{nama_program}}
+{{tanggal}}
+{{tenggat}}
+{{tautan}}
+{{tautan_aktivasi}}
+{{tautan_dokumen}}
+{{catatan_pemeriksa}}
+{{nama_pemeriksa}}
+{{referensi}}
+{{nama_organisasi}}
+
+Sediakan variable picker dan dokumentasi variabel.
+
+Jangan mengizinkan placeholder yang tidak dikenal.
+
+Gunakan escaping yang aman untuk HTML agar nilai penerima tidak dapat menyisipkan script.
+
+### G3. Template dengan lampiran
+
+Template email harus mendukung lampiran dokumen resmi yang dapat digunakan ulang.
+
+Contoh:
+- Pedoman Duta.
+- Juknis program.
+- Surat keputusan.
+- Surat tugas.
+- Panduan aktivasi.
+- Panduan pelaporan.
+- Materi pembekalan.
+- Dokumen resmi lainnya.
+
+Setiap lampiran template harus menggunakan file ID dari private storage, bukan path lokal yang dikirim pengguna.
+
+Sediakan:
+- Tambah lampiran.
+- Hapus lampiran dari template.
+- Ganti lampiran.
+- Preview metadata.
+- Ukuran file.
+- Tipe file.
+- Status dokumen.
+- Riwayat perubahan lampiran.
+
+Jangan mengirim lampiran yang sudah diarsipkan, tidak valid, atau tidak dapat diakses.
+
+### G4. Campaign dengan lampiran
+
+Pada pembuatan kampanye email, pengguna dapat:
+- Mengunggah satu atau beberapa file.
+- Memilih dokumen yang sudah tersimpan.
+- Menggunakan lampiran dari template.
+- Melihat daftar lampiran sebelum pengiriman.
+- Menghapus lampiran sebelum kampanye dikirim.
+- Mengirim lampiran yang sama ke seluruh penerima.
+- Mengatur batas ukuran dan tipe file.
+
+Buat pemeriksaan keamanan file:
+- Validasi MIME.
+- Pemeriksaan magic bytes.
+- Batas ukuran.
+- Nama file aman.
+- Penyimpanan private.
+- Pemeriksaan hak akses.
+- Perlindungan path traversal.
+- Antivirus atau pemeriksaan tambahan jika infrastruktur mendukung.
+
+Jangan mengizinkan pengiriman executable, file berbahaya, atau tipe file yang tidak disetujui.
+
+Simpan relasi lampiran ke kampanye dan log pengiriman.
+
+### G5. BULK EMAIL VIA CSV
+
+Kembangkan CSV Import menjadi sistem impor penerima yang sebenarnya.
+
+Pengguna dapat mengunggah CSV, kemudian sistem menampilkan:
+1. Nama file.
+2. Jumlah baris.
+3. Preview data.
+4. Pemetaan kolom.
+5. Kolom email.
+6. Kolom nama.
+7. Kolom jabatan.
+8. Kolom wilayah.
+9. Kolom angkatan.
+10. Kolom variabel tambahan.
+11. Baris valid.
+12. Baris tidak valid.
+13. Baris duplikat.
+14. Baris tanpa email.
+15. Baris yang akan dilewati.
+
+Contoh format:
+
+email,nama,jabatan,provinsi,angkatan,nomor_surat,tenggat
+
+Dukung:
+- CSV UTF-8.
+- Pemisah koma atau titik koma sesuai deteksi.
+- Header fleksibel.
+- Kolom tambahan.
+- Pemetaan manual.
+- Preview sebelum impor.
+- Validasi per baris.
+- Deteksi duplikasi.
+- Normalisasi email.
+- Laporan kesalahan yang dapat diunduh.
+
+Jangan sekadar memecah file berdasarkan koma atau baris baru. Gunakan parser CSV yang benar agar tanda kutip, koma di dalam teks, dan baris multiline ditangani dengan tepat.
+
+Sediakan mode:
+- Import penerima saja.
+- Import dan cocokkan dengan personel.
+- Import dan cocokkan dengan akun.
+- Kirim email massal.
+- Simpan sebagai draft kampanye.
+
+Jangan membuat akun otomatis hanya karena alamat email muncul di CSV.
+
+### G6. Bulk campaign engine
+
+Bangun sistem antrean pengiriman.
+
+Pengiriman tidak boleh mengandalkan satu request HTTP panjang untuk ratusan penerima.
+
+Implementasikan:
+- Campaign queue.
+- Batch processing.
+- Status antrean.
+- Progress.
+- Rate limit.
+- Retry terkontrol.
+- Retry failed recipient.
+- Idempotency.
+- Cancel campaign.
+- Pause/resume jika memungkinkan.
+- Rekap hasil.
+- Log per penerima.
+- Deteksi pengiriman ganda.
+
+Status kampanye:
+- Draft.
+- Menunggu jadwal.
+- Dalam antrean.
+- Sedang dikirim.
+- Sebagian berhasil.
+- Berhasil.
+- Gagal.
+- Dibatalkan.
+
+Bedakan status email:
+- Terantre.
+- Sedang dikirim.
+- Terkirim ke provider.
+- Gagal.
+- Dijadwalkan ulang.
+
+Jangan menyebut email benar-benar diterima inbox hanya berdasarkan respons SMTP accepted. Gunakan istilah status yang sesuai dengan bukti dari provider.
+
+### G7. Pengamanan pengiriman
+
+Sediakan:
+- Preview penerima.
+- Preview template.
+- Test email.
+- Konfirmasi jumlah penerima.
+- Konfirmasi lampiran.
+- Batas pengiriman.
+- Audit log.
+- Pembatasan izin bulk send.
+- Perlindungan agar penerima tidak dapat melihat alamat email penerima lain.
+- Pengaturan BCC atau pengiriman individual.
+- Proteksi spam dan pengiriman berulang.
+- Pemisahan transactional email dan campaign email.
+
+Email aktivasi, reset kata sandi, dan pemberitahuan keamanan harus tetap dapat dikirim oleh sistem melalui jalur transactional yang aman.
+
+Jangan membuat transactional email bergantung pada izin campaign bulk email.
+
+### G8. Email Delivery Center
+
+Sediakan dashboard:
+- Status SMTP.
+- Status koneksi.
+- Pengirim.
+- Jumlah antrean.
+- Jumlah terkirim.
+- Jumlah gagal.
+- Kampanye aktif.
+- Email yang perlu dicoba ulang.
+- Riwayat kampanye.
+- Riwayat lampiran.
+- Log per penerima.
+- Error yang sudah disanitasi.
+
+Jangan pernah menampilkan password SMTP atau kredensial provider.
+
+## H. WORKFLOW PROPOSAL DAN LKL
+
+Sempurnakan sistem persetujuan secara konsisten.
+
+### Proposal Duta
+
+Alur standar:
+
+Duta → Korwil → Sekretariat Nasional → pemeriksa/pengurus berwenang → Super Admin atau pejabat final sesuai matriks persetujuan.
+
+Tidak semua proposal harus melewati seluruh tahapan yang sama. Gunakan approval matrix berdasarkan:
+- Kategori kegiatan.
+- Risiko.
+- Penggunaan identitas DPBI.
+- Kebutuhan izin eksternal.
+- Wilayah.
+- Program unggulan.
+- Kebijakan organisasi.
+
+Setiap tahap wajib mempunyai:
+- Pemeriksa.
+- Status.
+- Catatan.
+- Tenggat.
+- Waktu keputusan.
+- Bukti persetujuan.
+- Riwayat.
+
+### LKL
+
+Alur standar:
+
+Duta mengirim LKL → Korwil memeriksa → revisi atau diterima → Sekretariat/pengurus nasional dapat melakukan monitoring dan evaluasi sesuai kebijakan.
+
+Pastikan status tidak bertentangan antarhalaman.
+
+### Revisi
+
+Setiap revisi harus:
+- Memiliki catatan.
+- Memiliki batas waktu.
+- Menyimpan versi sebelumnya.
+- Memiliki perbandingan perubahan.
+- Memiliki waktu pengiriman ulang.
+- Memiliki pemeriksa yang jelas.
+
+## I. STRUKTUR ORGANISASI
+
+Kembangkan Organization Center dari tingkat tertinggi sampai Duta.
+
+Struktur harus mendukung:
+- Pembina.
+- Penanggung Jawab.
+- Super Admin atau administrator sistem.
+- Pengurus Nasional.
+- Sekretariat Nasional.
+- Bidang.
+- Koordinator Wilayah.
+- Pengurus/anggota wilayah jika diperlukan.
+- Duta.
+- Alumni.
+
+Jangan menganggap seluruh jabatan otomatis merupakan role login.
+
+Bedakan:
+- Jabatan organisasi.
+- Role sistem.
+- Bidang kerja.
+- Wilayah kewenangan.
+- Status masa jabatan.
+
+Satu orang dapat memiliki jabatan organisasi tanpa harus memperoleh akses admin.
+
+Struktur harus mendukung:
+- Parent-child hierarchy.
+- Jabatan kosong.
+- Pemegang jabatan.
+- SK.
+- Periode.
+- Riwayat.
+- Penggantian.
+- Penugasan sementara.
+- Serah terima.
+
+## J. PENGELOLAAN DOKUMEN DAN LAMPIRAN
+
+Bangun satu pusat pengelolaan file.
+
+Dokumen dapat digunakan oleh:
+- Email.
+- Personalia.
+- Proposal.
+- LKL.
+- Program.
+- Persuratan.
+- Surat tugas.
+- Sertifikat.
+- Arsip.
+
+Satu file tidak perlu diduplikasi secara fisik hanya karena digunakan oleh beberapa modul.
+
+Gunakan relasi file ID dan akses berbasis izin.
+
+Sediakan:
+- Preview.
+- Download.
+- Metadata.
+- Checksum.
+- Versi.
+- Arsip.
+- Pemulihan.
+- Access log.
+- Batas retensi.
+
+Dokumen sensitif tidak boleh dapat diakses melalui URL publik tanpa otorisasi.
+
+## K. FITUR TAMBAHAN YANG HARUS DIAUDIT DAN DISEMPURNAKAN
+
+Jangan hanya mengimplementasikan fitur berikut jika ternyata sudah tersedia. Periksa kualitasnya terlebih dahulu.
+
+1. Personal Workspace per role.
+2. Global Search.
+3. Command Palette.
+4. Calendar Center.
+5. Tasks and Deadlines.
+6. Program Flagship Center.
+7. Regional Monitoring.
+8. Duta Performance Center.
+9. Alumni Management.
+10. Handover Center.
+11. Meeting and Minutes Center.
+12. Document Repository.
+13. Correspondence and Disposition Center.
+14. Evaluation and Feedback.
+15. Support Ticket Center.
+16. System Health Center.
+17. Backup and Restore Center.
+18. Audit Log Explorer.
+19. Import and Export Center.
+20. Public Website CMS.
+21. Notification Center.
+22. Maintenance Mode.
+23. Session Manager.
+24. Help Center.
+25. Onboarding Tour.
+26. User Preferences.
+27. System Version and Changelog.
+28. Data Retention Center.
+29. Privacy and Consent Center.
+30. Organization Knowledge Base.
+
+### Program unggulan
+
+Pusat kendali terpadu:
+- Behind The Culture.
+- Sedapnya Warisanku.
+- Budaya Masuk Sekolah.
+
+Setiap program mempunyai:
+- Target.
+- Tim.
+- Penanggung jawab.
+- Wilayah.
+- Proposal.
+- Jadwal.
+- Anggaran jika diperlukan.
+- Dokumentasi.
+- LKL.
+- Capaian.
+- Evaluasi.
+- Laporan dampak.
+
+### Peta wilayah
+
+Gunakan data GeoJSON yang sudah tersedia.
+
+Tampilkan:
+- Jumlah personel.
+- Status Korwil.
+- Aktivitas.
+- Proposal.
+- LKL.
+- Program.
+- Capaian.
+- Perbandingan wilayah.
+
+Jangan menampilkan data pribadi pada peta publik.
+
+### Kinerja Duta
+
+Gunakan indikator yang transparan:
+- Keaktifan.
+- Ketepatan LKL.
+- Partisipasi.
+- Penyelesaian tugas.
+- Kualitas pelaporan.
+- Keterlibatan program.
+
+Jangan menghasilkan skor tanpa formula yang dapat dijelaskan.
+
+## L. FITUR KEAMANAN DAN PRIVASI
+
+Lakukan security review terhadap seluruh API.
+
+Wajib:
+- Server-side authorization.
+- RBAC.
+- Scope wilayah.
+- Validasi kepemilikan data.
+- Proteksi IDOR.
+- Proteksi privilege escalation.
+- CSRF dan origin protection.
+- Rate limiting.
+- Password hashing aman.
+- Session revocation.
+- Secure cookies.
+- MFA untuk role tinggi.
+- Input validation.
+- Output escaping.
+- File upload validation.
+- Audit logging.
+- Sensitive data masking.
+- Export authorization.
+- Retention policy.
+- Backup encryption jika infrastruktur mendukung.
+
+Jangan mengandalkan penyembunyian tombol pada frontend sebagai keamanan.
+
+Setiap API harus memeriksa izin sendiri.
+
+Lindungi data pribadi pelajar, data wali, dokumen sekolah, alamat, dan informasi sensitif lainnya.
+
+Terapkan prinsip minimisasi data.
+
+## M. DATABASE DAN MIGRATION
+
+Gunakan migrasi terstruktur dan berurutan.
+
+Setiap perubahan skema harus:
+- Memiliki nomor migrasi.
+- Idempotent.
+- Memeriksa kolom dan indeks.
+- Mempertahankan data lama.
+- Dapat diuji terhadap database yang sudah berisi data.
+- Tidak menghapus tabel lama tanpa rencana migrasi.
+- Menggunakan transaksi untuk operasi kritis.
+
+Jangan mengandalkan CREATE TABLE IF NOT EXISTS saja untuk menyatakan migrasi selesai.
+
+Pastikan migrasi yang sudah diterapkan tidak dijalankan secara destruktif berulang kali.
+
+Sediakan backup sebelum migrasi penting.
+
+Uji migrasi pada salinan database yang representatif sebelum produksi.
+
+## N. VERSIONING DAN RELEASE MANAGEMENT
+
+Aplikasi harus mempunyai versi resmi.
+
+Gunakan semantic versioning:
+- MAJOR: perubahan besar yang tidak kompatibel.
+- MINOR: penambahan fitur.
+- PATCH: perbaikan bug.
+
+Versi harus konsisten pada:
+- package.json.
+- API health.
+- System version.
+- Footer atau halaman informasi aplikasi.
+- Release notes.
+- Changelog.
+
+Tambahkan:
+- Build number.
+- Commit SHA.
+- Waktu build.
+- Versi database schema.
+- Catatan perubahan.
+
+Jangan menampilkan informasi rahasia repository atau environment.
+
+## O. PUBLIC WEBSITE DAN BRANDING
+
+Sempurnakan website publik.
+
+Sediakan CMS yang memungkinkan pengelola berwenang mengubah:
+- Logo.
+- Favicon.
+- Hero section.
+- Gambar.
+- Warna identitas.
+- Deskripsi organisasi.
+- Visi misi.
+- Program.
+- Berita.
+- Pengumuman.
+- Statistik publik.
+- Footer.
+- Kontak resmi.
+- Tautan media sosial.
+
+Buat tampilan profesional, elegan, modern, berkarakter budaya Indonesia, tetapi tidak berlebihan.
+
+Website publik harus cepat, responsif, SEO-friendly, mudah dikelola, dan tetap terpisah dari informasi internal.
+
+Jangan menggunakan data dummy seolah-olah statistik resmi.
+
+## P. UX/UI — ZERO CONFUSION
+
+Satu sistem harus mudah digunakan meskipun memiliki banyak modul.
+
+Terapkan:
+- Dashboard sesuai role.
+- Navigasi yang konsisten.
+- Menu berdasarkan kewenangan.
+- Bahasa Indonesia yang jelas.
+- Breadcrumb.
+- Search.
+- Empty state.
+- Loading state.
+- Error state.
+- Success feedback.
+- Form bertahap.
+- Autosave.
+- Draft recovery.
+- Konfirmasi aksi destruktif.
+- Mobile-first responsive.
+- Aksesibilitas.
+
+Hindari:
+- Terlalu banyak menu.
+- Istilah teknis yang tidak dijelaskan.
+- Tombol yang tidak berfungsi.
+- Formulir panjang tanpa panduan.
+- Statistik tanpa sumber data.
+- Modal berlapis.
+- Halaman kosong tanpa penjelasan.
+- Komponen dengan gaya yang tidak konsisten.
+
+Gunakan design system bersama untuk seluruh aplikasi.
+
+## Q. SYSTEM HEALTH DAN OBSERVABILITY
+
+Bangun pusat kesehatan sistem.
+
+Pantau:
+- API health.
+- Database health.
+- Storage health.
+- Email health.
+- Queue health.
+- Backup health.
+- Migration status.
+- Error rate.
+- Response time.
+- Failed jobs.
+- Disk usage.
+- Application version.
+
+Buat error reference ID.
+
+Log harus disanitasi dan tidak boleh menyimpan password, token mentah, atau isi dokumen sensitif.
+
+## R. BACKUP DAN PEMULIHAN
+
+Sediakan:
+- Backup terjadwal.
+- Backup manual.
+- Checksum.
+- Riwayat.
+- Validasi file backup.
+- Retention.
+- Restore preview.
+- Restore confirmation.
+- Audit log.
+- Uji pemulihan berkala.
+
+Backup harus mencakup database secara konsisten termasuk kondisi SQLite WAL.
+
+Jangan menganggap menyalin file database aktif sebagai backup yang pasti konsisten.
+
+Jangan pernah menjalankan restore produksi tanpa persetujuan eksplisit dan backup kondisi terkini.
+
+## S. TESTING DAN QUALITY GATE
+
+Setiap fitur baru harus disertai pengujian.
+
+Minimal:
+- TypeScript check.
+- Unit test.
+- Integration test.
+- API authorization test.
+- Role permission test.
+- Database migration test.
+- Workflow state transition test.
+- File upload test.
+- Email rendering test.
+- CSV parser test.
+- Email queue test.
+- Duplicate submission test.
+- Invitation expiry test.
+- Invitation resend test.
+- Account deactivation test.
+- Personnel archival test.
+- Mobile UI test.
+
+Uji seluruh role:
+- Super Admin.
+- Wakil Super Admin.
+- Penanggung Jawab.
+- Pengurus Nasional.
+- Sekretariat Nasional.
+- Korwil.
+- Duta.
+- Alumni.
+
+Uji skenario negatif:
+- User tanpa izin.
+- Korwil lintas wilayah.
+- Email duplikat.
+- Token kedaluwarsa.
+- Token dipakai dua kali.
+- Lampiran tidak valid.
+- CSV rusak.
+- Database constraint.
+- Koneksi terputus.
+- Double click.
+- Concurrent edit.
+- Pengiriman email gagal.
+
+Jangan menyatakan implementasi selesai jika build gagal atau test penting gagal.
+
+## T. STRATEGI IMPLEMENTASI
+
+Jangan mengubah seluruh aplikasi sekaligus dalam satu perubahan besar.
+
+Bagi implementasi menjadi fase:
+
+**FASE 1 — Audit dan fondasi**
+- Audit repository.
+- Peta arsitektur.
+- Daftar masalah.
+- Prioritas.
+- Rencana migrasi.
+- Baseline test.
+
+**FASE 2 — Personalia, akun, dan undangan**
+- Pemisahan entitas.
+- Pengajuan Duta.
+- Pengelolaan akun pengurus.
+- Workflow Korwil.
+- Aktivasi.
+- Resend.
+- Deactivation.
+- Archive.
+- Permission.
+
+**FASE 3 — Email Center**
+- Template library.
+- Template attachments.
+- Campaign attachments.
+- CSV import.
+- Variable mapping.
+- Queue.
+- Retry.
+- Delivery logs.
+- Transactional emails.
+
+**FASE 4 — Approval dan workflow**
+- Approval matrix.
+- Proposal.
+- LKL.
+- Revisi.
+- Version history.
+- SLA.
+- Escalation.
+
+**FASE 5 — Organization dan operations**
+- Struktur organisasi.
+- Periode.
+- Jabatan.
+- Tugas.
+- Kalender.
+- Rapat.
+- Handover.
+
+**FASE 6 — Program dan analitik**
+- Flagship program.
+- Regional map.
+- Performance.
+- Alumni.
+- Impact analytics.
+
+**FASE 7 — UX dan website publik**
+- Dashboard.
+- Help center.
+- Onboarding.
+- CMS.
+- Branding.
+- Mobile.
+
+**FASE 8 — Reliability dan release**
+- Security audit.
+- Regression test.
+- Migration test.
+- Backup test.
+- Release notes.
+- Version update.
+- Staging verification.
+
+Urutan dapat disesuaikan berdasarkan dependensi teknis yang ditemukan saat audit.
+
+## U. ATURAN WAJIB UNTUK AGENT
+
+1. Jangan hanya membuat mockup.
+2. Jangan membuat tombol palsu.
+3. Jangan menggunakan data dummy untuk fitur operasional.
+4. Jangan menghapus fitur yang sudah bekerja tanpa pengganti.
+5. Jangan menghapus data pengguna.
+6. Jangan melakukan perubahan produksi secara langsung.
+7. Jangan menaruh secret di repository.
+8. Jangan memberikan role tinggi tanpa validasi.
+9. Jangan mengirim email tanpa preview dan validasi penerima.
+10. Jangan membuat pengiriman massal dalam satu request panjang.
+11. Jangan mengandalkan frontend untuk keamanan.
+12. Jangan membuat duplikasi tabel atau endpoint untuk fungsi yang sudah ada.
+13. Jangan menandai pekerjaan selesai sebelum diuji.
+14. Jangan menyembunyikan kegagalan test.
+15. Jangan mengubah skema tanpa migration.
+16. Jangan menganggap data demo sebagai data produksi.
+17. Jangan melakukan destructive migration.
+18. Jangan melakukan deploy tanpa prosedur backup dan verifikasi.
+
+Jika menemukan konflik antara prompt dan arsitektur yang ada, jelaskan konflik, pilih solusi paling aman, dan dokumentasikan keputusan.
+
+Jika menemukan fitur tambahan yang lebih baik, implementasikan apabila benar-benar bermanfaat, aman, dan sesuai tujuan organisasi.
+
+## V. HASIL AKHIR YANG WAJIB DISERAHKAN
+
+Agent harus menghasilkan:
+
+1. Audit repository.
+2. Daftar kekurangan dan risiko.
+3. Architecture decision records.
+4. Peta modul dan alur.
+5. Database schema dan migrations.
+6. Implementasi backend.
+7. Implementasi frontend.
+8. Email template library.
+9. Dokumentasi variabel email.
+10. Dokumentasi format CSV.
+11. Dokumentasi role dan permission.
+12. Dokumentasi alur pengajuan akun.
+13. Dokumentasi alur persetujuan.
+14. Dokumentasi administrasi personel.
+15. Dokumentasi pengelolaan lampiran.
+16. Dokumentasi konfigurasi email.
+17. Changelog.
+18. Test report.
+19. Security review.
+20. Deployment guide.
+21. Rollback guide.
+22. Panduan penggunaan berdasarkan role.
+
+Dokumentasi harus menjelaskan cara menggunakan sistem, bukan hanya cara menjalankan kode.
+
+## W. DEFINITION OF DONE
+
+SATU DPBI baru boleh dinyatakan selesai apabila:
+
+- Semua modul utama terintegrasi.
+- Tidak ada alur akun yang menggantung.
+- Personel dan akun dapat dikelola secara terpisah.
+- Pengajuan Duta memiliki alur khusus.
+- Pengajuan pengurus memiliki alur khusus.
+- Korwil dapat memproses pengajuan sesuai kewenangannya.
+- Undangan aktivasi benar-benar terkirim melalui email yang terkonfigurasi.
+- Undangan dapat dikirim ulang dengan aman.
+- Template email lengkap dan dapat dikelola.
+- Template dan kampanye dapat memiliki lampiran.
+- CSV dapat digunakan untuk bulk email dengan validasi.
+- Pengiriman massal memiliki antrean dan log.
+- Approval mempunyai riwayat dan aturan transisi.
+- Role dan permission benar-benar diterapkan di backend.
+- Penghapusan dan penonaktifan akun aman.
+- Data personel historis tetap terjaga.
+- Database migration aman.
+- Backup dan pemulihan dapat diuji.
+- Semua fitur utama mempunyai test.
+- Website nyaman digunakan pada desktop dan ponsel.
+- Tidak ada tombol utama yang tidak berfungsi.
+- Dokumentasi penggunaan tersedia.
+
+**Tujuan akhirnya bukan aplikasi yang terlihat besar, melainkan aplikasi yang benar-benar menjadi pusat kendali organisasi DPBI dan dapat digunakan secara berkelanjutan oleh kepengurusan saat ini maupun generasi berikutnya.**
+
+Mulai dari audit. Buat peta masalah. Susun rencana. Implementasikan secara bertahap. Uji. Dokumentasikan. Jangan berhenti pada laporan analisis atau desain saja.

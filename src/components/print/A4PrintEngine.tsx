@@ -177,9 +177,9 @@ export function A4PrintModal({
         <header className="flex items-center justify-between gap-4 pb-4 border-b-2 border-slate-900">
           <div className="flex items-center gap-3.5">
             <img
-              src="/assets/aistudio/logosd_69efa81d.jpg"
-              alt="Logo Resmi DPBI"
-              className="w-14 h-14 rounded-lg object-cover border border-slate-300 shrink-0"
+              src="/assets/aistudio/icon-utama_7bb14cc7.png"
+              alt="Logo Resmi SATU DPBI"
+              className="h-14 w-auto object-contain rounded-lg bg-white px-2 py-1 border border-slate-300 shrink-0"
             />
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#0EA5E9]">

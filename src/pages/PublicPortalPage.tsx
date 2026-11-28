@@ -69,6 +69,7 @@ export function PublicPortalPage({
     setAccountPending,
     pendingRedirectPath,
     setPendingRedirectPath,
+    preferences,
   } = useAuth();
 
   const [overview, setOverview] = useState<PublicOverviewPayload | null>(null);
@@ -168,7 +169,7 @@ export function PublicPortalPage({
   }, [drillCode, selectedCode, mode]);
 
   const redirectAfterAuth = () => {
-    const destination = pendingRedirectPath || '/dashboard';
+    const destination = pendingRedirectPath || preferences?.startPage || '/beranda';
     if (pendingRedirectPath) setPendingRedirectPath(null);
     navigate(destination);
   };
@@ -542,15 +543,26 @@ export function PublicPortalPage({
           {/* Two-Column Institutional About + Public Announcements */}
           <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-14 grid grid-cols-1 lg:grid-cols-12 gap-6">
             <GlassCard className="lg:col-span-6 p-6 space-y-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#0EA5E9]">
-                <Building2 className="w-4 h-4" />
-                <span>Tentang Organisasi &amp; Tata Kelola</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-[#0EA5E9]">
+                  <Building2 className="w-4 h-4" />
+                  <span>Tentang Organisasi &amp; Tata Kelola</span>
+                </div>
+                <img
+                  src="/assets/aistudio/logotp_bf31c116.png"
+                  alt="Lambang Duta Pelajar Berbudaya Indonesia"
+                  referrerPolicy="no-referrer"
+                  className="w-11 h-11 rounded-full object-contain bg-white p-0.5 border border-slate-200 dark:border-slate-700 shrink-0"
+                />
               </div>
               <h2 className="font-display text-xl font-bold text-slate-900 dark:text-white">
                 {overview?.cms?.about_dpbi?.title || 'Duta Pelajar Berbudaya Indonesia (DPBI)'}
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line line-clamp-6">
                 {aboutSummary}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Didukung &amp; dikelola oleh Duta Pelajar Berbudaya Indonesia — Berbudaya, Bergerak, Berdampak Untuk Negeri.
               </p>
               <div className="pt-2 flex flex-wrap items-center gap-4 text-xs">
                 <button
@@ -626,6 +638,12 @@ export function PublicPortalPage({
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-10 lg:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         <div className="lg:col-span-5 space-y-5">
           <div className="space-y-3">
+            <img
+              src="/assets/aistudio/icon-utama_7bb14cc7.png"
+              alt="Logo Utama SATU DPBI"
+              referrerPolicy="no-referrer"
+              className="h-12 w-auto object-contain rounded-xl bg-white px-2.5 py-1 border border-slate-200 dark:border-slate-700"
+            />
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#0EA5E9]">
               Portal Internal Terpadu
             </p>

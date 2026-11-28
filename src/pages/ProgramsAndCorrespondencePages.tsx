@@ -26,6 +26,7 @@ import { formatTanggalIndonesia, OFFICIAL_BIDANGS } from '../lib/rbac';
 import type { BatchRecord, CorrespondenceRecord, FlagshipProgramRecord } from '../lib/types';
 import { PublicFooter, PublicNavbar } from '../components/public/PublicChrome';
 import { EmptyState, GlassCard, Modal, PageHeader, Skeleton, StatusIndicator } from '../components/ui/Primitives';
+import { ProcessTracker } from '../components/ProcessTracker';
 
 interface ProgramItem extends Omit<FlagshipProgramRecord, 'metrics'> {
   metrics?: {
@@ -836,6 +837,7 @@ export function CorrespondencePage() {
   const [dirFilter, setDirFilter] = useState<'' | 'masuk' | 'keluar'>('');
   const [createOpen, setCreateOpen] = useState(false);
   const [dispTarget, setDispTarget] = useState<CorrespondenceListItem | null>(null);
+  const [trackerTarget, setTrackerTarget] = useState<CorrespondenceListItem | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -1041,6 +1043,13 @@ export function CorrespondencePage() {
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <StatusIndicator status={letter.status} />
+                  <button
+                    type="button"
+                    onClick={() => setTrackerTarget(letter)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-semibold hover:border-[#0EA5E9]"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-[#0EA5E9]" /> Lacak Proses
+                  </button>
                   {letter.fileId && (
                     <a
                       href={`/api/files/${letter.fileId}`}
@@ -1359,6 +1368,15 @@ export function CorrespondencePage() {
             </button>
           </div>
         </form>
+      </Modal>
+      <Modal
+        open={Boolean(trackerTarget)}
+        onClose={() => setTrackerTarget(null)}
+        title={`Pelacak Proses Surat ${trackerTarget?.referenceNumber || ''}`}
+        subtitle={trackerTarget?.subject}
+        maxWidth="max-w-3xl"
+      >
+        {trackerTarget && <ProcessTracker entityType="persuratan" entityId={trackerTarget.id} />}
       </Modal>
     </div>
   );

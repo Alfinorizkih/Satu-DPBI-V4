@@ -4,6 +4,23 @@ Seluruh perubahan besar pada arsitektur, antarmuka, keamanan, pemetaan wilayah, 
 
 ---
 
+## [4.2.0] — Addendum Zero-Confusion UX, Penguatan Operasional & Integrasi Identitas Resmi
+
+### Pengalaman Pengguna Zero-Confusion & Keandalan Sistem
+- **Beranda Saya Berbasis Peran (`/beranda`)**: Ruang kerja pribadi yang menyesuaikan sapaan, jabatan, wilayah, pintasan aksi utama, tugas aktif, revisi tertunda, persetujuan menunggu, tenggat terdekat, jadwal kegiatan, dan aktivitas terbaru secara spesifik untuk setiap peran (dengan pengalihan otomatis pasca-login sesuai preferensi `startPage`).
+- **Panduan Bertahap & Process Tracker (`ProcessTracker.tsx`, `ProposalsPage.tsx`, `LklPage.tsx`)**: Stepper 4 tahap, indikator kelengkapan syarat, contoh pengisian, penyimpanan *draft* otomatis & pemulihan (*draft recovery*), ringkasan pra-kirim, konfirmasi aksi berisiko, serta pelacak proses berlini masa lengkap (status saat ini, tahap sebelumnya, pemeriksa aktif, tindak lanjut, catatan, tenggat, dan tahap berikutnya).
+- **Pusat Bantuan Kontekstual, Tur Peran & Pusat Kendala (`/bantuan`, `/kendala`)**: Drawer bantuan kontekstual per halaman (pintasan `?`), tur interaktif per peran, FAQ & glosarium organisasi, serta modul tiket kendala `/kendala` dengan pelacakan status dan referensi galat.
+- **Tampilan & Preferensi (`/pengaturan` tab `Tampilan`)**: Pengaturan halaman awal (`startPage`), skala tampilan (`ringkas` / `nyaman` / `besar`), pintasan favorit tervalidasi, preferensi notifikasi, serta status penyelesaian tur.
+- **Integrasi Identitas Brand Resmi DPBI**: Penyematan aset logo resmi pada favicon/ikon aplikasi (`icon-app-sd`), logo utama portal (`icon-utama`), dan lambang atribusi *Didukung & Dikelola Oleh DPBI* (`logotp`) di header, halaman masuk, sidebar, serta footer hak cipta.
+
+### Penguatan Modul Inti & Integritas Operasional
+- **Pusat Email 50 Templat Resmi, 20 Variabel & Antrean Batch**: Ekspansi 50 templat resmi DPBI lintas kategori, toggle aktif/nonaktif templat, lampiran berkas (`email_attachments` dengan pemblokiran ekstensi eksekusi), 20 variabel ter-whitelist dengan proteksi *HTML-escape* anti-XSS, parser CSV RFC-4180 (`src/lib/csvParser.ts`) yang mendukung pemisah `,`/`;`/tab dan laporan galat bebas formula, serta antrean pengiriman bertahap (`email_queue`) lengkap dengan jeda (*pause*), lanjut (*resume*), proses batch, dan pembatalan.
+- **Siklus Personel, Impor & Pendaftaran Duta 2 Jalur**: Pengarsipan/pemulihan/hapus aman personel (menjaga akun aktif & `super_admin` terakhir via `HTTP 409`), pembatasan ketat peran dari impor CSV (`HTTP 403`), serta alur pengajuan Duta 2 jalur dengan status `perlu_revisi`, pengiriman ulang (`resubmit`), dan kebijakan `duta_auto_approve`.
+- **Idempotency & Concurrency Guard**: Perlindungan *double submission* (`X-Idempotency-Key` pada `idempotency_keys`) serta *optimistic concurrency* (`version` guard `HTTP 409`) pada pembaruan tugas.
+- **Kesehatan Sistem & Telemetri Operasional (`/status-sistem`)**: Ringkasan latensi SQLite WAL, kapasitas penyimpanan, metrik antrean email, jumlah tiket kendala terbuka, statistik permintaan API, serta log galat `5xx`.
+
+---
+
 ## [4.1.0] — Transformasi Total Tata Kelola, Program Unggulan, Persuratan Digital & Ketahanan Sistem
 
 ### Arsitektur Data, Keamanan & Ketahanan Operasional

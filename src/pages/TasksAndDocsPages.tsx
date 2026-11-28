@@ -1,21 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import {
-  AlertTriangle,
-  CheckSquare,
-  Download,
-  Eye,
-  FileText,
-  FolderOpen,
-  Link2,
-  Lock,
-  MessageSquare,
-  Paperclip,
-  Plus,
-  Printer,
-  Search,
-  Users,
-} from 'lucide-react';
-import { apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
+import { AlertTriangle, CheckSquare, Download, Eye, FileText, FolderOpen, Link2, Lock, MessageSquare, Paperclip, Plus, Printer, RefreshCw, Search, Users } from 'lucide-react';
+import { ApiError, apiGet, apiPatch, apiPost, apiUrl } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { INDONESIA_PROVINCES } from '../lib/provinces';
 import {
@@ -61,6 +46,7 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
   const [activeTask, setActiveTask] = useState<TaskRecord | null>(null);
   const [comments, setComments] = useState<Record<string, unknown>[]>([]);
   const [commentText, setCommentText] = useState('');
+  const [taskConflictError, setTaskConflictError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -105,12 +91,26 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
   }, [initialId]);
 
   const handleStatus = async (id: string, status: TaskStatus) => {
+    const current = tasks.find((t) => t.id === id) || activeTask;
     try {
-      await apiPatch(`/api/tasks/${id}`, { status });
-      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
-      if (activeTask?.id === id) setActiveTask({ ...activeTask, status });
+      const res = await apiPatch<{ ok: boolean; version?: number; updatedAt?: string }>(`/api/tasks/${id}`, {
+        status,
+        expectedVersion: current?.version,
+      });
+      setTaskConflictError(null);
+      const nextVer = res?.version ?? (current?.version ? current.version + 1 : undefined);
+      const nextUpd = res?.updatedAt ?? current?.updatedAt;
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status, version: nextVer, updatedAt: nextUpd } : t))
+      );
+      if (activeTask?.id === id) {
+        setActiveTask({ ...activeTask, status, version: nextVer, updatedAt: nextUpd });
+      }
       notify('Status tugas diperbarui.', 'success');
     } catch (err) {
+      if (err instanceof ApiError && (err.status === 409 || err.conflict) && err.conflict) {
+        setTaskConflictError(err.message);
+      }
       notify(err instanceof Error ? err.message : 'Gagal memperbarui tugas.', 'error');
     }
   };
@@ -118,10 +118,23 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
   const toggleChecklist = async (task: TaskRecord, itemId: string) => {
     const next = task.checklist.map((c) => (c.id === itemId ? { ...c, done: !c.done } : c));
     try {
-      await apiPatch(`/api/tasks/${task.id}`, { checklist: next });
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, checklist: next } : t)));
-      if (activeTask?.id === task.id) setActiveTask({ ...task, checklist: next });
+      const res = await apiPatch<{ ok: boolean; version?: number; updatedAt?: string }>(`/api/tasks/${task.id}`, {
+        checklist: next,
+        expectedVersion: task.version,
+      });
+      setTaskConflictError(null);
+      const nextVer = res?.version ?? (task.version ? task.version + 1 : undefined);
+      const nextUpd = res?.updatedAt ?? task.updatedAt;
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, checklist: next, version: nextVer, updatedAt: nextUpd } : t))
+      );
+      if (activeTask?.id === task.id) {
+        setActiveTask({ ...task, checklist: next, version: nextVer, updatedAt: nextUpd });
+      }
     } catch (err) {
+      if (err instanceof ApiError && (err.status === 409 || err.conflict) && err.conflict) {
+        setTaskConflictError(err.message);
+      }
       notify(err instanceof Error ? err.message : 'Gagal memperbarui checklist.', 'error');
     }
   };
@@ -247,6 +260,25 @@ export function TasksPage({ scope = 'all', initialId }: { scope?: 'all' | 'mine'
           )}
         </div>
       </div>
+
+      {taskConflictError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 px-4 py-3 text-xs text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-3"
+        >
+          <span className="font-medium">{taskConflictError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setTaskConflictError(null);
+              load();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Data Terbaru
+          </button>
+        </div>
+      )}
 
       {/* Compact Summary Strip */}
       <div className="grid grid-cols-3 gap-3 text-xs">

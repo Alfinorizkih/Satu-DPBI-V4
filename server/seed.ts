@@ -1002,80 +1002,115 @@ function wrapOfficialEmailHtml(heading: string, bodyParagraphs: string): string 
 
 function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
   const templates: [string, string, string, string, string, string][] = [
+    // 1. Akun, Aktivasi & Keamanan (10)
     [
-      'etpl-1', 'undangan_akun', 'Undangan Aktivasi Akun Resmi SATU DPBI', 'Akun & Aktivasi',
+      'etpl-1', 'undangan_akun', 'Undangan Aktivasi Akun Resmi SATU DPBI', 'Akun & Keamanan',
       '[SATU DPBI] Undangan Aktivasi Akun {{jabatan}} — {{provinsi}}',
-      'Yth. {{nama}},\n\nAkun resmi Anda pada portal SATU DPBI ({{jabatan}} · {{role}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi berikut sebelum {{tenggat}}:\n{{tautan}}\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
+      'Yth. {{nama}},\n\nAkun resmi Anda pada portal {{nama_organisasi}} ({{jabatan}} · {{role}} — {{provinsi}}, {{angkatan}}) telah disiapkan.\nSilakan selesaikan aktivasi melalui tautan undangan resmi berikut sebelum {{tenggat}}:\n{{tautan_aktivasi}}\n\nReferensi: {{referensi}}\nSatu Sistem, Satu Data, Satu Koordinasi.',
     ],
     [
-      'etpl-2', 'kirim_ulang_undangan', 'Kirim Ulang Undangan Aktivasi Akun', 'Akun & Aktivasi',
+      'etpl-2', 'kirim_ulang_undangan', 'Kirim Ulang Undangan Aktivasi Akun', 'Akun & Keamanan',
       '[SATU DPBI] Pengingat & Tautan Baru Aktivasi Akun — {{nama}}',
-      'Yth. {{nama}},\n\nBerikut tautan undangan aktivasi terbaru untuk akun SATU DPBI Anda ({{jabatan}} — {{provinsi}}). Tautan sebelumnya otomatis dinonaktifkan demi keamanan.\nTautan aktivasi: {{tautan}}\nBerlaku hingga: {{tenggat}}\n\nReferensi: {{referensi}}',
+      'Yth. {{nama}},\n\nBerikut tautan undangan aktivasi terbaru untuk akun SATU DPBI Anda ({{jabatan}} — {{provinsi}}). Tautan sebelumnya otomatis dinonaktifkan demi keamanan.\nTautan aktivasi: {{tautan_aktivasi}}\nBerlaku hingga: {{tenggat}}\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-3', 'aktivasi_berhasil', 'Konfirmasi Aktivasi Akun Berhasil', 'Akun & Aktivasi',
+      'etpl-3', 'aktivasi_berhasil', 'Konfirmasi Aktivasi Akun Berhasil', 'Akun & Keamanan',
       '[SATU DPBI] Akun Resmi Anda Telah Aktif — {{nama}}',
-      'Halo {{nama}},\n\nAktivasi akun SATU DPBI Anda ({{jabatan}} · {{role}} — {{provinsi}}) berhasil diselesaikan pada {{tanggal}}.\nAnda kini dapat masuk ke portal melalui {{tautan}} untuk mengakses tugas, proposal, dan koordinasi wilayah.\n\nReferensi: {{referensi}}',
+      'Halo {{nama}},\n\nAktivasi akun SATU DPBI Anda ({{jabatan}} · {{role}} — {{provinsi}}) berhasil diselesaikan pada {{tanggal}}.\nAnda kini dapat masuk ke portal melalui {{tautan}} untuk mengakses tugas, proposal, dan koordinasi wilayah.\n\nNomor Anggota: {{nomor_anggota}}\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-4', 'reset_password', 'Tautan Reset Kata Sandi Akun', 'Keamanan Akun',
+      'etpl-4', 'reset_password', 'Tautan Reset Kata Sandi Akun', 'Akun & Keamanan',
       '[SATU DPBI] Permintaan Reset Kata Sandi — {{nama}}',
       'Yth. {{nama}},\n\nKami menerima permintaan pengaturan ulang kata sandi untuk akun {{email}} pada {{tanggal}}.\nGunakan tautan satu kali pakai berikut (kedaluwarsa {{tenggat}}):\n{{tautan}}\n\nJika Anda tidak merasa meminta reset sandi, abaikan pesan ini dan hubungi Sekretariat Nasional.',
     ],
     [
-      'etpl-5', 'konfirmasi_reset_password', 'Konfirmasi Perubahan Kata Sandi', 'Keamanan Akun',
+      'etpl-5', 'konfirmasi_reset_password', 'Konfirmasi Perubahan Kata Sandi', 'Akun & Keamanan',
       '[SATU DPBI] Kata Sandi Berhasil Diperbarui',
       'Yth. {{nama}},\n\nKata sandi untuk akun {{email}} telah diperbarui pada {{tanggal}} dan seluruh sesi perangkat sebelumnya telah dirotasi.\nJika bukan Anda yang melakukan perubahan ini, segera hubungi Super Admin SATU DPBI.\n\nReferensi: {{referensi}}',
     ],
     [
+      'etpl-19', 'permohonan_akun_diterima', 'Konfirmasi Pengajuan Permohonan Akun Duta', 'Akun & Keamanan',
+      '[SATU DPBI] Pengajuan Akun Duta Diterima untuk Verifikasi — {{nama}}',
+      'Yth. {{nama}},\n\nPengajuan akun calon Duta Pelajar Berbudaya Indonesia ({{provinsi}}, {{angkatan}}) telah dicatat oleh sistem dengan nomor referensi {{referensi}} pada {{tanggal}}.\nTim Sekretariat Nasional akan memverifikasi kelengkapan data sebelum mengirimkan tautan aktivasi.\n\nPantau status melalui: {{tautan}}',
+    ],
+    [
+      'etpl-20', 'permohonan_akun_revisi', 'Permintaan Perbaikan Data Permohonan Akun Duta', 'Akun & Keamanan',
+      '[SATU DPBI] Permohonan Akun {{referensi}} Memerlukan Perbaikan Data',
+      'Yth. {{nama}},\n\nPengajuan akun Duta bernomor {{referensi}} ({{provinsi}}) memerlukan perbaikan kelengkapan data berdasarkan pemeriksaan {{nama_pemeriksa}} pada {{tanggal}}.\nCatatan pemeriksa: {{catatan_pemeriksa}}\n\nKoordinator Wilayah dapat memperbarui data pengajuan ulang melalui: {{tautan}}',
+    ],
+    [
+      'etpl-21', 'permohonan_akun_ditolak', 'Pemberitahuan Penolakan Permohonan Akun Duta', 'Akun & Keamanan',
+      '[SATU DPBI] Keputusan Permohonan Akun — {{referensi}}',
+      'Yth. {{nama}},\n\nDengan mempertimbangkan hasil verifikasi administrasi wilayah {{provinsi}}, permohonan akun {{referensi}} belum dapat disetujui pada {{tanggal}}.\nAlasan keputusan: {{catatan_pemeriksa}}\n\nDetail catatan tersedia di: {{tautan}}',
+    ],
+    [
+      'etpl-22', 'akun_ditangguhkan', 'Pemberitahuan Penangguhan Sementara Akses Akun', 'Akun & Keamanan',
+      '[SATU DPBI] Informasi Status Penangguhan Akun — {{nama}}',
+      'Yth. {{nama}},\n\nAkses akun {{email}} pada portal SATU DPBI sementara ditangguhkan per {{tanggal}} untuk keperluan peninjauan administratif.\nCatatan: {{catatan_pemeriksa}}\n\nUntuk klarifikasi resmi, silakan menghubungi Sekretariat Nasional melalui {{tautan}}.',
+    ],
+    [
+      'etpl-23', 'akun_diaktifkan_kembali', 'Pemberitahuan Aktivasi Ulang Akses Akun', 'Akun & Keamanan',
+      '[SATU DPBI] Akses Akun Anda Telah Diaktifkan Kembali — {{nama}}',
+      'Yth. {{nama}},\n\nAkun {{email}} ({{jabatan}} — {{provinsi}}) telah diaktifkan kembali per {{tanggal}} dan seluruh hak akses sesuai peran {{role}} telah pulih.\nSilakan masuk melalui: {{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+
+    // 2. Persetujuan & Alur Kerja (9)
+    [
       'etpl-6', 'notifikasi_pengajuan', 'Notifikasi Pengajuan Proposal / Permohonan Baru', 'Persetujuan & Alur Kerja',
       '[SATU DPBI] Pengajuan Baru Menunggu Tinjauan ({{referensi}})',
-      'Yth. {{nama}},\n\nTerdapat pengajuan baru bernomor {{referensi}} dari wilayah {{provinsi}} ({{angkatan}}) yang memerlukan peninjauan Anda sebelum {{tenggat}}.\nBuka antrean persetujuan pada: {{tautan}}\n\nSatu Sistem, Satu Data, Satu Koordinasi.',
+      'Yth. {{nama}},\n\nTerdapat pengajuan baru bernomor {{referensi}} ({{nomor_pengajuan}}) dari wilayah {{provinsi}} ({{angkatan}}) yang memerlukan peninjauan Anda sebelum {{tenggat}}.\nBuka antrean persetujuan pada: {{tautan}}\n\nSatu Sistem, Satu Data, Satu Koordinasi.',
     ],
     [
       'etpl-7', 'notifikasi_revisi', 'Permintaan Revisi Proposal atau Laporan (LKL)', 'Persetujuan & Alur Kerja',
       '[SATU DPBI] Pengajuan Perlu Revisi — {{referensi}}',
-      'Yth. {{nama}},\n\nPengajuan {{referensi}} ({{provinsi}}) berstatus Perlu Revisi setelah pemeriksaan tahap persetujuan pada {{tanggal}}.\nMohon perbaiki dokumen sesuai catatan peninjau dan ajukan ulang sebelum {{tenggat}} melalui:\n{{tautan}}',
+      'Yth. {{nama}},\n\nPengajuan {{referensi}} ({{provinsi}}) berstatus Perlu Revisi setelah pemeriksaan oleh {{nama_pemeriksa}} pada {{tanggal}}.\nCatatan pemeriksa: {{catatan_pemeriksa}}\n\nMohon perbaiki dokumen dan ajukan ulang sebelum {{tenggat}} melalui:\n{{tautan}}',
     ],
     [
       'etpl-8', 'proposal_disetujui', 'Pemberitahuan Proposal Kegiatan Disetujui', 'Persetujuan & Alur Kerja',
       '[SATU DPBI] Proposal Disetujui — {{referensi}}',
-      'Selamat {{nama}},\n\nProposal kegiatan {{referensi}} untuk wilayah {{provinsi}} ({{angkatan}}) telah resmi disetujui pada {{tanggal}}.\nAgenda kalender dan tugas tindak lanjut (termasuk kewajiban LKL) telah dibuat otomatis di portal:\n{{tautan}}',
+      'Selamat {{nama}},\n\nProposal kegiatan {{referensi}} untuk wilayah {{provinsi}} ({{angkatan}}) telah resmi disetujui oleh {{nama_pemeriksa}} pada {{tanggal}}.\nAgenda kalender dan tugas tindak lanjut (termasuk kewajiban LKL) telah dibuat otomatis di portal:\n{{tautan}}',
     ],
     [
       'etpl-9', 'proposal_ditolak', 'Pemberitahuan Proposal Tidak Dapat Disetujui', 'Persetujuan & Alur Kerja',
       '[SATU DPBI] Keputusan Penolakan Proposal — {{referensi}}',
-      'Yth. {{nama}},\n\nBerdasarkan evaluasi administrasi dan kesesuaian risiko, proposal {{referensi}} ({{provinsi}}) belum dapat disetujui pada {{tanggal}}.\nSilakan tinjau catatan keputusan lengkap pada: {{tautan}}',
+      'Yth. {{nama}},\n\nBerdasarkan evaluasi administrasi dan kesesuaian risiko, proposal {{referensi}} ({{provinsi}}) belum dapat disetujui pada {{tanggal}}.\nCatatan peninjau: {{catatan_pemeriksa}}\n\nSilakan tinjau catatan keputusan lengkap pada: {{tautan}}',
     ],
+    [
+      'etpl-24', 'eskalasi_sla_persetujuan', 'Eskalasi Batas Waktu (SLA) Pemeriksaan Pengajuan', 'Persetujuan & Alur Kerja',
+      '[ESKALASI SLA] Pengajuan {{referensi}} Melewati Batas Pemeriksaan',
+      'Yth. {{nama}},\n\nPengajuan {{referensi}} dari wilayah {{provinsi}} telah melewati tenggat pemeriksaan {{tenggat}}.\nMohon segera menindaklanjuti atau mendelegasikan pemeriksaan di Pusat Persetujuan:\n{{tautan}}',
+    ],
+    [
+      'etpl-25', 'revisi_diterima_kembali', 'Konfirmasi Pengiriman Ulang Revisi Diterima Sistem', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Revisi Pengajuan {{referensi}} Telah Diterima untuk Pemeriksaan Ulang',
+      'Yth. {{nama}},\n\nRevisi dokumen untuk {{referensi}} ({{provinsi}}) berhasil dikirim ulang pada {{tanggal}} dan kini kembali masuk antrean pemeriksaan {{nama_pemeriksa}}.\nPantau linimasa proses pada: {{tautan}}',
+    ],
+    [
+      'etpl-26', 'verifikasi_administrasi_proposal', 'Proposal Lolos Pemeriksaan Administrasi Awal', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Proposal {{referensi}} Lolos Administrasi & Lanjut ke Peninjauan Substansi',
+      'Yth. {{nama}},\n\nProposal {{referensi}} wilayah {{provinsi}} telah lolos pemeriksaan kelengkapan administrasi pada {{tanggal}} dan diteruskan ke tahap peninjauan substansi.\nLihat progres proses di: {{tautan}}',
+    ],
+    [
+      'etpl-27', 'pengecualian_lokasi_keputusan', 'Keputusan Pengajuan Pengecualian Verifikasi Lokasi', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Keputusan Pengecualian Lokasi Wilayah {{provinsi}} — {{referensi}}',
+      'Yth. {{nama}},\n\nPengajuan pengecualian verifikasi lokasi ({{referensi}}) untuk wilayah {{provinsi}} telah diputuskan pada {{tanggal}}.\nCatatan: {{catatan_pemeriksa}}\n\nRincian dapat diperiksa melalui: {{tautan}}',
+    ],
+    [
+      'etpl-28', 'delegasi_wewenang_aktif', 'Pemberitahuan Pelimpahan Wewenang Persetujuan Sementara', 'Persetujuan & Alur Kerja',
+      '[SATU DPBI] Pelimpahan Wewenang Persetujuan Sementara Aktif ({{provinsi}})',
+      'Yth. {{nama}},\n\nTerhitung sejak {{tanggal}} hingga {{tenggat}}, Anda ditetapkan sebagai pelaksana wewenang sementara pada antrean persetujuan untuk menjaga kelancaran koordinasi.\nLihat detail delegasi pada: {{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+
+    // 3. Proposal, Program & Kegiatan (9)
     [
       'etpl-10', 'konfirmasi_kegiatan', 'Konfirmasi Jadwal & Pelaksanaan Kegiatan Resmi', 'Program & Kegiatan',
-      '[Informasi Kegiatan] Konfirmasi Program {{angkatan}} — {{provinsi}}',
-      'Halo {{nama}},\n\nBerikut konfirmasi jadwal pelaksanaan kegiatan resmi DPBI untuk wilayah {{provinsi}} pada {{tanggal}}.\nPastikan daftar hadir, izin lokasi, dan pendamping dewasa tersedia sesuai SOP. Detail agenda:\n{{tautan}}\n\nReferensi: {{referensi}}',
-    ],
-    [
-      'etpl-11', 'pengingat_tenggat', 'Pengingat Tenggat Tugas, Proposal & Laporan Bulanan', 'Koordinasi Wilayah',
-      '[Pengingat Tenggat] Kewajiban {{jabatan}} {{provinsi}} — Batas {{tenggat}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon segera menuntaskan kewajiban administrasi/laporan Anda sebelum tenggat {{tenggat}}.\nAkses modul pelaporan langsung di:\n{{tautan}}\n\nReferensi: {{referensi}}',
+      '[Informasi Kegiatan] Konfirmasi Program {{nama_program}} ({{angkatan}}) — {{provinsi}}',
+      'Halo {{nama}},\n\nBerikut konfirmasi jadwal pelaksanaan kegiatan resmi {{nama_program}} DPBI untuk wilayah {{provinsi}} pada {{tanggal}}.\nPastikan daftar hadir, izin lokasi, dan pendamping dewasa tersedia sesuai SOP. Detail agenda:\n{{tautan}}\n\nReferensi: {{referensi}}',
     ],
     [
       'etpl-12', 'notifikasi_laporan', 'Status Pemeriksaan LKL / Laporan Koordinator', 'Laporan & Evaluasi',
       '[SATU DPBI] Pembaruan Status Laporan {{referensi}}',
-      'Yth. {{nama}},\n\nLaporan {{referensi}} wilayah {{provinsi}} telah diperiksa pada {{tanggal}}.\nLihat hasil verifikasi dan catatan evaluasi kinerja melalui:\n{{tautan}}',
-    ],
-    [
-      'etpl-13', 'penetapan_jabatan', 'Surat Keputusan & Penetapan Jabatan Resmi', 'Struktur Organisasi',
-      '[SATU DPBI] Penetapan Jabatan Resmi: {{jabatan}} ({{nomor_surat}})',
-      'Yth. {{nama}},\n\nSelamat atas penetapan amanah resmi Anda sebagai {{jabatan}} di wilayah {{provinsi}} ({{angkatan}}) berdasarkan surat nomor {{nomor_surat}} tertanggal {{tanggal}}.\nUnduh SK dan kelengkapan tugas di:\n{{tautan}}',
-    ],
-    [
-      'etpl-14', 'perubahan_jabatan', 'Pemberitahuan Perubahan / Rotasi Jabatan', 'Struktur Organisasi',
-      '[SATU DPBI] Pembaruan Penugasan Jabatan — {{nama}} ({{nomor_surat}})',
-      'Yth. {{nama}},\n\nTerdapat pembaruan penugasan jabatan Anda menjadi {{jabatan}} ({{provinsi}}) efektif per {{tanggal}} sesuai catatan nomor {{nomor_surat}}.\nRiwayat jabatan telah tercatat permanen di profil Anda:\n{{tautan}}',
-    ],
-    [
-      'etpl-15', 'pengumuman_organisasi', 'Pengumuman Resmi Organisasi DPBI', 'Komunikasi Nasional',
-      '[Pengumuman Resmi DPBI] Informasi Organisasi — {{tanggal}}',
-      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nSekretariat Nasional DPBI menyampaikan pengumuman resmi organisasi terkait pelaksanaan program {{angkatan}}.\nSilakan membaca naskah lengkap pengumuman pada:\n{{tautan}}\n\nReferensi: {{referensi}}',
+      'Yth. {{nama}},\n\nLaporan {{referensi}} wilayah {{provinsi}} telah diperiksa oleh {{nama_pemeriksa}} pada {{tanggal}}.\nCatatan pemeriksa: {{catatan_pemeriksa}}\n\nLihat hasil verifikasi dan evaluasi kinerja melalui:\n{{tautan}}',
     ],
     [
       'etpl-16', 'rekap_bulanan', 'Rekapitulasi Bulanan Operasional Wilayah & Program', 'Laporan & Evaluasi',
@@ -1083,14 +1118,150 @@ function seedDefaultEmailTemplates(db: DatabaseSync, now: string) {
       'Yth. {{nama}},\n\nBerikut ringkasan rekapitulasi operasional bulanan wilayah {{provinsi}} untuk periode berjalan per {{tanggal}}.\nTinjau indikator capaian proposal, LKL, dan tugas di:\n{{tautan}}\n\nNomor Rekap: {{nomor_surat}}',
     ],
     [
-      'etpl-17', 'informasi_alumni', 'Informasi Transisi & Jendela Akses Arsip Alumni', 'Alumni',
+      'etpl-29', 'undangan_program_unggulan', 'Pembukaan Partisipasi Program Unggulan Nasional DPBI', 'Program & Kegiatan',
+      '[Program DPBI] Partisipasi Resmi Program {{nama_program}} — {{angkatan}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nProgram Unggulan Nasional {{nama_program}} untuk {{angkatan}} resmi dibuka bagi Duta Pelajar dan Koordinator Wilayah.\nAjukan proposal kegiatan terkait program ini sebelum {{tenggat}} melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-30', 'pengingat_kirim_lkl', 'Pengingat Pelaporan Kegiatan Lapangan (LKL) Pasca-Acara', 'Laporan & Evaluasi',
+      '[Pengingat LKL] Segera Kirim Laporan Kegiatan untuk Proposal {{referensi}}',
+      'Yth. {{nama}},\n\nKegiatan yang merujuk pada proposal {{referensi}} telah melewati tanggal pelaksanaan. Mohon segera mengunggah LKL beserta dokumentasi foto & laporan PDF sebelum {{tenggat}} melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-31', 'lkl_diterima_apresiasi', 'Konfirmasi Laporan Kegiatan Lapangan (LKL) Resmi Diterima', 'Laporan & Evaluasi',
+      '[SATU DPBI] LKL {{referensi}} Resmi Diterima — Terima Kasih atas Kontribusinya',
+      'Selamat {{nama}},\n\nLaporan Kegiatan Lapangan (LKL) bernomor {{referensi}} di wilayah {{provinsi}} telah diperiksa dan dinyatakan DITERIMA pada {{tanggal}}.\nStatistik kegiatan telah otomatis tercatat pada capaian wilayah dan evaluasi angkatan:\n{{tautan}}',
+    ],
+    [
+      'etpl-32', 'evaluasi_kinerja_terbit', 'Pemberitahuan Hasil Evaluasi Kinerja Berkala', 'Laporan & Evaluasi',
+      '[SATU DPBI] Hasil Evaluasi & Pembinaan Kinerja {{angkatan}} — {{nama}}',
+      'Yth. {{nama}},\n\nHasil evaluasi kinerja berkala Anda untuk periode {{angkatan}} ({{provinsi}}) telah diterbitkan pada {{tanggal}}.\nTinjau skor indikator dan rekomendasi pembinaan dari Koordinator/Pengawas melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-33', 'pengingat_laporan_bulanan_korwil', 'Pengingat Rutin Laporan Bulanan Koordinator (Tanggal 5)', 'Laporan & Evaluasi',
+      '[Pengingat Tanggal 5] Laporan Bulanan Koordinator Wilayah {{provinsi}}',
+      'Yth. {{nama}} (Koordinator Wilayah {{provinsi}}),\n\nMengingatkan batas akhir penyampaian Laporan Bulanan Koordinator jatuh pada {{tenggat}}.\nLampirkan ringkasan perkembangan kabupaten/kota dan kendala wilayah melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-34', 'pengingat_laporan_akhir_angkatan', 'Pengingat Laporan Akhir Penutupan Angkatan', 'Laporan & Evaluasi',
+      '[SATU DPBI] Kewajiban Laporan Akhir {{angkatan}} — Wilayah {{provinsi}}',
+      'Yth. {{nama}},\n\nMenjelang penutupan {{angkatan}}, Koordinator Wilayah wajib mengirimkan Laporan Akhir maksimal H+7 penutupan ({{tenggat}}) sebelum proses transisi Duta menjadi Alumni:\n{{tautan}}',
+    ],
+
+    // 4. Organisasi, Personalia & Penugasan Wilayah (9)
+    [
+      'etpl-11', 'pengingat_tenggat', 'Pengingat Tenggat Tugas, Proposal & Laporan Bulanan', 'Organisasi & Penugasan',
+      '[Pengingat Tenggat] Kewajiban {{jabatan}} {{provinsi}} — Batas {{tenggat}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nMohon segera menuntaskan kewajiban tugas/administrasi Anda sebelum tenggat {{tenggat}}.\nAkses daftar tugas langsung di:\n{{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+    [
+      'etpl-13', 'penetapan_jabatan', 'Surat Keputusan & Penetapan Jabatan Resmi', 'Organisasi & Penugasan',
+      '[SATU DPBI] Penetapan Jabatan Resmi: {{jabatan}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nSelamat atas penetapan amanah resmi Anda sebagai {{jabatan}} di wilayah {{provinsi}} ({{angkatan}}) berdasarkan surat nomor {{nomor_surat}} tertanggal {{tanggal}}.\nUnduh SK dan kelengkapan tugas di:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-14', 'perubahan_jabatan', 'Pemberitahuan Perubahan / Rotasi Jabatan', 'Organisasi & Penugasan',
+      '[SATU DPBI] Pembaruan Penugasan Jabatan — {{nama}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nTerdapat pembaruan penugasan jabatan Anda menjadi {{jabatan}} ({{provinsi}}) efektif per {{tanggal}} sesuai catatan nomor {{nomor_surat}}.\nRiwayat jabatan telah tercatat permanen di profil Anda:\n{{tautan}}',
+    ],
+    [
+      'etpl-18', 'serah_terima_jabatan', 'Berita Acara Serah Terima Jabatan Koordinator Wilayah', 'Organisasi & Penugasan',
+      '[SATU DPBI] Serah Terima Jabatan Wilayah {{provinsi}} ({{nomor_surat}})',
+      'Yth. {{nama}},\n\nProses serah terima jabatan Koordinator Wilayah {{provinsi}} ({{nomor_surat}}) telah dicatat pada {{tanggal}} mencakup pengalihan tugas, proposal aktif, dan arsip dokumen.\nTinjau paket serah terima lengkap di:\n{{tautan}}',
+    ],
+    [
+      'etpl-35', 'verifikasi_berkas_lengkap', 'Konfirmasi Verifikasi Berkas Personalia Diterima', 'Organisasi & Penugasan',
+      '[SATU DPBI] Berkas Personalia {{nomor_anggota}} Terverifikasi Lengkap',
+      'Yth. {{nama}},\n\nSeluruh berkas persyaratan keanggotaan Anda (Nomor Anggota: {{nomor_anggota}}, Wilayah: {{provinsi}}) telah dinyatakan TERVERIFIKASI pada {{tanggal}}.\nAnda kini dapat mengajukan proposal kegiatan dan berpartisipasi penuh dalam program angkatan:\n{{tautan}}',
+    ],
+    [
+      'etpl-36', 'verifikasi_berkas_perbaikan', 'Permintaan Melengkapi Berkas Personalia', 'Organisasi & Penugasan',
+      '[SATU DPBI] Lengkapi Berkas Personalia {{nomor_anggota}} — {{provinsi}}',
+      'Yth. {{nama}},\n\nHasil pemeriksaan berkas personalia ({{nomor_anggota}}) memerlukan pembaruan/pelengkapan dokumen.\nCatatan pemeriksa: {{catatan_pemeriksa}}\n\nSilakan perbarui profil dan unggah ulang berkas melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-37', 'penugasan_tugas_baru', 'Pemberitahuan Penugasan Tugas Operasional Baru', 'Organisasi & Penugasan',
+      '[SATU DPBI] Tugas Operasional Baru ({{referensi}}) — Tenggat {{tenggat}}',
+      'Yth. {{nama}},\n\nAnda menerima penugasan operasional baru bernomor {{referensi}} pada wilayah {{provinsi}} dengan batas waktu {{tenggat}}.\nPeriksa rincian checklist dan instruksi pengerjaan di:\n{{tautan}}',
+    ],
+    [
+      'etpl-38', 'penyambutan_angkatan_baru', 'Selamat Datang & Orientasi Resmi Angkatan Baru DPBI', 'Organisasi & Penugasan',
+      '[Selamat Datang] Orientasi Resmi {{angkatan}} — {{nama_organisasi}}',
+      'Selamat datang {{nama}}!\n\nDengan bangga kami menyambut Anda dalam {{angkatan}} {{nama_organisasi}} sebagai {{jabatan}} perwakilan {{provinsi}} ({{kabupaten}}).\nSilakan mempelajari panduan onboarding dan jadwal pembekalan pada:\n{{tautan}}',
+    ],
+    [
+      'etpl-39', 'pembinaan_wilayah_aktif', 'Pemberitahuan Pendampingan & Pembinaan Wilayah', 'Organisasi & Penugasan',
+      '[SATU DPBI] Program Pendampingan Koordinasi Wilayah {{provinsi}}',
+      'Yth. {{nama}},\n\nWilayah {{provinsi}} saat ini masuk agenda pendampingan penguatan koordinasi kabupaten/kota.\nCatatan pembinaan: {{catatan_pemeriksa}}\n\nSilakan koordinasikan tindak lanjut bersama Pengurus Bidang Pengembangan Wilayah melalui:\n{{tautan}}',
+    ],
+
+    // 5. Komunikasi, Pengumuman & Perlindungan (7)
+    [
+      'etpl-15', 'pengumuman_organisasi', 'Pengumuman Resmi Organisasi DPBI', 'Komunikasi Nasional',
+      '[Pengumuman Resmi DPBI] Informasi Organisasi — {{tanggal}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nSekretariat Nasional DPBI menyampaikan pengumuman resmi organisasi terkait pelaksanaan program {{angkatan}}.\nSilakan membaca naskah lengkap pengumuman pada:\n{{tautan}}\n\nReferensi: {{referensi}}',
+    ],
+    [
+      'etpl-40', 'undangan_rapat_koordinasi', 'Undangan Rapat Koordinasi Nasional / Wilayah', 'Komunikasi Nasional',
+      '[Undangan Rapat] Koordinasi {{jabatan}} — {{tanggal}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nAnda diundang menghadiri Rapat Koordinasi resmi DPBI yang dijadwalkan pada {{tanggal}}.\nAgenda rapat dan tautan ruang pertemuan tercantum pada kalender portal:\n{{tautan}}\n\nNomor Undangan: {{nomor_surat}}',
+    ],
+    [
+      'etpl-41', 'edaran_kepatuhan_safeguarding', 'Edaran Standar Perlindungan Peserta Didik (Safeguarding)', 'Komunikasi Nasional',
+      '[PENTING] Edaran Kepatuhan Perlindungan Peserta Didik & Pendampingan U-18',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nSesuai standar perlindungan peserta didik DPBI, seluruh kegiatan luring yang melibatkan pelajar wajib mematuhi rasio pendamping dewasa dan izin tertulis orang tua/wali.\nUnduh SOP terbaru melalui:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-42', 'tindak_lanjut_pengaduan', 'Konfirmasi Tindak Lanjut Laporan Perlindungan / Pengaduan', 'Komunikasi Nasional',
+      '[RAHASIA] Pembaruan Penanganan Laporan Perlindungan — {{referensi}}',
+      'Yth. {{nama}},\n\nLaporan perlindungan/pengaduan dengan nomor referensi {{referensi}} sedang ditangani secara tertutup oleh Penanggung Jawab berwenang per {{tanggal}}.\nTinjau status terkini melalui akses aman:\n{{tautan}}',
+    ],
+    [
+      'etpl-43', 'pembaruan_agenda_kalender', 'Pemberitahuan Perubahan Jadwal / Agenda Organisasi', 'Komunikasi Nasional',
+      '[SATU DPBI] Pembaruan Jadwal Kegiatan ({{referensi}}) — {{provinsi}}',
+      'Yth. {{nama}},\n\nTerdapat pembaruan waktu atau lokasi agenda organisasi yang terhubung dengan {{referensi}} ({{provinsi}}).\nPastikan kalender koordinasi Anda telah sinkron melalui:\n{{tautan}}',
+    ],
+    [
+      'etpl-44', 'laporan_kendala_diterima', 'Konfirmasi Tiket Kendala Teknis / Operasional Diterima', 'Komunikasi Nasional',
+      '[Pusat Kendala SATU DPBI] Laporan Anda ({{referensi}}) Sedang Ditangani',
+      'Yth. {{nama}},\n\nLaporan kendala Anda dengan nomor tiket {{referensi}} telah diterima oleh tim pengelola sistem pada {{tanggal}}.\nKami akan memberi pembaruan setelah pemeriksaan selesai. Pantau tiket di:\n{{tautan}}',
+    ],
+    [
+      'etpl-45', 'laporan_kendala_selesai', 'Pemberitahuan Penyelesaian Tiket Kendala', 'Komunikasi Nasional',
+      '[Pusat Kendala SATU DPBI] Tiket {{referensi}} Telah Diselesaikan',
+      'Yth. {{nama}},\n\nTiket kendala {{referensi}} telah ditindaklanjuti dan diselesaikan pada {{tanggal}}.\nCatatan penyelesaian: {{catatan_pemeriksa}}\n\nSilakan memeriksa kembali fitur terkait melalui: {{tautan}}',
+    ],
+
+    // 6. Dokumen, Arsip & Alumni (6)
+    [
+      'etpl-17', 'informasi_alumni', 'Informasi Transisi & Jendela Akses Arsip Alumni', 'Dokumen & Alumni',
       '[SATU DPBI] Informasi Alumni & Jendela Arsip 30 Hari — {{nama}}',
       'Yth. {{nama}},\n\nMasa tugas {{angkatan}} telah memasuki fase Alumni. Anda memiliki akses arsip pribadi & unduh sertifikat hingga {{tenggat}} melalui:\n{{tautan}}\n\nReferensi: {{referensi}}',
     ],
     [
-      'etpl-18', 'serah_terima_jabatan', 'Berita Acara Serah Terima Jabatan Koordinator Wilayah', 'Struktur Organisasi',
-      '[SATU DPBI] Serah Terima Jabatan Wilayah {{provinsi}} ({{nomor_surat}})',
-      'Yth. {{nama}},\n\nProses serah terima jabatan Koordinator Wilayah {{provinsi}} ({{nomor_surat}}) telah dicatat pada {{tanggal}} mencakup pengalihan tugas, proposal aktif, dan arsip dokumen.\nTinjau paket serah terima lengkap di:\n{{tautan}}\n\nReferensi: {{referensi}}',
+      'etpl-46', 'pengingat_alumni_h7', 'Pengingat Batas Akses Arsip Alumni Tersisa 7 Hari', 'Dokumen & Alumni',
+      '[Pengingat H-7] Masa Akses Arsip Alumni Berakhir pada {{tenggat}}',
+      'Yth. {{nama}},\n\nMasa akses arsip pribadi dan pengunduhan sertifikat {{angkatan}} tinggal 7 hari lagi (berakhir {{tenggat}}).\nSegera unduh seluruh SK, sertifikat, dan portofolio kegiatan Anda di:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-47', 'dokumen_sk_terbit', 'Pemberitahuan Penerbitan Surat Keputusan / Sertifikat Resmi', 'Dokumen & Alumni',
+      '[SATU DPBI] Dokumen Resmi {{nomor_surat}} Tersedia untuk Diunduh',
+      'Yth. {{nama}},\n\nDokumen resmi bernomor {{nomor_surat}} telah diterbitkan oleh Sekretariat Nasional pada {{tanggal}}.\nSilakan mengunduh berkas asli dari pustaka dokumen terotorisasi:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-48', 'pembaruan_sop_nasional', 'Pemberitahuan Pembaruan SOP & Pedoman Organisasi', 'Dokumen & Alumni',
+      '[SATU DPBI] Pembaruan Dokumen Pedoman/SOP Resmi ({{nomor_surat}})',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nDokumen pedoman/SOP versi terbaru ({{nomor_surat}}) telah berlaku mulai {{tanggal}} dan menggantikan versi sebelumnya.\nPelajari pembaruan tersebut melalui:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-49', 'surat_keluar_resmi', 'Penyampaian Surat Dinas / Korespondensi Resmi DPBI', 'Dokumen & Alumni',
+      '[Surat Resmi DPBI] {{nomor_surat}} — {{nama_organisasi}}',
+      'Yth. {{nama}},\n\nTerlampir/tersedia surat dinas resmi dari {{nama_organisasi}} bernomor {{nomor_surat}} tertanggal {{tanggal}} untuk perhatian dan tindak lanjut di wilayah {{provinsi}}.\nAkses naskah dan lampiran pada:\n{{tautan_dokumen}}',
+    ],
+    [
+      'etpl-50', 'penutupan_angkatan_arsip', 'Pemberitahuan Pengarsipan Resmi Angkatan & Ringkasan Kinerja', 'Dokumen & Alumni',
+      '[SATU DPBI] Penutupan & Pengarsipan Resmi {{angkatan}}',
+      'Yth. {{nama}} ({{jabatan}} — {{provinsi}}),\n\nRangkaian program {{angkatan}} telah resmi selesai dan seluruh catatan operasional telah diarsipkan dalam repositori SATU DPBI per {{tanggal}}.\nTerima kasih atas dedikasi Anda. Ringkasan arsip tersedia pada:\n{{tautan}}',
     ],
   ];
 
